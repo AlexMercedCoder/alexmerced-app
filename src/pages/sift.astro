@@ -1,0 +1,184 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+
+const app = getApp('sift');
+---
+
+<Base
+  title="Sift, a regex workbench"
+  description={app.description}
+  app="sift"
+  chrome="app"
+  keywords={app.keywords}
+>
+  <div class="app-frame" id="sift-root">
+    <AppBar app="sift">
+      <button class="btn btn--sm" id="sf-copy">Copy pattern</button>
+      <button class="btn btn--sm btn--primary" id="sf-save">Save</button>
+    </AppBar>
+
+    <div class="shell shell--wide sf">
+      <section class="sf-main">
+        <div class="sf-patternbar">
+          <span class="sf-slash">/</span>
+          <label class="sr-only" for="sf-pattern">Pattern</label>
+          <input id="sf-pattern" class="sf-pattern" spellcheck="false" autocomplete="off" placeholder="your pattern here" />
+          <span class="sf-slash">/</span>
+        </div>
+
+        <div class="sf-flags" id="sf-flags" role="group" aria-label="Flags"></div>
+        <p class="sf-status" id="sf-status" data-state="idle" aria-live="polite"></p>
+
+        <label class="sf-field">
+          <span class="sf-field__label">Test against</span>
+          <textarea id="sf-sample" class="field sf-sample" rows="7" spellcheck="false"></textarea>
+        </label>
+
+        <div class="sf-tabs" id="sf-tabs" role="tablist">
+          <button type="button" class="sf-tab" data-tab="matches" role="tab">Matches</button>
+          <button type="button" class="sf-tab" data-tab="replace" role="tab">Replace</button>
+          <button type="button" class="sf-tab" data-tab="explain" role="tab">Explain</button>
+        </div>
+
+        <div class="sf-panel" data-panel="matches" role="tabpanel">
+          <pre class="sf-highlight" id="sf-highlight"></pre>
+          <div class="sf-groups" id="sf-groups"></div>
+        </div>
+
+        <div class="sf-panel" data-panel="replace" role="tabpanel" hidden>
+          <label class="sf-field">
+            <span class="sf-field__label">Replace with</span>
+            <input id="sf-replacement" class="field" spellcheck="false" autocomplete="off" placeholder="$1, or $&lt;name&gt; for a named group" />
+          </label>
+          <div class="sf-result-head">
+            <span class="sf-field__label">Result</span>
+            <button class="btn btn--sm btn--ghost" id="sf-copy-result">Copy</button>
+          </div>
+          <pre class="sf-highlight" id="sf-replace-out"></pre>
+        </div>
+
+        <div class="sf-panel" data-panel="explain" role="tabpanel" hidden>
+          <div class="sf-explain" id="sf-explain"></div>
+        </div>
+      </section>
+
+      <aside class="sf-side">
+        <h2 class="sf-subhead">Common patterns</h2>
+        <div class="sf-presets" id="sf-library"></div>
+
+        <h2 class="sf-subhead">Saved</h2>
+        <div class="sf-savedlist" id="sf-saved"></div>
+        <p class="sf-note" id="sf-saved-empty">Nothing saved yet. Build a pattern and press Save to keep it on this device.</p>
+      </aside>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountSift } from '../apps/sift/ui';
+  const root = document.getElementById('sift-root');
+  if (root) void mountSift(root as HTMLElement);
+</script>
+
+<style is:global>
+  .sf { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1.75rem; padding: 1.25rem 0 3rem; align-items: start; }
+  .sf-main { display: grid; gap: 0.75rem; min-width: 0; }
+
+  .sf-patternbar {
+    display: flex; align-items: center; gap: 0.4rem;
+    background: var(--paper-raised); border: 1px solid var(--rule-strong); border-radius: var(--radius);
+    padding: 0.5rem 0.75rem;
+  }
+  .sf-patternbar:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -1px; }
+  .sf-slash { color: var(--text-faint); font: 1.15rem var(--mono); }
+  .sf-pattern { flex: 1; border: 0; background: none; font: 1.02rem var(--mono); padding: 0.15rem 0; min-width: 0; }
+  .sf-pattern:focus { outline: none; }
+
+  .sf-flags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .sf-flag {
+    display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer;
+    border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-raised);
+    padding: 0.28rem 0.6rem; font: 0.76rem var(--sans); color: var(--text-soft);
+  }
+  .sf-flag code { font: 700 0.8rem var(--mono); }
+  .sf-flag:hover { border-color: var(--accent); }
+  .sf-flag.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .sf-status { margin: 0; font: 0.82rem var(--mono); min-height: 1.2rem; }
+  .sf-status[data-state='ok'] { color: var(--good); }
+  .sf-status[data-state='error'] { color: var(--danger); }
+  .sf-status[data-state='none'], .sf-status[data-state='idle'] { color: var(--text-faint); }
+
+  .sf-field { display: grid; gap: 0.3rem; }
+  .sf-field__label { font: 600 0.75rem var(--sans); color: var(--text-soft); }
+  .sf-sample { font: 0.9rem/1.6 var(--mono); resize: vertical; }
+
+  .sf-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--rule); }
+  .sf-tab {
+    background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+    font: 600 0.85rem var(--sans); color: var(--text-soft); padding: 0.5rem 0.75rem;
+  }
+  .sf-tab:hover { color: var(--text); }
+  .sf-tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .sf-panel { display: grid; gap: 0.75rem; }
+  .sf-highlight {
+    margin: 0; padding: 0.75rem; background: var(--paper-raised); border: 1px solid var(--rule);
+    border-radius: var(--radius-sm); font: 0.88rem/1.7 var(--mono);
+    white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow-y: auto;
+  }
+  .sf-mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; padding: 0.05em 0; }
+  .sf-mark:nth-of-type(even) { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+
+  .sf-groups { display: grid; gap: 0.5rem; max-height: 20rem; overflow-y: auto; }
+  .sf-group-row { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.55rem 0.7rem; }
+  .sf-group-row > strong { display: block; font: 600 0.8rem var(--mono); color: var(--text-soft); margin-bottom: 0.35rem; }
+  .sf-group-table { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; margin: 0; }
+  .sf-group-table dt { font: 600 0.76rem var(--mono); color: var(--accent); }
+  .sf-group-table dd { margin: 0; font: 0.82rem var(--mono); overflow-wrap: anywhere; }
+  .sf-group-table dd[data-empty] { color: var(--text-faint); font-style: italic; }
+
+  .sf-result-head { display: flex; justify-content: space-between; align-items: center; }
+
+  .sf-explain { display: grid; gap: 0.25rem; }
+  .sf-explain-row {
+    display: grid; grid-template-columns: minmax(4rem, auto) 1fr; gap: 0.75rem; align-items: baseline;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem;
+  }
+  .sf-explain-row code {
+    font: 700 0.85rem var(--mono); color: var(--accent);
+    background: var(--accent-soft); padding: 0.1em 0.35em; border-radius: 3px; overflow-wrap: anywhere;
+  }
+  .sf-explain-row span { font-size: 0.86rem; color: var(--text-soft); }
+
+  .sf-side { display: grid; gap: 0.5rem; align-content: start; position: sticky; top: calc(var(--header-h) + 1rem); }
+  .sf-subhead { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0.5rem 0 0.15rem; }
+  .sf-presets, .sf-savedlist { display: grid; gap: 0.3rem; }
+  .sf-preset {
+    display: grid; gap: 0.1rem; text-align: left; cursor: pointer;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.5rem 0.6rem;
+  }
+  .sf-preset:hover { border-color: var(--accent); }
+  .sf-preset strong { font-size: 0.85rem; }
+  .sf-preset span { font-size: 0.72rem; color: var(--text-faint); line-height: 1.4; }
+
+  .sf-saved-row { display: grid; grid-template-columns: 1fr auto; gap: 0.25rem; align-items: center; }
+  .sf-saved-open {
+    display: grid; gap: 0.1rem; text-align: left; cursor: pointer; min-width: 0;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.45rem 0.6rem;
+  }
+  .sf-saved-open:hover { border-color: var(--accent); }
+  .sf-saved-open strong { font-size: 0.84rem; }
+  .sf-saved-open code { font: 0.72rem var(--mono); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-saved-remove { background: none; border: 0; cursor: pointer; color: var(--text-faint); font-size: 1rem; padding: 0.2rem 0.3rem; }
+  .sf-saved-remove:hover { color: var(--danger); }
+
+  .sf-note { margin: 0; font-size: 0.78rem; color: var(--text-faint); line-height: 1.5; }
+
+  @media (max-width: 940px) {
+    .sf { grid-template-columns: 1fr; }
+    .sf-side { position: static; }
+  }
+</style>

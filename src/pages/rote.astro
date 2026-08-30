@@ -1,0 +1,128 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('rote');
+---
+<Base title="Rote, spaced repetition flashcards" description={app.description} app="rote" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="rote-root">
+    <AppBar app="rote">
+      <label class="sr-only" for="rt-deck">Deck</label>
+      <select id="rt-deck" class="field field--sm rt-deck"></select>
+      <button class="btn btn--sm btn--primary" id="rt-mode">Start reviewing</button>
+      <button class="btn btn--sm" id="rt-new-deck">New deck</button>
+      <button class="btn btn--sm" id="rt-deck-settings">Settings</button>
+      <button class="btn btn--sm" id="rt-import-csv">Import CSV</button>
+      <button class="btn btn--sm" id="rt-export-csv">Export CSV</button>
+      <button class="btn btn--sm btn--danger" id="rt-delete-deck">Delete deck</button>
+    </AppBar>
+
+    <div class="shell shell--wide rt">
+      <div class="rt-summary">
+        <span class="rt-stats" id="rt-stats"></span>
+        <div class="rt-forecast-wrap">
+          <span class="rt-fc-label">Next 14 days</span>
+          <div class="rt-forecast" id="rt-forecast" aria-label="Cards due over the next fortnight"></div>
+        </div>
+      </div>
+
+      <section class="rt-review" id="rt-review" hidden>
+        <div class="rt-card" id="rt-card">
+          <p class="rt-review-meta" id="rt-review-meta"></p>
+          <div class="rt-face rt-face--front" id="rt-front"></div>
+          <hr class="rt-rule" />
+          <div class="rt-face rt-face--back" id="rt-back" hidden></div>
+          <button class="btn btn--primary rt-reveal" id="rt-reveal">Show answer <kbd>space</kbd></button>
+          <div class="rt-grades" id="rt-grades" hidden>
+            <button type="button" class="rt-grade" data-grade="0" data-tone="bad"><strong>Again</strong><span>Did not remember</span><kbd>1</kbd></button>
+            <button type="button" class="rt-grade" data-grade="3" data-tone="warn"><strong>Hard</strong><span>A struggle</span><kbd>2</kbd></button>
+            <button type="button" class="rt-grade" data-grade="4" data-tone="ok"><strong>Good</strong><span>After a moment</span><kbd>3</kbd></button>
+            <button type="button" class="rt-grade" data-grade="5" data-tone="great"><strong>Easy</strong><span>Instant</span><kbd>4</kbd></button>
+          </div>
+        </div>
+        <div class="empty" id="rt-done">
+          <strong>All caught up</strong>
+          <p data-role="summary"></p>
+        </div>
+      </section>
+
+      <section class="rt-browse" id="rt-browse">
+        <div class="rt-browse-head">
+          <h2 class="rt-subhead">Cards</h2>
+          <button class="btn btn--sm" id="rt-add-card">Add a card</button>
+        </div>
+        <div class="rt-cards" id="rt-cards"></div>
+        <div class="empty" id="rt-cards-empty">
+          <strong>No cards in this deck</strong>
+          <p>Add one above, or import a CSV with front and back columns. Scheduling starts the first time you review.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountRote } from '../apps/rote/ui';
+  const root = document.getElementById('rote-root');
+  if (root) void mountRote(root as HTMLElement);
+</script>
+
+<style is:global>
+  .rt { padding: 1.25rem 0 3rem; display: grid; gap: 1.25rem; }
+  .rt-deck { max-width: 14rem; }
+
+  .rt-summary { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; }
+  .rt-stats { font: 0.82rem var(--mono); color: var(--text-soft); }
+  .rt-forecast-wrap { display: flex; align-items: center; gap: 0.6rem; }
+  .rt-fc-label { font: 0.7rem var(--mono); color: var(--text-faint); }
+  .rt-forecast { display: flex; align-items: flex-end; gap: 2px; height: 2.2rem; }
+  .rt-fc-col { width: 0.7rem; height: 100%; display: flex; align-items: flex-end; }
+  .rt-fc-col span { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; }
+  .rt-fc-col span[data-empty] { background: var(--rule); }
+
+  .rt-review { display: grid; place-items: center; padding: 1rem 0 2rem; }
+  .rt-card {
+    width: min(44rem, 100%); background: var(--paper-raised); border: 1px solid var(--rule);
+    border-radius: var(--radius); box-shadow: var(--shadow-1); padding: 1.75rem; display: grid; gap: 1rem;
+  }
+  .rt-review-meta { margin: 0; font: 0.72rem var(--mono); color: var(--text-faint); }
+  .rt-face { font-size: 1.25rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rt-face--front { font-weight: 600; }
+  .rt-face--back { color: var(--text-soft); }
+  .rt-rule { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+  .rt-reveal { justify-self: start; }
+  .rt-reveal kbd, .rt-grade kbd {
+    font: 0.7rem var(--mono); background: rgba(255,255,255,.22); border-radius: 3px; padding: 0.05em 0.3em; margin-left: 0.4rem;
+  }
+  .rt-grades { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 0.5rem; }
+  .rt-grade {
+    display: grid; gap: 0.1rem; cursor: pointer; text-align: left;
+    border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--paper-raised); padding: 0.65rem 0.75rem;
+  }
+  .rt-grade strong { font-size: 0.92rem; }
+  .rt-grade span { font-size: 0.72rem; color: var(--text-faint); }
+  .rt-grade kbd { background: var(--paper-sunk); color: var(--text-soft); margin-left: 0; }
+  .rt-grade[data-tone='bad']:hover { border-color: var(--danger); }
+  .rt-grade[data-tone='warn']:hover { border-color: var(--warn); }
+  .rt-grade[data-tone='ok']:hover { border-color: var(--accent); }
+  .rt-grade[data-tone='great']:hover { border-color: var(--good); }
+
+  .rt-browse-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; }
+  .rt-subhead { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0; }
+  .rt-cards { display: grid; gap: 0.3rem; }
+  .rt-card-row {
+    display: grid; grid-template-columns: 1fr 1fr auto auto auto; gap: 0.4rem; align-items: center;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.35rem 0.5rem;
+  }
+  .rt-card-row[data-state='suspended'] { opacity: .55; }
+  .rt-card-input { border: 0; background: none; padding: 0.3rem 0.2rem; font-size: 0.88rem; min-width: 0; }
+  .rt-card-input:focus { outline: none; background: var(--paper-sunk); border-radius: 4px; }
+  .rt-badge { font: 0.68rem var(--mono); color: var(--text-faint); white-space: nowrap; }
+  .rt-icon { background: none; border: 0; cursor: pointer; color: var(--text-faint); font-size: 0.8rem; padding: 0.2rem 0.35rem; }
+  .rt-icon:hover { color: var(--text); }
+
+  @media (max-width: 700px) {
+    .rt-card-row { grid-template-columns: 1fr auto auto; }
+    .rt-badge { grid-column: 1 / -1; }
+  }
+</style>
