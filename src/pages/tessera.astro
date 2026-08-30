@@ -16,10 +16,51 @@ const app = getApp('tessera');
 >
   <div class="app-frame" id="tessera-root">
     <AppBar app="tessera">
+      <div class="ts-modes" id="ts-modes" role="group" aria-label="Make or read a code">
+        <button type="button" class="ts-mode" data-mode="make" aria-pressed="true">Make</button>
+        <button type="button" class="ts-mode" data-mode="read" aria-pressed="false">Read</button>
+      </div>
       <button class="btn btn--sm btn--primary" id="ts-save">Save to library</button>
     </AppBar>
 
-    <div class="shell shell--wide ts">
+    <section class="shell shell--wide ts-read" id="ts-read" hidden aria-label="Read a code">
+      <div class="ts-read__grid">
+        <div class="ts-read__left">
+          <div class="ts-read__actions">
+            <button class="btn btn--primary" id="ts-camera">Use the camera</button>
+            <button class="btn" id="ts-pick">Choose a picture</button>
+            <input type="file" id="ts-file" accept="image/*" hidden />
+          </div>
+
+          <div class="ts-drop" id="ts-drop">
+            <p>Drop a picture of a code here, or paste one with Control and V.</p>
+          </div>
+
+          <div class="ts-stage" id="ts-stage" hidden>
+            <video id="ts-video" playsinline muted></video>
+            <canvas id="ts-shot" class="ts-shot" hidden></canvas>
+            <canvas id="ts-marks" class="ts-marks"></canvas>
+          </div>
+        </div>
+
+        <div class="ts-read__right">
+          <p class="ts-status" id="ts-status" data-state="idle">Nothing read yet.</p>
+          <div class="ts-result" id="ts-result" hidden>
+            <h2 class="ts-subhead">What it says</h2>
+            <pre class="ts-readout" id="ts-readout"></pre>
+            <div class="ts-read__buttons">
+              <button class="btn btn--sm" id="ts-copy-read">Copy</button>
+              <a class="btn btn--sm" id="ts-open" target="_blank" rel="noopener noreferrer" hidden>Open the link</a>
+              <button class="btn btn--sm" id="ts-reuse">Edit as a new code</button>
+            </div>
+            <dl class="ts-facts" id="ts-read-facts"></dl>
+            <p class="ts-note" id="ts-safety" hidden></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="shell shell--wide ts" id="ts-make">
       <section class="ts-build" aria-label="Build a code">
         <div class="ts-kinds" id="ts-kinds" role="group" aria-label="What the code should do"></div>
         <p class="ts-kind-blurb" id="ts-kind-blurb"></p>
@@ -105,7 +146,7 @@ const app = getApp('tessera');
       </aside>
     </div>
 
-    <section class="shell shell--wide ts-library-wrap" aria-label="Saved codes">
+    <section class="shell shell--wide ts-library-wrap" id="ts-library-wrap" aria-label="Saved codes">
       <h2 class="ts-subhead">Your library</h2>
       <div class="ts-library" id="ts-library"></div>
       <div class="empty" id="ts-library-empty">
@@ -123,6 +164,35 @@ const app = getApp('tessera');
 </script>
 
 <style is:global>
+
+  .ts-modes { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
+  .ts-mode { font: 600 0.78rem var(--sans); padding: 0.3rem 0.85rem; border: 0; background: var(--paper-raised); color: var(--text-soft); cursor: pointer; }
+  .ts-mode[aria-pressed='true'] { background: var(--accent); color: #fff; }
+
+  .ts-read { padding: 1.5rem 0 2rem; }
+  .ts-read__grid { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 2rem; align-items: start; }
+  .ts-read__left, .ts-read__right { min-width: 0; display: grid; gap: 0.75rem; align-content: start; }
+  .ts-read__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .ts-drop { border: 1px dashed var(--rule); border-radius: 0.6rem; padding: 1.4rem 1rem; text-align: center; }
+  .ts-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+  .ts-drop p { margin: 0; font-size: 0.85rem; color: var(--text-soft); }
+
+  .ts-stage { position: relative; line-height: 0; border: 1px solid var(--rule); border-radius: 0.6rem; overflow: hidden; background: #111; }
+  .ts-stage video, .ts-shot { display: block; width: 100%; max-height: 60vh; object-fit: contain; }
+  .ts-marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  .ts-status { margin: 0; font-size: 0.86rem; padding: 0.5rem 0.7rem; border-radius: 0.4rem; border: 1px solid var(--rule); background: var(--paper-raised); color: var(--text-soft); }
+  .ts-status[data-state='good'] { background: #dcfce7; border-color: #86efac; color: #14532d; }
+  .ts-status[data-state='bad'] { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+  .ts-status[data-state='busy'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  .ts-result { display: grid; gap: 0.6rem; }
+  .ts-readout { margin: 0; padding: 0.7rem; border: 1px solid var(--rule); border-radius: 0.5rem; background: var(--paper-raised); font-size: 0.82rem; white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; }
+  .ts-read__buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+  @media (max-width: 900px) {
+    .ts-read__grid { grid-template-columns: minmax(0, 1fr); }
+  }
   .ts { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 2rem; padding: 1.5rem 0 2rem; align-items: start; }
 
   .ts-kinds { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.6rem; }

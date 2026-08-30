@@ -1,6 +1,8 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadBlob, downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
+import { CameraScanner, describePayload, fitToScan, type Reading } from './reader';
+import { scanImage, ScanError, type ScanResult } from './scan';
 import { PAYLOADS, buildPayload, payloadByKind, type PayloadKind } from './payloads';
 import { QrError, capacityFor, drawToCanvas, encodeQr, toSvg, type EcLevel, type QrCode } from './qr';
 import {
@@ -404,7 +406,270 @@ export async function mountTessera(root: HTMLElement): Promise<void> {
     clearWarning: 'This deletes every saved code Tessera holds on this device. Export first if you want a copy. Continue?',
   });
 
+  // Bringing a scanned payload straight into the builder is the natural next
+  // step after reading one, so the two halves are not separate tools.
+  const setMode = mountReader(root, (text) => {
+    kind = 'text';
+    values = { text };
+    setMode('make');
+    renderKinds();
+    renderForm();
+    render();
+  });
+
   library = await loadCodes();
   renderForm();
   render();
+}
+
+// --------------------------------------------------------------------- reading
+
+/**
+ * The read half. It is wired separately from the builder because the two share
+ * nothing but the page: one turns text into modules, the other turns pixels
+ * back into text.
+ */
+function mountReader(root: HTMLElement, onReuse: (text: string) => void): (mode: 'make' | 'read') => void {
+  const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`);
+
+  const readPane = $<HTMLElement>('ts-read');
+  const makePane = $<HTMLElement>('ts-make');
+  const libraryPane = $<HTMLElement>('ts-library-wrap');
+  const modes = $<HTMLDivElement>('ts-modes');
+  const status = $<HTMLParagraphElement>('ts-status');
+  const resultBox = $<HTMLDivElement>('ts-result');
+  const readout = $<HTMLPreElement>('ts-readout');
+  const facts = $<HTMLDListElement>('ts-read-facts');
+  const safety = $<HTMLParagraphElement>('ts-safety');
+  const openLink = $<HTMLAnchorElement>('ts-open');
+  const stage = $<HTMLDivElement>('ts-stage');
+  const video = $<HTMLVideoElement>('ts-video');
+  const shot = $<HTMLCanvasElement>('ts-shot');
+  const marks = $<HTMLCanvasElement>('ts-marks');
+  const dropZone = $<HTMLDivElement>('ts-drop');
+  const fileInput = $<HTMLInputElement>('ts-file');
+  const cameraButton = $<HTMLButtonElement>('ts-camera');
+
+  // The read pane is optional markup: if the page does not carry it, the
+  // builder still works and the mode switch becomes a no-op.
+  if (!readPane || !makePane || !modes || !status || !resultBox || !readout || !stage || !video || !shot || !marks) {
+    return () => {};
+  }
+  // Hoisted function declarations do not keep the narrowing above, so each
+  // element is bound to a local that is known to exist.
+  const videoEl = video;
+  const stageEl = stage;
+  const shotEl = shot;
+  const marksEl = marks;
+  const readPaneEl = readPane;
+  const makePaneEl = makePane;
+  const modesEl = modes;
+  const resultEl = resultBox;
+  const readoutEl = readout;
+
+  let lastText = '';
+
+  const setStatus = (message: string, state: 'idle' | 'busy' | 'good' | 'bad') => {
+    status.textContent = message;
+    status.dataset.state = state;
+  };
+
+  function drawMarks(corners: { x: number; y: number }[] | null, sourceWidth: number, sourceHeight: number): void {
+    const context = marksEl.getContext('2d');
+    if (!context) return;
+    marksEl.width = marksEl.clientWidth || 1;
+    marksEl.height = marksEl.clientHeight || 1;
+    context.clearRect(0, 0, marksEl.width, marksEl.height);
+    if (!corners || sourceWidth === 0 || sourceHeight === 0) return;
+
+    // The stage letterboxes its contents, so the overlay has to match that fit.
+    const scale = Math.min(marksEl.width / sourceWidth, marksEl.height / sourceHeight);
+    const offsetX = (marksEl.width - sourceWidth * scale) / 2;
+    const offsetY = (marksEl.height - sourceHeight * scale) / 2;
+
+    context.strokeStyle = getComputedStyle(root).getPropertyValue('--accent').trim() || '#6b4bc4';
+    context.lineWidth = 3;
+    context.beginPath();
+    corners.forEach((point, index) => {
+      const x = offsetX + point.x * scale;
+      const y = offsetY + point.y * scale;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.closePath();
+    context.stroke();
+  }
+
+  function show(result: ScanResult, reading: Reading, sourceWidth: number, sourceHeight: number): void {
+    lastText = result.text;
+    resultEl.hidden = false;
+    readoutEl.textContent = result.text;
+
+    const rows: [string, string][] = [
+      ['Contains', reading.kind],
+      ['Version', `${result.version}, ${result.version * 4 + 17} modules across`],
+      ['Error correction', result.ec],
+      ['Mask', String(result.mask)],
+      ['Encoding', result.mode],
+      ['Characters', String([...result.text].length)],
+    ];
+    if (result.repaired > 0) rows.push(['Repaired', `${result.repaired} damaged codeword${result.repaired === 1 ? '' : 's'}`]);
+    if (result.inverted) rows.push(['Polarity', 'Light on dark']);
+
+    if (facts) {
+      facts.innerHTML = rows
+        .map(([label, value]) => `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`)
+        .join('');
+    }
+
+    if (safety) {
+      safety.hidden = reading.caution === null;
+      safety.textContent = reading.caution ?? '';
+    }
+
+    if (openLink) {
+      openLink.hidden = reading.link === null;
+      if (reading.link) openLink.href = reading.link;
+    }
+
+    setStatus(
+      result.repaired > 0
+        ? `Read it, and repaired ${result.repaired} damaged codeword${result.repaired === 1 ? '' : 's'}.`
+        : 'Read it.',
+      'good',
+    );
+    drawMarks(result.corners, sourceWidth, sourceHeight);
+  }
+
+  const camera = new CameraScanner(videoEl, {
+    onResult: (result, reading) => {
+      cameraButton?.replaceChildren('Use the camera');
+      show(result, reading, videoEl.videoWidth, videoEl.videoHeight);
+    },
+    onStatus: setStatus,
+    onFrame: (corners) => drawMarks(corners, videoEl.videoWidth, videoEl.videoHeight),
+  });
+
+  function readImageData(image: ImageData): void {
+    setStatus('Looking for a code.', 'busy');
+    try {
+      const result = scanImage(image);
+      show(result, describePayload(result.text), image.width, image.height);
+    } catch (error) {
+      resultEl.hidden = true;
+      drawMarks(null, 0, 0);
+      setStatus(error instanceof ScanError ? error.message : 'That picture could not be read.', 'bad');
+    }
+  }
+
+  async function readFile(file: File): Promise<void> {
+    camera.stop();
+    try {
+      const bitmap = await createImageBitmap(file);
+      const size = fitToScan(bitmap.width, bitmap.height);
+
+      shotEl.width = size.width;
+      shotEl.height = size.height;
+      const context = shotEl.getContext('2d', { willReadFrequently: true });
+      if (!context) throw new Error('no context');
+      context.drawImage(bitmap, 0, 0, size.width, size.height);
+      bitmap.close();
+
+      stageEl.hidden = false;
+      shotEl.hidden = false;
+      videoEl.hidden = true;
+      readImageData(context.getImageData(0, 0, size.width, size.height));
+    } catch {
+      setStatus('That file could not be opened as an image.', 'bad');
+    }
+  }
+
+  cameraButton?.addEventListener('click', async () => {
+    if (camera.running) {
+      camera.stop();
+      cameraButton.textContent = 'Use the camera';
+      setStatus('Camera closed.', 'idle');
+      return;
+    }
+    stageEl.hidden = false;
+    shotEl.hidden = true;
+    videoEl.hidden = false;
+    try {
+      await camera.start();
+      cameraButton.textContent = 'Stop the camera';
+    } catch {
+      setStatus('The camera was not made available. Check the permission for this site.', 'bad');
+      stageEl.hidden = true;
+    }
+  });
+
+  $<HTMLButtonElement>('ts-pick')?.addEventListener('click', () => fileInput?.click());
+  fileInput?.addEventListener('change', async () => {
+    const [file] = Array.from(fileInput.files ?? []);
+    if (file) await readFile(file);
+    fileInput.value = '';
+  });
+
+  if (dropZone) {
+    for (const type of ['dragenter', 'dragover']) {
+      dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.add('is-over'); });
+    }
+    for (const type of ['dragleave', 'drop']) {
+      dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.remove('is-over'); });
+    }
+    dropZone.addEventListener('drop', async (event) => {
+      const [file] = Array.from((event as DragEvent).dataTransfer?.files ?? []);
+      if (file?.type.startsWith('image/')) await readFile(file);
+    });
+  }
+
+  // Pasting a screenshot is how most codes on a screen get read.
+  document.addEventListener('paste', async (event) => {
+    if (readPaneEl.hidden) return;
+    for (const item of Array.from((event as ClipboardEvent).clipboardData?.items ?? [])) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) { event.preventDefault(); await readFile(file); return; }
+      }
+    }
+  });
+
+  $<HTMLButtonElement>('ts-copy-read')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(lastText);
+      toast('Copied.', { kind: 'good' });
+    } catch {
+      toast('The browser would not let this page use the clipboard.', { kind: 'error' });
+    }
+  });
+
+  $<HTMLButtonElement>('ts-reuse')?.addEventListener('click', () => {
+    if (lastText) onReuse(lastText);
+  });
+
+  function setMode(mode: 'make' | 'read'): void {
+    const reading = mode === 'read';
+    readPaneEl.hidden = !reading;
+    makePaneEl.hidden = reading;
+    if (libraryPane) libraryPane.hidden = reading;
+    for (const button of modesEl.querySelectorAll<HTMLButtonElement>('.ts-mode')) {
+      button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+    }
+    if (!reading) camera.stop();
+  }
+
+  modes.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.ts-mode');
+    if (button?.dataset.mode) setMode(button.dataset.mode as 'make' | 'read');
+  });
+
+  window.addEventListener('pagehide', () => camera.stop());
+  window.addEventListener('resize', () => drawMarks(null, 0, 0));
+
+  return setMode;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"]/g, (character) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]!);
 }
