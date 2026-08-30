@@ -4,6 +4,7 @@ import { readPref, writePref } from '../../lib/prefs';
 import type { ClickSample, PointerSample } from './attention';
 import { defaultComposition, type Composition } from './layout';
 import { defaultZoom, type ZoomKeyframe, type ZoomSettings } from './zoom';
+import { reviveBlocks, type ZoomBlock } from './zooms';
 
 /**
  * Keeping a recording between visits.
@@ -63,7 +64,12 @@ export type Project = {
   /** Where the export begins and ends, in seconds. */
   start: number;
   end: number;
-  /** The zoom track, once it has been worked out or edited by hand. */
+  /**
+   * The zoom blocks, which are what a person edits. The keyframe track is
+   * derived from these, so these are what has to be kept.
+   */
+  zooms: ZoomBlock[];
+  /** The derived camera move, kept so a reopened project renders identically. */
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
   createdAt: string;
@@ -132,6 +138,7 @@ export function reviveProject(value: unknown): Project | null {
     clicks: points(project.clicks),
     start: Math.max(0, typeof project.start === 'number' ? project.start : 0),
     end: typeof project.end === 'number' && project.end > 0 ? project.end : duration,
+    zooms: reviveBlocks(project.zooms),
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
     settings: reviveSettings(project.settings),
     createdAt: typeof project.createdAt === 'string' ? project.createdAt : stamp,
@@ -141,14 +148,15 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end'>
-    & Partial<Pick<Project, 'settings' | 'keyframes' | 'start' | 'end'>>,
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms'>
+    & Partial<Pick<Project, 'settings' | 'keyframes' | 'start' | 'end' | 'zooms'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
   return {
     id: createId('rec'),
     name,
+    zooms: [],
     keyframes: null,
     start: 0,
     end: detail.duration,

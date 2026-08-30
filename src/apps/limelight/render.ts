@@ -45,6 +45,12 @@ export type Project = {
   /** What to write. */
   format: OutputFormat;
   gifColours: number;
+  /**
+   * The camera move, when the timeline has one. Passing it in rather than
+   * rebuilding it here is what guarantees the export matches the preview,
+   * including any zoom that was moved or resized by hand.
+   */
+  keyframes?: ZoomKeyframe[] | null;
   /** Whether to carry the recorded audio into the export. */
   keepAudio: boolean;
   /** Seconds into the recording that the export begins and ends. */
@@ -356,7 +362,9 @@ export async function render(
   const context = canvas.getContext('2d', { alpha: project.composition.background === 'none' });
   if (!context) throw new RenderError('This browser would not give a drawing surface.');
 
-  const track = buildZoomTrack(points, project.duration, project.zoom);
+  const track = project.keyframes?.length
+    ? project.keyframes
+    : buildZoomTrack(points, project.duration, project.zoom);
   const smoothed = project.pointer.length ? smoothPath(project.pointer) : [];
   const cursorTrack: PointerSample[] = smoothed.map((point, index) => ({
     time: project.pointer[index].time, x: point.x, y: point.y,

@@ -66,8 +66,24 @@ const app = getApp('limelight');
           <span class="ll-time" id="ll-trim-label"></span>
         </div>
 
+        <div class="ll-zoomrow">
+          <span class="ll-tracklabel">Zoom</span>
+          <div class="ll-zoomtrack" id="ll-zoomtrack" aria-label="Zoom track"></div>
+        </div>
+        <p class="ll-note" id="ll-zoom-hint"></p>
+
+        <div class="ll-zoom-selected" id="ll-zoom-selected" hidden>
+          <label class="ll-slider">
+            <span>How far this one goes in</span>
+            <input type="range" id="ll-zoom-amount" min="1" max="4" step="0.1" />
+            <em id="ll-zoom-amount-out"></em>
+          </label>
+        </div>
+
         <div class="ll-scrubrow">
+          <button class="btn btn--sm btn--primary" id="ll-zoom-add">Add a zoom</button>
           <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
+          <button class="btn btn--sm btn--ghost" id="ll-zoom-clear">Clear zooms</button>
           <button class="btn btn--sm btn--danger" id="ll-discard">Discard</button>
         </div>
       </div>
@@ -144,6 +160,18 @@ const app = getApp('limelight');
 </script>
 
 <style is:global>
+
+  .ll-zoomrow { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); align-items: center; gap: 0.5rem; }
+  .ll-tracklabel { font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-soft); }
+  .ll-zoomtrack { position: relative; height: 2.4rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--paper-raised); touch-action: none; overflow: hidden; }
+  .ll-zoom { position: absolute; top: 4px; bottom: 4px; background: var(--accent); opacity: 0.55; border-radius: 0.25rem; cursor: grab; display: flex; align-items: center; justify-content: center; min-width: 10px; }
+  .ll-zoom.is-pinned { opacity: 0.85; }
+  .ll-zoom.is-selected { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .ll-zoom__label { font-size: 0.66rem; color: #fff; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
+  .ll-zoom__grip { position: absolute; top: 0; bottom: 0; width: 8px; border: 0; padding: 0; background: rgba(0,0,0,0.25); cursor: ew-resize; }
+  .ll-zoom__grip--start { left: 0; border-radius: 0.25rem 0 0 0.25rem; }
+  .ll-zoom__grip--end { right: 0; border-radius: 0 0.25rem 0.25rem 0; }
+  .ll-zoom-selected { padding: 0.5rem 0.7rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--paper-raised); }
 
   .ll-projects-panel { padding: 1rem; display: grid; gap: 0.6rem; }
   .ll-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }

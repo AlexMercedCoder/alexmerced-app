@@ -149,3 +149,31 @@ describe('settings preference', () => {
     expect(back.keepAudio).toBe(false);
   });
 });
+
+describe('zoom blocks survive storage', () => {
+  it('keeps blocks that were edited by hand', async () => {
+    const project = make('Edited');
+    project.zooms = [
+      { id: 'z1', start: 1, end: 3, scale: 3, x: 0.8, y: 0.2, pinned: true },
+      { id: 'z2', start: 5, end: 6, scale: 1.8, x: 0.5, y: 0.5, pinned: false },
+    ];
+    await saveProject(project);
+
+    const back = await loadProject(project.id);
+    expect(back!.zooms).toHaveLength(2);
+    expect(back!.zooms[0]).toEqual(project.zooms[0]);
+    expect(back!.zooms[1].pinned).toBe(false);
+  });
+
+  it('starts a new project with none', () => {
+    expect(make().zooms).toEqual([]);
+  });
+
+  it('drops a stored block that is no longer usable', async () => {
+    const project = make('Damaged');
+    // Written by an older version, or corrupted: end before start.
+    (project as unknown as { zooms: unknown[] }).zooms = [{ id: 'bad', start: 5, end: 2 }, null];
+    await saveProject(project);
+    expect((await loadProject(project.id))!.zooms).toEqual([]);
+  });
+});

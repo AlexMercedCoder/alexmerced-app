@@ -17,7 +17,11 @@ import {
   saveCurrentId, saveProject, saveSettings, storedBytes, type Project as StoredProject,
   type Settings,
 } from './store';
-import { buildZoomTrack, defaultZoom, zoomAt, type ZoomSettings } from './zoom';
+import { defaultZoom, zoomAt, type ZoomSettings } from './zoom';
+import {
+  addBlock, blocksFromInterest, constrain, mergeBlocks, removeBlock, reviveBlocks,
+  trackFromBlocks, type ZoomBlock,
+} from './zooms';
 
 
 export async function mountLimelight(root: HTMLElement): Promise<void> {
@@ -45,6 +49,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let controller: AbortController | null = null;
   let previewTime = 0;
   let stored: StoredProject | null = null;
+  let zooms: ZoomBlock[] = [];
   let trim = { start: 0, end: 0 };
   let saveTimer = 0;
 
@@ -189,8 +194,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!project) return;
     stored = project;
     settings = project.settings;
+    zooms = project.zooms;
     saveCurrentId(project.id);
 
+    await renderProjects();
     await load({
       blob: new Blob([project.bytes as unknown as BlobPart], { type: project.mime }),
       duration: project.duration,
@@ -251,7 +258,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     renderControls();
     renderTrim();
-    await analyse();
+    renderZooms();
+    // A reopened project already has its zooms, so it does not analyse again.
+    if (zooms.length === 0) await analyse();
+    else sourceNote.hidden = true;
     await drawPreview();
   }
 
@@ -265,6 +275,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       const found = await findInterest(current, onProgress, controller.signal);
       points = found.points;
       interestSource = found.source;
+      // A re-analysis must not undo work: anything edited by hand is kept.
+      zooms = mergeBlocks(zooms, blocksFromInterest(points, current.duration, settings.zoom));
+      renderZooms();
+      persistZooms();
 
       const clicks = recording?.clicks.length ?? 0;
       const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -417,6 +431,158 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     remember();
   });
 
+  // ------------------------------------------------------------------ zoom track
+
+  const zoomTrackEl = $<HTMLDivElement>('ll-zoomtrack');
+
+  function persistZooms(): void {
+    if (!stored) return;
+    // The blocks are what a person edits, so they are what is kept. The
+    // keyframe track is derived and stored alongside so a reopened project
+    // renders exactly as it did.
+    stored.zooms = zooms;
+    stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
+    queueSave();
+  }
+
+  function renderZooms(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    zoomTrackEl.innerHTML = '';
+
+    for (const zoom of zooms) {
+      const bar = document.createElement('div');
+      bar.className = 'll-zoom';
+      if (zoom.pinned) bar.classList.add('is-pinned');
+      bar.style.left = `${(zoom.start / duration) * 100}%`;
+      bar.style.width = `${((zoom.end - zoom.start) / duration) * 100}%`;
+      bar.dataset.id = zoom.id;
+      bar.title = `${zoom.scale.toFixed(1)}x, ${formatClock(zoom.start)} to ${formatClock(zoom.end)}`;
+
+      const label = document.createElement('span');
+      label.className = 'll-zoom__label';
+      label.textContent = `${zoom.scale.toFixed(1)}x`;
+      bar.append(label);
+
+      for (const edge of ['start', 'end'] as const) {
+        const handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
+        handle.setAttribute('aria-label', `Move the ${edge} of this zoom`);
+        handle.addEventListener('pointerdown', (event) => {
+          event.stopPropagation();
+          beginZoomDrag(event, zoom.id, edge);
+        });
+        bar.append(handle);
+      }
+
+      bar.addEventListener('pointerdown', (event) => beginZoomDrag(event, zoom.id, 'move'));
+      bar.addEventListener('dblclick', () => {
+        zooms = removeBlock(zooms, zoom.id);
+        renderZooms();
+        persistZooms();
+        void drawPreview();
+      });
+
+      zoomTrackEl.append(bar);
+    }
+
+    $<HTMLParagraphElement>('ll-zoom-hint').textContent = zooms.length
+      ? 'Drag a zoom to move it, its edges to resize, and double click to delete. Select one to change how far it goes in.'
+      : 'No zooms yet. Press Add a zoom to put one at the playhead.';
+    renderSelected();
+  }
+
+  let dragging: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
+  let selected: string | null = null;
+
+  function zoomTimeAt(event: PointerEvent): number {
+    if (!recording) return 0;
+    const box = zoomTrackEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
+  }
+
+  function beginZoomDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
+    const zoom = zooms.find((entry) => entry.id === id);
+    if (!zoom) return;
+    selected = id;
+    dragging = { id, edge, from: zoomTimeAt(event), start: zoom.start, end: zoom.end };
+    zoomTrackEl.setPointerCapture(event.pointerId);
+    renderSelected();
+  }
+
+  zoomTrackEl.addEventListener('pointermove', (event) => {
+    if (!dragging || !recording) return;
+    const shift = zoomTimeAt(event) - dragging.from;
+
+    zooms = zooms.map((zoom) => {
+      if (zoom.id !== dragging!.id) return zoom;
+      if (dragging!.edge === 'move') {
+        const width = dragging!.end - dragging!.start;
+        return { ...zoom, start: dragging!.start + shift, end: dragging!.start + shift + width, pinned: true };
+      }
+      if (dragging!.edge === 'start') return { ...zoom, start: dragging!.start + shift, pinned: true };
+      return { ...zoom, end: dragging!.end + shift, pinned: true };
+    });
+
+    zooms = constrain(zooms, dragging.id, recording.duration);
+    renderZooms();
+  });
+
+  const endZoomDrag = () => {
+    if (!dragging) return;
+    dragging = null;
+    persistZooms();
+    void drawPreview();
+  };
+  zoomTrackEl.addEventListener('pointerup', endZoomDrag);
+  zoomTrackEl.addEventListener('pointercancel', endZoomDrag);
+
+  function renderSelected(): void {
+    const panel = $<HTMLDivElement>('ll-zoom-selected');
+    const zoom = zooms.find((entry) => entry.id === selected);
+    panel.hidden = !zoom;
+    if (!zoom) return;
+    $<HTMLInputElement>('ll-zoom-amount').value = String(zoom.scale);
+    $<HTMLSpanElement>('ll-zoom-amount-out').textContent = `${zoom.scale.toFixed(1)}x`;
+    for (const bar of zoomTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
+      bar.classList.toggle('is-selected', bar.dataset.id === selected);
+    }
+  }
+
+  $<HTMLInputElement>('ll-zoom-amount').addEventListener('input', (event) => {
+    if (!selected || !recording) return;
+    const scale = Number((event.target as HTMLInputElement).value);
+    zooms = zooms.map((zoom) => (zoom.id === selected ? { ...zoom, scale, pinned: true } : zoom));
+    zooms = constrain(zooms, selected, recording.duration);
+    renderZooms();
+    persistZooms();
+    void drawPreview();
+  });
+
+  $<HTMLButtonElement>('ll-zoom-add').addEventListener('click', () => {
+    if (!recording) return;
+    const before = zooms.length;
+    zooms = addBlock(zooms, previewTime, recording.duration, settings.zoom);
+    if (zooms.length === before) {
+      setStatus('There is no room for a zoom there. Move the playhead into a gap.', 'bad');
+      return;
+    }
+    selected = zooms.find((zoom) => zoom.pinned && zoom.start <= previewTime + 0.01 && zoom.end >= previewTime - 0.01)?.id ?? selected;
+    renderZooms();
+    persistZooms();
+    void drawPreview();
+  });
+
+  $<HTMLButtonElement>('ll-zoom-clear').addEventListener('click', () => {
+    if (!zooms.length || !confirm('Remove every zoom, including the ones you set by hand?')) return;
+    zooms = [];
+    selected = null;
+    renderZooms();
+    persistZooms();
+    void drawPreview();
+  });
+
   // ------------------------------------------------------------------ preview
 
   let drawing = false;
@@ -433,7 +599,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       await seekSafely(video, Math.min(current.duration - 1e-3, previewTime));
       if (cameraVideo) await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), previewTime));
 
-      const track = buildZoomTrack(points, current.duration, settings.zoom);
+      const track = trackFromBlocks(zooms, current.duration, settings.zoom);
       const cursor = current.pointer.length
         ? current.pointer.reduce((best, sample) =>
             Math.abs(sample.time - previewTime) < Math.abs(best.time - previewTime) ? sample : best, current.pointer[0])
@@ -643,7 +809,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const started = performance.now();
 
     try {
-      const result = await render(current, points, onProgress, controller.signal);
+      const result = await render({ ...current, keyframes: trackFromBlocks(zooms, current.duration, settings.zoom) }, points, onProgress, controller.signal);
       const stem = (stored?.name ?? 'limelight').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'limelight';
       downloadBlob(`${stem}.${result.extension}`, result.blob);
       setStatus(
