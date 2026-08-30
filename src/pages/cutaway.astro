@@ -1,0 +1,139 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('cutaway');
+---
+<Base title="Cutaway, trim and convert video without uploading it" description={app.description} app="cutaway" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="cutaway-root">
+    <AppBar app="cutaway">
+      <button class="btn btn--sm btn--primary" id="cw-export">Export</button>
+    </AppBar>
+
+    <div class="shell shell--wide cw">
+      <div class="cw-drop" id="cw-drop">
+        <button class="btn btn--primary" id="cw-add">Choose a video</button>
+        <p>or drop one here. It is read in this browser and never uploaded.</p>
+        <input type="file" id="cw-file" accept="video/*" hidden />
+      </div>
+
+      <div class="cw-stage" id="cw-stage" hidden>
+        <div class="cw-preview" id="cw-preview"></div>
+
+        <div class="cw-timeline" id="cw-timeline" aria-label="Trim range">
+          <div class="cw-range" id="cw-range"></div>
+          <div class="cw-playhead" id="cw-playhead"></div>
+        </div>
+
+        <div class="cw-transport">
+          <button class="btn btn--sm btn--primary" id="cw-play">Play the range</button>
+          <button class="btn btn--sm" id="cw-set-start">Start here</button>
+          <button class="btn btn--sm" id="cw-set-end">End here</button>
+          <span class="cw-range-label" id="cw-range-label"></span>
+        </div>
+      </div>
+
+      <p class="cw-status" id="cw-status" data-state="idle">Nothing loaded yet.</p>
+      <div class="cw-bar" id="cw-bar" hidden><div class="cw-bar__fill" id="cw-bar-fill"></div></div>
+      <ul class="cw-notices" id="cw-notices" hidden></ul>
+
+      <div class="cw-controls" id="cw-controls" hidden>
+        <section class="card cw-card">
+          <h2 class="cw-subhead">Output</h2>
+          <label class="field-row"><span>Format</span><select class="field" id="cw-format"></select></label>
+          <p class="cw-note" id="cw-format-note"></p>
+
+          <div class="cw-presets">
+            <button class="btn btn--sm" id="cw-p-360">360p</button>
+            <button class="btn btn--sm" id="cw-p-480">480p</button>
+            <button class="btn btn--sm" id="cw-p-720">720p</button>
+            <button class="btn btn--sm" id="cw-p-1080">1080p</button>
+          </div>
+
+          <div class="cw-pair">
+            <label class="field-row"><span>Width</span><input class="field" id="cw-width" type="number" min="2" max="7680" step="2" /></label>
+            <label class="field-row"><span>Height</span><input class="field" id="cw-height" type="number" min="2" max="4320" step="2" /></label>
+          </div>
+          <div class="cw-pair">
+            <label class="field-row"><span>Frames a second</span><input class="field" id="cw-fps" type="number" min="1" max="120" step="1" /></label>
+            <label class="field-row"><span>Speed</span><input class="field" id="cw-speed" type="number" min="0.1" max="8" step="0.1" /></label>
+          </div>
+
+          <div id="cw-video-only">
+            <div class="cw-pair">
+              <label class="field-row"><span>Bitrate, kbps</span><input class="field" id="cw-bitrate" type="number" min="50" max="100000" step="50" /></label>
+              <label class="cw-check"><input type="checkbox" id="cw-audio" /><span>Keep the audio</span></label>
+            </div>
+          </div>
+
+          <div id="cw-gif-only" hidden>
+            <div class="cw-pair">
+              <label class="field-row"><span>Colours</span><input class="field" id="cw-colours" type="number" min="2" max="256" step="1" /></label>
+              <label class="cw-check"><input type="checkbox" id="cw-dither" /><span>Dither</span></label>
+            </div>
+          </div>
+        </section>
+
+        <section class="card cw-card">
+          <h2 class="cw-subhead">What will come out</h2>
+          <div class="cw-summary" id="cw-summary"></div>
+          <p class="cw-note">
+            Every frame is read by seeking to it and drawing it, so nothing is guessed. That is slower
+            than reading the compressed stream, and it is why a long clip takes a while.
+          </p>
+        </section>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountCutaway } from '../apps/cutaway/ui';
+  const root = document.getElementById('cutaway-root');
+  if (root) void mountCutaway(root as HTMLElement);
+</script>
+
+<style is:global>
+  .cw { display: grid; gap: 1rem; padding: 1.25rem 0 3rem; }
+  .cw-subhead { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.6rem; }
+  .cw-note { font-size: 0.79rem; color: var(--ink-soft); margin: 0.5rem 0 0; line-height: 1.55; }
+
+  .cw-drop { display: grid; gap: 0.4rem; justify-items: center; padding: 1.5rem 1rem; border: 1px dashed var(--rule); border-radius: 0.6rem; text-align: center; }
+  .cw-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+  .cw-drop.is-loaded { padding: 0.8rem 1rem; }
+  .cw-drop p { margin: 0; font-size: 0.82rem; color: var(--ink-soft); }
+
+  .cw-stage { display: grid; gap: 0.6rem; }
+  .cw-preview { border: 1px solid var(--rule); border-radius: 0.6rem; overflow: hidden; background: #111; line-height: 0; }
+  .cw-video { display: block; width: 100%; max-height: 56vh; object-fit: contain; }
+
+  .cw-timeline { position: relative; height: 2.6rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--paper-raised); cursor: ew-resize; touch-action: none; overflow: hidden; }
+  .cw-range { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.25; border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .cw-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
+  .cw-transport { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .cw-range-label { font-size: 0.8rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
+  .cw-status { margin: 0; font-size: 0.85rem; padding: 0.5rem 0.7rem; border-radius: 0.4rem; border: 1px solid var(--rule); background: var(--paper-raised); color: var(--ink-soft); }
+  .cw-status[data-state='good'] { background: #dcfce7; border-color: #86efac; color: #14532d; }
+  .cw-status[data-state='bad'] { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+  .cw-status[data-state='busy'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  .cw-bar { height: 6px; border-radius: 999px; background: var(--rule); overflow: hidden; }
+  .cw-bar__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.15s linear; }
+
+  .cw-notices { margin: 0; padding: 0.6rem 0.7rem 0.6rem 1.6rem; border-radius: 0.4rem; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; font-size: 0.82rem; display: grid; gap: 0.3rem; }
+
+  .cw-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; align-items: start; }
+  .cw-card { padding: 1rem; min-width: 0; }
+  .cw-presets { display: flex; gap: 0.35rem; flex-wrap: wrap; margin: 0.7rem 0; }
+  .cw-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-bottom: 0.6rem; }
+  .cw-check { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; align-self: end; padding-bottom: 0.5rem; }
+  .cw-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 0.5rem; }
+  .cw-summary > div { display: grid; gap: 0.1rem; padding: 0.5rem 0.6rem; border: 1px solid var(--rule); border-radius: 0.45rem; }
+  .cw-summary span { font-size: 0.67rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-soft); }
+  .cw-summary strong { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 620px) {
+    .cw-pair { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>

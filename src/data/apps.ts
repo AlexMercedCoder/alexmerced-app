@@ -349,6 +349,26 @@ export const apps: AppEntry[] = [
     keywords: ['chart maker', 'csv to chart', 'graph generator', 'svg chart', 'online chart tool'],
   },
   {
+    slug: 'cutaway',
+    category: 'make',
+    name: 'Cutaway',
+    tagline: 'Trim, shrink and convert video in the tab',
+    description:
+      'Set an in point and an out point, choose a size, and get back a WebM, an animated GIF, or every frame as a PNG. The container is written here, because WebCodecs will encode frames but hands them back with nothing around them, and the browser offers no way to write one.',
+    action: 'Open Cutaway',
+    theme: 'cutaway',
+    accent: '#a8562f',
+    accentSoft: '#f6e4da',
+    storage: 'localStorage',
+    features: [
+      'Trim, resize, change the frame rate, change the speed, drop the audio',
+      'Out as WebM with VP9, VP8 or AV1, as an animated GIF, or as still frames in a ZIP',
+      'A WebM muxer and a GIF encoder, both written for this site',
+      'Says plainly what this browser can and cannot encode, before you start',
+    ],
+    keywords: ['video trimmer', 'video to gif', 'convert video', 'compress video', 'browser video editor'],
+  },
+  {
     slug: 'tally',
     category: 'make',
     name: 'Tally',
