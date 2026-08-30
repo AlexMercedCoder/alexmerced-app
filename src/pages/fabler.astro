@@ -1,0 +1,111 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('fabler');
+---
+<Base title="Fabler, a sample data generator" description={app.description} app="fabler" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="fabler-root">
+    <AppBar app="fabler">
+      <label class="fb-inline"><span>Seed</span><input id="fb-seed" class="field field--sm fb-seed" spellcheck="false" /></label>
+      <button class="btn btn--sm" id="fb-reseed">New seed</button>
+      <button class="btn btn--sm" id="fb-add-table">Add table</button>
+      <button class="btn btn--sm btn--primary" id="fb-download-all">Download everything</button>
+    </AppBar>
+
+    <div class="shell shell--wide fb">
+      <section class="fb-schema">
+        <header class="fb-head"><h2 class="fb-subhead">Schema</h2><span class="fb-stats" id="fb-stats"></span></header>
+        <div class="fb-tables" id="fb-tables"></div>
+        <p class="fb-note">
+          The same seed always produces the same rows, so a demo you record today can be reproduced
+          tomorrow. Foreign keys draw only from the ids that exist in the table they reference.
+        </p>
+      </section>
+
+      <section class="fb-out">
+        <header class="fb-head">
+          <h2 class="fb-subhead">Preview</h2>
+          <label class="fb-inline"><span>Rows</span><input id="fb-preview-rows" class="field field--sm fb-rows" type="number" min="1" max="200" /></label>
+        </header>
+        <div class="fb-preview" id="fb-preview"></div>
+
+        <header class="fb-head">
+          <div class="fb-inline">
+            <span>Output</span>
+            <select id="fb-format" class="field field--sm">
+              <option value="json">JSON</option>
+              <option value="ndjson">NDJSON</option>
+              <option value="csv">CSV</option>
+              <option value="sql">SQL inserts</option>
+              <option value="ddl">SQL DDL</option>
+            </select>
+          </div>
+          <div class="fb-actions">
+            <button class="btn btn--sm btn--ghost" id="fb-copy">Copy preview</button>
+            <button class="btn btn--sm" id="fb-download">Download</button>
+          </div>
+        </header>
+        <pre class="fb-output" id="fb-output"></pre>
+      </section>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountFabler } from '../apps/fabler/ui';
+  const root = document.getElementById('fabler-root');
+  if (root) void mountFabler(root as HTMLElement);
+</script>
+
+<style is:global>
+  .fb { display: grid; grid-template-columns: minmax(0, 26rem) minmax(0, 1fr); gap: 1.5rem; padding: 1.25rem 0 3rem; align-items: start; }
+  .fb-inline { display: inline-flex; align-items: center; gap: 0.35rem; font: 600 0.75rem var(--sans); color: var(--text-soft); }
+  .fb-seed { width: 8rem; font-family: var(--mono); }
+  .fb-rows { width: 4.5rem; }
+  .fb-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; min-height: 2rem; }
+  .fb-subhead { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0; }
+  .fb-stats { font: 0.74rem var(--mono); color: var(--text-faint); }
+  .fb-actions { display: flex; gap: 0.3rem; }
+  .fb-note { font-size: 0.76rem; color: var(--text-faint); line-height: 1.5; margin: 0.75rem 0 0; }
+
+  .fb-tables { display: grid; gap: 0.7rem; }
+  .fb-table { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; }
+  .fb-table__head { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--rule); background: var(--paper-sunk); }
+  .fb-table__name { flex: 1; border: 0; background: none; font: 700 0.9rem var(--mono); padding: 0.2rem; min-width: 0; }
+  .fb-table__name:focus { outline: none; background: var(--paper-raised); border-radius: 3px; }
+  .fb-table__rows { width: 4.5rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper-raised); padding: 0.2rem 0.3rem; font-size: 0.8rem; text-align: right; }
+  .fb-table__rowslabel { font: 0.7rem var(--mono); color: var(--text-faint); }
+
+  .fb-fields { padding: 0.4rem 0.5rem 0.5rem; display: grid; gap: 0.25rem; }
+  .fb-field { display: grid; grid-template-columns: 6.5rem 1fr auto auto; gap: 0.3rem; align-items: center; }
+  .fb-field__name { border: 0; background: var(--paper-sunk); border-radius: 4px; padding: 0.28rem 0.35rem; font: 0.78rem var(--mono); min-width: 0; }
+  .fb-field__name:focus { outline: 1px solid var(--accent); }
+  .fb-kind, .fb-field__ref { border: 1px solid var(--rule); border-radius: 4px; background: var(--paper-raised); font-size: 0.75rem; padding: 0.22rem; min-width: 0; }
+  .fb-field__num { width: 3.2rem; border: 1px solid var(--rule); border-radius: 4px; padding: 0.22rem 0.3rem; font-size: 0.74rem; }
+  .fb-field__options { border: 1px solid var(--rule); border-radius: 4px; padding: 0.22rem 0.3rem; font-size: 0.74rem; min-width: 0; }
+  .fb-field__null { width: 3rem; border: 1px solid var(--rule); border-radius: 4px; padding: 0.22rem 0.25rem; font-size: 0.72rem; text-align: right; }
+  .fb-icon { background: none; border: 0; cursor: pointer; color: var(--text-faint); font-size: 0.85rem; padding: 0.15rem 0.3rem; }
+  .fb-icon:hover { color: var(--danger); }
+  .fb-addfield { background: none; border: 0; cursor: pointer; color: var(--accent); font: 600 0.76rem var(--sans); text-align: left; padding: 0.3rem 0.1rem 0; }
+
+  .fb-out { display: grid; gap: 0.3rem; min-width: 0; }
+  .fb-preview { display: grid; gap: 0.75rem; max-height: 24rem; overflow-y: auto; }
+  .fb-preview-caption { font: 600 0.76rem var(--mono); color: var(--text-soft); margin: 0 0 0.25rem; }
+  .fb-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--paper-raised); }
+  .fb-scroll table { border-collapse: collapse; width: 100%; font-size: 0.76rem; }
+  .fb-scroll th, .fb-scroll td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  .fb-scroll th { font: 600 0.7rem var(--mono); color: var(--text-faint); background: var(--paper-sunk); position: sticky; top: 0; }
+  .fb-scroll td { font-family: var(--mono); }
+  .fb-scroll td[data-null] { color: var(--text-faint); font-style: italic; }
+
+  .fb-output {
+    margin: 0; padding: 0.7rem 0.8rem; background: var(--paper-sunk); border: 1px solid var(--rule);
+    border-radius: var(--radius-sm); font: 0.78rem/1.6 var(--mono); max-height: 20rem; overflow: auto;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 1000px) {
+    .fb { grid-template-columns: 1fr; }
+  }
+</style>

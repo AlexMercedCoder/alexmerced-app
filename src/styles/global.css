@@ -50,6 +50,7 @@
 [data-theme='stint']     { --accent: #0d7a8c; --accent-soft: #daf0f3; }
 [data-theme='loupe']     { --accent: #4a6fa5; --accent-soft: #e3ebf5; }
 [data-theme='decanter']  { --accent: #8a5a2b; --accent-soft: #f2e7da; }
+[data-theme='fabler']    { --accent: #2f7d4f; --accent-soft: #dcf0e4; }
 
 *, *::before, *::after { box-sizing: border-box; }
 

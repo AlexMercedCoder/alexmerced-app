@@ -94,6 +94,25 @@ export const apps: AppEntry[] = [
     keywords: ['qr code generator', 'wifi qr code', 'vcard qr', 'offline qr generator'],
   },
   {
+    slug: 'fabler',
+    name: 'Fabler',
+    tagline: 'Believable data, reproducible every time',
+    description:
+      'Describe a schema and get realistic rows out of it. Everything is generated from a seed, so the same schema produces the same data every run, and foreign keys draw only from ids that actually exist in the table they point at.',
+    action: 'Open Fabler',
+    theme: 'fabler',
+    accent: '#2f7d4f',
+    accentSoft: '#dcf0e4',
+    storage: 'localStorage',
+    features: [
+      'Nearly forty field types, from names and addresses to IPs and timestamps',
+      'Seeded generation, so a demo can be reproduced exactly',
+      'Foreign keys across tables that keep referential integrity',
+      'Output as JSON, NDJSON, CSV, SQL inserts, or a CREATE TABLE script',
+    ],
+    keywords: ['test data generator', 'mock data', 'fake data', 'sample data', 'seed database'],
+  },
+  {
     slug: 'decanter',
     name: 'Decanter',
     tagline: 'Pour data from one shape into another',
