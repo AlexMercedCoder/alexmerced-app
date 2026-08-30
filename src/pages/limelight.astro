@@ -110,6 +110,19 @@ const app = getApp('limelight');
           </div>
 
           <label class="ll-check"><input type="checkbox" id="ll-audio" /><span>Keep the sound that was recorded</span></label>
+
+          <div class="ll-pair">
+            <label class="field-row"><span>Format</span>
+              <select class="field" id="ll-format">
+                <option value="webm">WebM</option>
+                <option value="mp4">MP4</option>
+                <option value="gif">Animated GIF</option>
+              </select>
+            </label>
+            <label class="field-row"><span>Quality</span><select class="field" id="ll-quality"></select></label>
+          </div>
+          <p class="ll-note" id="ll-format-note"></p>
+
           <label class="field-row"><span>Frames a second</span>
             <select class="field" id="ll-fps">
               <option value="24">24</option>
@@ -177,6 +190,7 @@ const app = getApp('limelight');
 
   .ll-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-items: start; }
   .ll-card { padding: 1rem; min-width: 0; display: grid; gap: 0.55rem; align-content: start; }
+  .ll-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
   .ll-presets { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.3rem; }
   .ll-preset { width: 42px; height: 30px; border-radius: 0.35rem; border: 2px solid transparent; box-shadow: 0 0 0 1px var(--rule); cursor: pointer; padding: 0; }
   .ll-preset[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }

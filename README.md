@@ -99,6 +99,11 @@ normally be reached for, the thing is implemented here and covered by tests:
   the QR reader (`src/lib/homography.ts`).
 - **A WebM muxer** (`src/lib/webm.ts`). WebCodecs encodes frames and hands them
   back bare; the browser offers no way to write a container around them.
+- **An MP4 muxer** (`src/lib/mp4.ts`). WebM is the better container, but MP4 is
+  what people send each other, so a tool that cannot write one will not get
+  used. Boxes, sample tables, and the nested descriptors AAC needs.
+- **An Opus track builder** (`src/lib/opus.ts`), shared by everything that has
+  to put sound in a file.
 - **A GIF encoder** (`src/lib/gif.ts`) with median-cut quantisation,
   Floyd-Steinberg dithering, and LZW.
 - **An EXIF reader** (`src/apps/loupe/exif.ts`), a **ZIP writer** with CRC-32

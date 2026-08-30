@@ -132,10 +132,20 @@ export function evenSize(width: number, height: number): { width: number; height
 }
 
 export const OUTPUT_SIZES: { id: string; label: string; width: number; height: number }[] = [
+  { id: '4k', label: '3840 by 2160, 4K', width: 3840, height: 2160 },
+  { id: '1440p', label: '2560 by 1440', width: 2560, height: 1440 },
   { id: '1080p', label: '1920 by 1080', width: 1920, height: 1080 },
   { id: '720p', label: '1280 by 720', width: 1280, height: 720 },
   { id: 'square', label: '1080 square', width: 1080, height: 1080 },
   { id: 'vertical', label: '1080 by 1920, vertical', width: 1080, height: 1920 },
+  { id: 'portrait', label: '1080 by 1350, portrait', width: 1080, height: 1350 },
+];
+
+/** How hard to push the encoder, as a multiplier on the suggested bitrate. */
+export const QUALITY: { id: 'low' | 'medium' | 'high'; label: string; factor: number }[] = [
+  { id: 'low', label: 'Smaller file', factor: 0.5 },
+  { id: 'medium', label: 'Balanced', factor: 1 },
+  { id: 'high', label: 'Best quality', factor: 1.8 },
 ];
 
 /** A rounded rectangle path, for clipping the recording and drawing its shadow. */

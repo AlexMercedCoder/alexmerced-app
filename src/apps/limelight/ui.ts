@@ -5,10 +5,13 @@ import { registerTools } from '../../lib/webmcp';
 import type { Interest } from './attention';
 import { canCapture, CaptureError, Session, type Recording, type Source } from './capture';
 import {
-  cameraRect, defaultComposition, OUTPUT_SIZES, PRESETS, type CameraCorner, type Composition,
+  cameraRect, defaultComposition, OUTPUT_SIZES, PRESETS, QUALITY,
+  type CameraCorner, type Composition,
 } from './layout';
 import { limelightTools } from './mcp';
-import { drawFrame, findInterest, render, RenderError, type Project } from './render';
+import {
+  capabilities, drawFrame, findInterest, render, RenderError, type OutputFormat, type Project,
+} from './render';
 import {
   createProject, deleteProject, loadCurrentId, loadProject, loadProjects, loadSettings,
   saveCurrentId, saveProject, saveSettings, storedBytes, type Project as StoredProject,
@@ -87,6 +90,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       bitrate: suggestBitrate(),
       showClicks: settings.showClicks,
       showCursor: settings.showCursor && recording.pointer.length > 0,
+      format: settings.format,
+      gifColours: 128,
       keepAudio: settings.keepAudio && recording.hasAudio,
       start: trim.start,
       end: trim.end > trim.start ? trim.end : recording.duration,
@@ -95,7 +100,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function suggestBitrate(): number {
     const { width, height } = settings.composition;
-    return Math.max(1_500_000, Math.min(24_000_000, Math.round(width * height * settings.frameRate * 0.09)));
+    const factor = QUALITY.find((entry) => entry.id === settings.quality)?.factor ?? 1;
+    const base = width * height * settings.frameRate * 0.09;
+    return Math.max(800_000, Math.min(80_000_000, Math.round(base * factor)));
   }
 
   // ------------------------------------------------------------------ capture
@@ -489,6 +496,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     settings.composition.width = size.width;
     settings.composition.height = size.height;
     remember();
+    void describeFormat();
     void drawPreview();
   });
 
@@ -535,6 +543,54 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     void drawPreview();
   });
 
+  const formatEl = $<HTMLSelectElement>('ll-format');
+  formatEl.addEventListener('change', async () => {
+    settings.format = formatEl.value as OutputFormat;
+    remember();
+    await describeFormat();
+  });
+
+  const qualityEl = $<HTMLSelectElement>('ll-quality');
+  for (const entry of QUALITY) {
+    const option = document.createElement('option');
+    option.value = entry.id;
+    option.textContent = entry.label;
+    qualityEl.append(option);
+  }
+  qualityEl.addEventListener('change', () => {
+    settings.quality = qualityEl.value as Settings['quality'];
+    remember();
+    renderReadouts();
+  });
+
+  /** Says what this browser can write, and what each choice costs. */
+  async function describeFormat(): Promise<void> {
+    const note = $<HTMLParagraphElement>('ll-format-note');
+    const { width, height } = settings.composition;
+    const able = await capabilities(width, height);
+
+    const mp4Option = formatEl.querySelector<HTMLOptionElement>('option[value="mp4"]');
+    if (mp4Option) {
+      mp4Option.disabled = !able.mp4;
+      mp4Option.textContent = able.mp4 ? 'MP4' : 'MP4, not available here';
+    }
+
+    if (settings.format === 'mp4' && !able.mp4) {
+      settings.format = 'webm';
+      formatEl.value = 'webm';
+      remember();
+    }
+
+    note.textContent =
+      settings.format === 'gif'
+        ? 'A GIF plays anywhere but has no sound and only 256 colours a frame. Keep it short and small.'
+        : settings.format === 'mp4'
+          ? able.aac
+            ? 'MP4 with H.264. The most portable choice.'
+            : 'MP4 with H.264. This browser cannot encode AAC, so the sound will be Opus, which Safari does not play. WebM keeps sound everywhere.'
+          : 'WebM with VP9. Best quality for the size, and sound that plays in every current browser.';
+  }
+
   const fpsEl = $<HTMLSelectElement>('ll-fps');
   fpsEl.addEventListener('change', () => {
     settings.frameRate = Number(fpsEl.value) || 30;
@@ -547,6 +603,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     for (const [id, , read] of toggles) $<HTMLInputElement>(id).checked = read();
     cornerEl.value = settings.composition.camera.corner;
     fpsEl.value = String(settings.frameRate);
+    formatEl.value = settings.format;
+    qualityEl.value = settings.quality;
     const size = OUTPUT_SIZES.find((entry) =>
       entry.width === settings.composition.width && entry.height === settings.composition.height);
     sizeEl.value = size?.id ?? OUTPUT_SIZES[0].id;
@@ -586,11 +644,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     try {
       const result = await render(current, points, onProgress, controller.signal);
-      downloadBlob(`${(stored?.name ?? 'limelight').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.webm`, result.blob);
+      const stem = (stored?.name ?? 'limelight').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'limelight';
+      downloadBlob(`${stem}.${result.extension}`, result.blob);
       setStatus(
         `Saved ${formatBytes(result.blob.size)} from ${result.frames} frames`
         + `${result.hasAudio ? ', with sound' : ', silent'}`
-        + `, in ${((performance.now() - started) / 1000).toFixed(1)} seconds.`,
+        + `, in ${((performance.now() - started) / 1000).toFixed(1)} seconds.`
+        + `${result.note ? ` ${result.note}` : ''}`,
         'good',
       );
       toast('Saved to your downloads folder.', { kind: 'good' });
@@ -667,6 +727,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   window.addEventListener('pagehide', () => { session?.cancel(); release(); });
 
   renderControls();
+  await describeFormat();
   await renderProjects();
 
   // Reopen whatever was last worked on, so a reload picks up where it left off.
