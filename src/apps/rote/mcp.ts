@@ -171,7 +171,8 @@ export function roteTools(onChanged: () => void): McpTool[] {
     },
     {
       name: 'rote_search_cards',
-      description: 'Find cards by their fronts or backs, across every deck.',
+      description:
+        'Find cards by their fronts or backs, across every deck. Returns each card with its deck, its state, when it is next due, and whether it is due now. Use it to check whether something is already covered before adding a duplicate.',
       inputSchema: {
         type: 'object',
         properties: { query: { type: 'string' } },

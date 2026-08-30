@@ -14,6 +14,7 @@ function stubContext(registerTool: (tool: unknown) => unknown) {
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'navigator', { value: undefined, writable: true, configurable: true });
+  Object.defineProperty(globalThis, 'document', { value: undefined, writable: true, configurable: true });
 });
 
 const tool = (name: string, execute: McpTool['execute']): McpTool => ({
@@ -24,13 +25,48 @@ const tool = (name: string, execute: McpTool['execute']): McpTool => ({
 });
 
 describe('modelContext', () => {
+  /** Puts a registry in one of the four shapes the proposal has taken. */
+  function place(where: 'navigator.modelContext' | 'document.modelContext' | 'navigator' | 'document') {
+    const registry = { registerTool: () => {} };
+    const value = where.endsWith('.modelContext') ? { modelContext: registry } : registry;
+    const target = where.startsWith('navigator') ? 'navigator' : 'document';
+    Object.defineProperty(globalThis, target, { value, writable: true, configurable: true });
+    return registry;
+  }
+
   it('finds nothing when the browser does not offer it', () => {
     expect(modelContext()).toBeNull();
   });
 
-  it('finds it on navigator', () => {
-    stubContext(() => {});
-    expect(modelContext()).not.toBeNull();
+  it('finds it wherever the proposal has put it', () => {
+    for (const where of ['navigator.modelContext', 'document.modelContext', 'navigator', 'document'] as const) {
+      Object.defineProperty(globalThis, 'navigator', { value: undefined, writable: true, configurable: true });
+      Object.defineProperty(globalThis, 'document', { value: undefined, writable: true, configurable: true });
+      const registry = place(where);
+      expect(modelContext(), where).toBe(registry);
+    }
+  });
+
+  it('prefers navigator.modelContext, which is where the proposal now says', () => {
+    const onNavigator = { registerTool: () => {} };
+    Object.defineProperty(globalThis, 'navigator', { value: { modelContext: onNavigator }, writable: true, configurable: true });
+    Object.defineProperty(globalThis, 'document', { value: { modelContext: { registerTool: () => {} } }, writable: true, configurable: true });
+    expect(modelContext()).toBe(onNavigator);
+  });
+
+  it('ignores a modelContext that carries no registerTool', () => {
+    Object.defineProperty(globalThis, 'navigator', { value: { modelContext: {} }, writable: true, configurable: true });
+    expect(modelContext()).toBeNull();
+  });
+
+  it('registers through navigator.modelContext, which is the shape that matters', () => {
+    const seen: string[] = [];
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { modelContext: { registerTool: (entry: { name: string }) => seen.push(entry.name) } },
+      writable: true, configurable: true,
+    });
+    expect(registerTools([tool('a', () => textResult('x'))])).toBe(1);
+    expect(seen).toEqual(['a']);
   });
 });
 
@@ -171,5 +207,55 @@ describe('truncate', () => {
 
   it('says so when nothing was trimmed', () => {
     expect(truncate([1, 2], 10).truncated).toBe(false);
+  });
+});
+
+describe('registering late', () => {
+  it('registers as soon as the context appears, rather than giving up', async () => {
+    vi.useFakeTimers();
+    try {
+      // No registry at all when the page loads, which is what an extension
+      // that injects one a moment later looks like.
+      expect(registerTools([tool('late', () => textResult('x'))])).toBe(0);
+
+      const seen: string[] = [];
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { modelContext: { registerTool: (entry: { name: string }) => seen.push(entry.name) } },
+        writable: true, configurable: true,
+      });
+
+      await vi.advanceTimersByTimeAsync(400);
+      expect(seen).toEqual(['late']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops watching rather than polling for ever', async () => {
+    vi.useFakeTimers();
+    try {
+      registerTools([tool('never', () => textResult('x'))]);
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      const seen: string[] = [];
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { modelContext: { registerTool: (entry: { name: string }) => seen.push(entry.name) } },
+        writable: true, configurable: true,
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(seen).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('registers immediately when the context is already there', () => {
+    const seen: string[] = [];
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { modelContext: { registerTool: (entry: { name: string }) => seen.push(entry.name) } },
+      writable: true, configurable: true,
+    });
+    expect(registerTools([tool('now', () => textResult('x'))])).toBe(1);
+    expect(seen).toEqual(['now']);
   });
 });

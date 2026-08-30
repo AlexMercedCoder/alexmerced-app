@@ -1,5 +1,6 @@
 import { errorResult, readBoolean, readEnum, readNumber, readString, readStringArray, requireString, textResult, type McpTool } from '../../lib/webmcp';
 import { columnKind, parseInput, suggestFields } from './data';
+import { createChart, saveChart } from './store';
 import { defaultSpec, PALETTES, renderChart, type ChartType } from './render';
 
 const TYPES: readonly ChartType[] = ['bar', 'groupedBar', 'stackedBar', 'line', 'area', 'scatter', 'pie', 'doughnut'];
@@ -9,7 +10,7 @@ const TYPES: readonly ChartType[] = ['bar', 'groupedBar', 'stackedBar', 'line', 
  * produce on its own: describing a bar chart in words is not a bar chart. This
  * returns real SVG that can be pasted into a document or a page.
  */
-export function ordinateTools(): McpTool[] {
+export function ordinateTools(onSaved: () => void): McpTool[] {
   return [
     {
       name: 'ordinate_render_chart',
@@ -92,6 +93,55 @@ export function ordinateTools(): McpTool[] {
           rows: table.rows.length,
           labelColumn: labelField === -1 ? '(row numbers)' : table.columns[labelField],
           valueColumns: series.map((index) => table.columns[index]),
+        });
+      },
+    },
+    {
+      name: 'ordinate_save_chart',
+      description:
+        'Save a chart to the library on this page, so it stays after the tab closes and can be reopened and adjusted by hand. Takes the same arguments as ordinate_render_chart, plus a name.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          data: { type: 'string' },
+          type: { type: 'string', enum: [...TYPES] },
+          labelColumn: { type: 'string' },
+          valueColumns: { type: 'array', items: { type: 'string' } },
+          title: { type: 'string' },
+          subtitle: { type: 'string' },
+          palette: { type: 'string', enum: Object.keys(PALETTES) },
+        },
+        required: ['name', 'data'],
+      },
+      execute: async (input) => {
+        const table = parseInput(requireString(input, 'data'));
+        if (table.rows.length === 0) return errorResult('No rows could be read from that data.');
+
+        const suggested = suggestFields(table);
+        const named = readString(input, 'labelColumn');
+        const wanted = readStringArray(input, 'valueColumns');
+
+        const chart = createChart(requireString(input, 'name'), requireString(input, 'data'));
+        chart.spec = {
+          ...chart.spec,
+          type: readEnum(input, 'type', TYPES, 'bar'),
+          title: readString(input, 'title'),
+          subtitle: readString(input, 'subtitle'),
+          palette: readEnum(input, 'palette', Object.keys(PALETTES) as [string, ...string[]], 'studio'),
+          labelField: named ? table.columns.indexOf(named) : suggested.label,
+          series: wanted.length
+            ? wanted.map((name) => table.columns.indexOf(name)).filter((index) => index >= 0)
+            : suggested.series,
+        };
+
+        await saveChart(chart);
+        onSaved();
+        return textResult({
+          id: chart.id,
+          name: chart.name,
+          type: chart.spec.type,
+          note: 'Saved to this browser and now in the library on the page.',
         });
       },
     },

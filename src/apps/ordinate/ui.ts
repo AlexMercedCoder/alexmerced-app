@@ -380,8 +380,14 @@ export async function mountOrdinate(root: HTMLElement): Promise<void> {
   charts = await loadCharts();
   select(loadSelected() ?? charts[0]?.id ?? '');
 
+  /** Reloads the saved charts, so one an agent saved appears on the page. */
+  async function refreshLibrary(): Promise<void> {
+    charts = await loadCharts();
+    renderList();
+  }
+
   // Everything this app can do, offered to an agent on this page.
-  registerTools(ordinateTools());
+  registerTools(ordinateTools(refreshLibrary));
 }
 
 /**

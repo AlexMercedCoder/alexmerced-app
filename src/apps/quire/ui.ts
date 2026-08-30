@@ -5,6 +5,8 @@ import { createId } from '../../lib/id';
 import { PdfFile, PdfReadError, assemble } from '../../lib/pdf/parse';
 import { PdfDocument, jpegImage, rawRgbImage } from '../../lib/pdf/write';
 import { chunk, describeSize, formatBytes, formatPageRange, move, outputName, parsePageRange, rotateBy, type Slot } from './model';
+import { registerTools } from '../../lib/webmcp';
+import { quireTools } from './mcp';
 
 type Loaded = { name: string; size: number; file: PdfFile };
 
@@ -389,4 +391,7 @@ export async function mountQuire(root: HTMLElement): Promise<void> {
   });
 
   render();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(quireTools());
 }

@@ -9,6 +9,8 @@ import {
   APP_ID, createPage, FINISH_LABELS, PAGE_SIZE_LABELS, type Page, type PageSize, type Settings,
 } from './model';
 import { toPdf } from './pdf';
+import { registerTools } from '../../lib/webmcp';
+import { foolscapTools } from './mcp';
 import {
   applyImport, buildExport, clearAll, deletePage, loadPages, loadSettings, savePage, savePages,
   saveSettings, storedBytes,
@@ -485,6 +487,9 @@ export async function mountFoolscap(root: HTMLElement): Promise<void> {
   applySettingsToControls();
   renderPages();
   void refreshStorage();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(foolscapTools());
 }
 
 // ---------------------------------------------------------------------- helpers

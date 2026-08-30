@@ -27,14 +27,25 @@ export type McpTool = {
 };
 
 type ModelContext = { registerTool?: (tool: unknown) => unknown };
+type Host = { modelContext?: ModelContext; registerTool?: (tool: unknown) => unknown };
 
-/** The proposal has moved between navigator and document; accept either. */
+/**
+ * Finds wherever this browser put the tool registry.
+ *
+ * The proposal has moved: it has lived on navigator.modelContext and on
+ * document.modelContext, and some builds expose registerTool directly on one
+ * or the other. All four are accepted, because guessing wrong means every tool
+ * on the site silently fails to register and nothing says so.
+ */
 export function modelContext(): ModelContext | null {
-  const scope = globalThis as unknown as { navigator?: ModelContext; document?: ModelContext };
-  const found = scope.navigator ?? null;
-  const candidate = (found && typeof found.registerTool === 'function' ? found : null)
-    ?? (scope.document && typeof scope.document.registerTool === 'function' ? scope.document : null);
-  return candidate ?? null;
+  const scope = globalThis as unknown as { navigator?: Host; document?: Host };
+
+  for (const host of [scope.navigator, scope.document]) {
+    if (!host) continue;
+    if (host.modelContext && typeof host.modelContext.registerTool === 'function') return host.modelContext;
+    if (typeof host.registerTool === 'function') return host as ModelContext;
+  }
+  return null;
 }
 
 export function textResult(value: unknown): ToolResult {
@@ -81,40 +92,71 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/**
- * Registers a set of tools, catching failures one at a time.
- *
- * A browser that does not implement the proposal, or one where a name is
- * already taken, must not stop the app from mounting. This is an extra
- * surface, not a requirement.
- */
-export function registerTools(tools: McpTool[]): number {
-  const context = modelContext();
-  if (!context?.registerTool) return 0;
+/** Wraps a tool so a thrown error reaches the caller as something readable. */
+function wrap(tool: McpTool): Record<string, unknown> {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    execute: async (input: Record<string, unknown> = {}) => {
+      try {
+        return await tool.execute(input ?? {});
+      } catch (error) {
+        // A thrown error would be opaque. A described one is actionable.
+        return errorResult(error instanceof Error ? error.message : 'That did not work.');
+      }
+    },
+  };
+}
 
+/** Registers into a context that is known to exist. Failures are per tool. */
+function registerInto(context: ModelContext, tools: McpTool[]): number {
   let registered = 0;
   for (const tool of tools) {
     try {
-      context.registerTool({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        execute: async (input: Record<string, unknown> = {}) => {
-          try {
-            return await tool.execute(input ?? {});
-          } catch (error) {
-            // A thrown error would be opaque to the caller. A described one is
-            // something an agent can act on.
-            return errorResult(error instanceof Error ? error.message : 'That did not work.');
-          }
-        },
-      });
+      context.registerTool?.(wrap(tool));
       registered += 1;
     } catch {
       // Already registered, or unsupported. Either way, carry on.
     }
   }
   return registered;
+}
+
+/** How long to keep watching for a context that has not appeared yet. */
+const WAIT_MS = 10_000;
+const POLL_MS = 250;
+
+/**
+ * Registers a set of tools.
+ *
+ * The registry usually exists before any page script runs, in which case this
+ * is immediate. But an agent runtime injected by an extension can arrive a
+ * moment after the page has loaded, and a site that only looked once would
+ * offer that agent nothing at all, silently. So when the registry is missing,
+ * this watches briefly for it to appear rather than giving up.
+ *
+ * A browser that never provides one is the normal case, and costs a handful of
+ * checks over ten seconds before the watch stops.
+ */
+export function registerTools(tools: McpTool[]): number {
+  const context = modelContext();
+  if (context) return registerInto(context, tools);
+
+  if (typeof setInterval !== 'function') return 0;
+
+  const started = Date.now();
+  const timer = setInterval(() => {
+    const found = modelContext();
+    if (found) {
+      clearInterval(timer);
+      registerInto(found, tools);
+      return;
+    }
+    if (Date.now() - started > WAIT_MS) clearInterval(timer);
+  }, POLL_MS);
+
+  return 0;
 }
 
 // --------------------------------------------------------------------- input helpers

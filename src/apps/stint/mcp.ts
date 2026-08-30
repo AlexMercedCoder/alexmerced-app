@@ -81,7 +81,8 @@ export function stintTools(onChanged: () => void): McpTool[] {
     },
     {
       name: 'stint_stop_timer',
-      description: 'Stop whatever timer is running and report how long it ran.',
+      description:
+        'Stop whatever timer is running and report what it was on and how long it ran. Says so plainly when nothing was running, rather than treating that as a failure.',
       inputSchema: { type: 'object', properties: {} },
       execute: async () => {
         const { entries } = await loadWorkspace();

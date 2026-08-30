@@ -178,6 +178,24 @@ module scripts are fetched in `cors` mode while `cache.addAll` stores them from
 a `no-cors` request. Without `ignoreVary` the scripts never match the cache and
 the site loads offline with no JavaScript at all.
 
+### For agents
+
+Every page registers WebMCP tools when it loads, so an agent that has navigated
+to a page can use what that page does rather than read a description of it.
+Seventy-four tools across twenty apps: run SQL, render a chart, read a QR code
+out of a photograph, merge PDFs, straighten a scan, trim audio, convert an
+image, add a card to a board.
+
+The site-wide tools are on every page (`src/lib/siteTools.ts`). One of them,
+`build_skill`, writes a ready-to-save skill document: which page to open for
+which job, worked recipes, and the traps. Give it a task and the pages and
+recipes are ordered around it.
+
+The catalogue that document is written from lives in `src/data/agentGuide.ts`,
+and a test checks it against the tools that are actually registered. A guide
+that has drifted is worse than no guide, because it sends an agent looking for
+something that is gone.
+
 ### What a browser is not allowed to know
 
 Limelight zooms in on whatever is happening. Where it gets that from depends on

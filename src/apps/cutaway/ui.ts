@@ -7,6 +7,8 @@ import {
   frameCount, outputDuration, outputName, suggestBitrate, type Job, type OutputFormat, type SourceInfo,
 } from './model';
 import { codecSupported, inspect, PipelineError, run, seekTo, type Progress } from './pipeline';
+import { registerTools } from '../../lib/webmcp';
+import { cutawayTools } from './mcp';
 
 const SETTINGS_KEY = 'cutaway:job';
 
@@ -388,6 +390,9 @@ export async function mountCutaway(root: HTMLElement): Promise<void> {
       'bad',
     );
   }
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(cutawayTools());
 }
 
 function escapeHtml(value: string): string {

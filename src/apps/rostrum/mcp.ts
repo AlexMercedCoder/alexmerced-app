@@ -60,6 +60,38 @@ export function rostrumTools(onChanged: () => void): McpTool[] {
       },
     },
     {
+      name: 'rostrum_export_deck',
+      description:
+        'Export a deck that is already saved, as a PDF or as a standalone HTML file that carries its own styling and needs nothing else to open.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Deck id or title.' },
+          as: { type: 'string', enum: ['pdf', 'html'] },
+        },
+        required: ['id'],
+      },
+      execute: async (input) => {
+        const wanted = requireString(input, 'id');
+        const decks = await loadDecks();
+        const deck = decks.find((entry) => entry.id === wanted || entry.title.toLowerCase() === wanted.toLowerCase());
+        if (!deck) return textResult({ error: `No deck matching "${wanted}".`, available: decks.map((entry) => entry.title) });
+
+        if (readString(input, 'as', 'pdf') === 'html') {
+          return textResult({ title: deck.title, slides: deck.slides.length, html: toStandaloneHtml(deck, new Map()) });
+        }
+        const bytes = await toPdf(deck, new Map());
+        return textResult({
+          title: deck.title,
+          slides: deck.slides.length,
+          filename: `${slug(deck.title)}.pdf`,
+          bytes: bytes.length,
+          dataUri: `data:application/pdf;base64,${base64(bytes)}`,
+          note: 'Any images placed on slides are left out here, because they live in the page\u2019s own storage rather than in the deck.',
+        });
+      },
+    },
+    {
       name: 'rostrum_list_decks',
       description: 'List the decks stored in this browser, with their slide counts.',
       inputSchema: { type: 'object', properties: {} },

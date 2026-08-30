@@ -15,6 +15,8 @@ import {
   applyImport, buildExport, clearAll, deleteClip, loadClips, loadSettings, saveClip, saveSettings, storedBytes,
 } from './store';
 import { duration as sampleDuration, encodeWav, frameCount, type Samples } from './wav';
+import { registerTools } from '../../lib/webmcp';
+import { cadenceTools } from './mcp';
 
 type Loaded = { clip: Clip; samples: Samples };
 
@@ -669,6 +671,9 @@ export async function mountCadence(root: HTMLElement): Promise<void> {
   for (const [id, key] of numberSettings) $<HTMLInputElement>(id).value = String(settings[key]);
   await showFirstOrEmpty();
   void refreshStorage();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(cadenceTools());
 }
 
 function escapeHtml(value: string): string {
