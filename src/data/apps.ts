@@ -94,6 +94,25 @@ export const apps: AppEntry[] = [
     keywords: ['qr code generator', 'wifi qr code', 'vcard qr', 'offline qr generator'],
   },
   {
+    slug: 'decanter',
+    name: 'Decanter',
+    tagline: 'Pour data from one shape into another',
+    description:
+      'Convert between JSON, NDJSON, CSV, YAML and TOML, with every parser written from scratch so none of it leaves your machine. Then the parts that make it more than a converter: flatten and unflatten nesting, query by path, and generate a SQL, Iceberg or JSON Schema from whatever you pasted.',
+    action: 'Open Decanter',
+    theme: 'decanter',
+    accent: '#8a5a2b',
+    accentSoft: '#f2e7da',
+    storage: 'localStorage',
+    features: [
+      'Five formats, converted in any direction, with the input format detected',
+      'Flatten and unflatten nesting, and query with a JSONPath-style expression',
+      'Schema inference reporting types, nullability and how often a field appears',
+      'Generates SQL DDL, an Iceberg schema, or a JSON Schema',
+    ],
+    keywords: ['json to yaml', 'csv to json', 'toml converter', 'json schema generator', 'jsonpath'],
+  },
+  {
     slug: 'loupe',
     name: 'Loupe',
     tagline: 'Resize and convert without uploading anything',

@@ -1,0 +1,170 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('decanter');
+---
+<Base title="Decanter, a format workbench" description={app.description} app="decanter" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="decanter-root" data-transform="none" data-csv="false">
+    <AppBar app="decanter">
+      <button class="btn btn--sm" id="dc-sample">Load sample</button>
+      <button class="btn btn--sm" id="dc-save-snippet">Save snippet</button>
+    </AppBar>
+
+    <div class="shell shell--wide dc">
+      <div class="dc-bar">
+        <label class="dc-inline"><span>From</span>
+          <select id="dc-in-format" class="field field--sm">
+            <option value="auto">Detect</option>
+            <option value="json">JSON</option>
+            <option value="ndjson">NDJSON</option>
+            <option value="csv">CSV</option>
+            <option value="yaml">YAML</option>
+            <option value="toml">TOML</option>
+          </select>
+        </label>
+        <em class="dc-detected" id="dc-detected"></em>
+
+        <button class="btn btn--sm btn--ghost" id="dc-swap" title="Use the output as the new input">⇄</button>
+
+        <label class="dc-inline"><span>To</span>
+          <select id="dc-out-format" class="field field--sm">
+            <option value="json">JSON</option>
+            <option value="ndjson">NDJSON</option>
+            <option value="csv">CSV</option>
+            <option value="yaml">YAML</option>
+            <option value="toml">TOML</option>
+          </select>
+        </label>
+
+        <label class="dc-inline"><span>Transform</span>
+          <select id="dc-transform" class="field field--sm">
+            <option value="none">None</option>
+            <option value="flatten">Flatten</option>
+            <option value="unflatten">Unflatten</option>
+            <option value="query">Query by path</option>
+          </select>
+        </label>
+
+        <label class="dc-inline" data-show="query"><span>Path</span>
+          <input id="dc-path" class="field field--sm dc-path" spellcheck="false" placeholder="$.items[*].name" />
+        </label>
+        <label class="dc-inline" data-show="separator"><span>Separator</span>
+          <input id="dc-separator" class="field field--sm dc-sep" spellcheck="false" />
+        </label>
+
+        <div class="dc-csv" data-show="csv">
+          <label class="dc-inline"><span>Delimiter</span><input id="dc-delimiter" class="field field--sm dc-sep" spellcheck="false" /></label>
+          <label class="dc-check"><input type="checkbox" id="dc-header" /><span>Header row</span></label>
+          <label class="dc-check"><input type="checkbox" id="dc-infer" /><span>Infer types</span></label>
+        </div>
+
+        <span class="dc-status" id="dc-status" aria-live="polite"></span>
+      </div>
+
+      <div class="dc-panes">
+        <section class="dc-pane" id="dc-input-wrap">
+          <header class="dc-pane__head"><h2 class="dc-subhead">Input</h2><span class="dc-stats" id="dc-stats"></span></header>
+          <textarea id="dc-input" class="dc-text" spellcheck="false" aria-label="Input"></textarea>
+        </section>
+
+        <section class="dc-pane">
+          <header class="dc-pane__head">
+            <h2 class="dc-subhead">Output</h2>
+            <div class="dc-pane__actions">
+              <button class="btn btn--sm btn--ghost" id="dc-copy">Copy</button>
+              <button class="btn btn--sm btn--ghost" id="dc-download">Download</button>
+            </div>
+          </header>
+          <pre class="dc-text dc-text--out" id="dc-output"></pre>
+        </section>
+      </div>
+
+      <section class="dc-schema-wrap">
+        <header class="dc-pane__head">
+          <div class="dc-schema-tabs" id="dc-schema-tabs">
+            <button type="button" class="dc-tab" data-schema-tab="fields">Fields</button>
+            <button type="button" class="dc-tab" data-schema-tab="sql">SQL DDL</button>
+            <button type="button" class="dc-tab" data-schema-tab="iceberg">Iceberg</button>
+            <button type="button" class="dc-tab" data-schema-tab="jsonschema">JSON Schema</button>
+          </div>
+          <div class="dc-pane__actions">
+            <label class="dc-inline"><span>Table</span><input id="dc-table" class="field field--sm dc-table" spellcheck="false" /></label>
+            <button class="btn btn--sm btn--ghost" id="dc-copy-schema">Copy</button>
+          </div>
+        </header>
+        <pre class="dc-text dc-text--out dc-schema" id="dc-schema"></pre>
+      </section>
+
+      <section class="dc-snippets-wrap">
+        <h2 class="dc-subhead">Saved snippets</h2>
+        <div class="dc-snippets" id="dc-snippets"></div>
+      </section>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountDecanter } from '../apps/decanter/ui';
+  const root = document.getElementById('decanter-root');
+  if (root) void mountDecanter(root as HTMLElement);
+</script>
+
+<style is:global>
+  .dc { padding: 1rem 0 3rem; display: grid; gap: 0.85rem; }
+  .dc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+  .dc-inline { display: inline-flex; align-items: center; gap: 0.35rem; font: 600 0.75rem var(--sans); color: var(--text-soft); }
+  .dc-check { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: var(--text-soft); }
+  .dc-detected { font: 0.72rem var(--mono); color: var(--text-faint); font-style: normal; }
+  .dc-path { width: 12rem; font-family: var(--mono); }
+  .dc-sep { width: 3.5rem; text-align: center; font-family: var(--mono); }
+  .dc-table { width: 8rem; font-family: var(--mono); }
+  .dc-csv { display: inline-flex; align-items: center; gap: 0.6rem; }
+  .dc-status { margin-left: auto; font: 0.78rem var(--mono); }
+  .dc-status[data-state='ok'] { color: var(--good); }
+  .dc-status[data-state='error'] { color: var(--danger); }
+
+  #decanter-root:not([data-transform='query']) [data-show='query'] { display: none; }
+  #decanter-root[data-transform='none'] [data-show='separator'],
+  #decanter-root[data-transform='query'] [data-show='separator'] { display: none; }
+  #decanter-root[data-csv='false'] [data-show='csv'] { display: none; }
+
+  .dc-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
+  .dc-pane { display: grid; gap: 0.35rem; min-width: 0; border-radius: var(--radius); }
+  .dc-pane[data-over] { outline: 2px dashed var(--accent); outline-offset: 4px; }
+  .dc-pane__head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 2rem; }
+  .dc-pane__actions { display: flex; gap: 0.25rem; align-items: center; }
+  .dc-subhead { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0; }
+  .dc-stats { font: 0.72rem var(--mono); color: var(--text-faint); }
+
+  .dc-text {
+    width: 100%; min-height: 22rem; max-height: 30rem; overflow: auto; margin: 0;
+    border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--paper-raised);
+    padding: 0.7rem 0.8rem; font: 0.84rem/1.6 var(--mono); resize: vertical; white-space: pre; tab-size: 2;
+  }
+  textarea.dc-text:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  .dc-text--out { background: var(--paper-sunk); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  .dc-schema-wrap { display: grid; gap: 0.35rem; }
+  .dc-schema { min-height: 9rem; max-height: 18rem; }
+  .dc-schema-tabs { display: flex; gap: 0.2rem; }
+  .dc-tab {
+    background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+    font: 600 0.78rem var(--sans); color: var(--text-soft); padding: 0.35rem 0.55rem;
+  }
+  .dc-tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .dc-snippets-wrap { display: grid; gap: 0.35rem; }
+  .dc-snippets { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .dc-snippet { display: inline-flex; align-items: center; border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-raised); }
+  .dc-snippet__open { background: none; border: 0; cursor: pointer; font: 600 0.76rem var(--sans); padding: 0.32rem 0.3rem 0.32rem 0.7rem; }
+  .dc-snippet__open:hover { color: var(--accent); }
+  .dc-snippet__remove { background: none; border: 0; cursor: pointer; color: var(--text-faint); padding: 0.2rem 0.55rem 0.2rem 0.2rem; }
+  .dc-snippet__remove:hover { color: var(--danger); }
+  .dc-note { margin: 0; font-size: 0.78rem; color: var(--text-faint); }
+
+  @media (max-width: 900px) {
+    .dc-panes { grid-template-columns: 1fr; }
+    .dc-status { margin-left: 0; width: 100%; }
+  }
+</style>
