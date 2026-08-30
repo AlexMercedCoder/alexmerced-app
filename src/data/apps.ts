@@ -269,6 +269,26 @@ export const apps: AppEntry[] = [
     keywords: ['regex tester', 'regular expression', 'regex explainer', 'regex builder'],
   },
   {
+    slug: 'foolscap',
+    category: 'make',
+    name: 'Foolscap',
+    tagline: 'Photograph a document, get a straight PDF',
+    description:
+      'Point the camera at a page. Foolscap finds its edges, corrects the perspective so the page comes out square rather than trapezoidal, flattens the uneven lighting, and stacks the results into a PDF. Contracts, receipts, and passports are exactly the paperwork you should not be uploading to a stranger, so none of it leaves the browser.',
+    action: 'Open Foolscap',
+    theme: 'foolscap',
+    accent: '#3f6b53',
+    accentSoft: '#dfeee6',
+    storage: 'IndexedDB and localStorage',
+    features: [
+      'Finds the page edges, and says so plainly when it cannot',
+      'Perspective correction by homography, so the page comes out square',
+      'Local thresholding, which keeps the corner a single cutoff would lose',
+      'Multi-page PDF at Letter, A4, Legal, or the size of the scan itself',
+    ],
+    keywords: ['document scanner', 'scan to pdf', 'camera scanner', 'perspective correction', 'offline scanner'],
+  },
+  {
     slug: 'cadence',
     category: 'make',
     name: 'Cadence',
