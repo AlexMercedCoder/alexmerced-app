@@ -53,6 +53,9 @@
 [data-theme='fabler']    { --accent: #2f7d4f; --accent-soft: #dcf0e4; }
 [data-theme='quire']     { --accent: #a03d55; --accent-soft: #f6e0e6; }
 [data-theme='rostrum']   { --accent: #5b4bbd; --accent-soft: #e6e2f7; }
+[data-theme='tally']     { --accent: #7a6a1f; --accent-soft: #f1ecd6; }
+[data-theme='ordinate']  { --accent: #1f5f8b; --accent-soft: #dfeaf3; }
+[data-theme='cadence']   { --accent: #8c4a6b; --accent-soft: #f4e3ec; }
 
 *, *::before, *::after { box-sizing: border-box; }
 

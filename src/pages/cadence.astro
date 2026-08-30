@@ -1,0 +1,148 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('cadence');
+---
+<Base title="Cadence, record and edit audio without uploading it" description={app.description} app="cadence" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="cadence-root">
+    <AppBar app="cadence">
+      <button class="btn btn--sm" id="cd-download-source">Save original</button>
+      <button class="btn btn--sm btn--primary" id="cd-download">Save as WAV</button>
+    </AppBar>
+
+    <div class="shell shell--wide cd">
+      <aside class="cd-side">
+        <div class="cd-capture">
+          <button class="btn btn--primary cd-recordbtn" id="cd-record">Record</button>
+          <span class="cd-record-time" id="cd-record-time"></span>
+        </div>
+        <div class="cd-drop" id="cd-drop">
+          <button class="btn btn--sm" id="cd-add">Add audio files</button>
+          <p>or drop them here</p>
+          <input type="file" id="cd-file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.opus,.webm,.flac" multiple hidden />
+        </div>
+
+        <div class="cd-head">
+          <h2 class="cd-subhead">Clips</h2>
+          <button class="btn btn--sm" id="cd-join" disabled>Join ticked</button>
+        </div>
+        <div class="cd-list" id="cd-list"></div>
+        <div class="empty" id="cd-empty">
+          <strong>Nothing here yet</strong>
+          <p>Record from the microphone, or add a file. Neither one leaves this browser.</p>
+        </div>
+        <p class="cd-storage" id="cd-storage"></p>
+      </aside>
+
+      <main class="cd-work" id="cd-work" hidden>
+        <input class="field cd-name" id="cd-name" aria-label="Clip name" />
+
+        <div class="cd-wavewrap">
+          <canvas id="cd-wave" class="cd-wave" aria-label="Waveform"></canvas>
+          <div class="cd-selection" id="cd-selection" hidden></div>
+          <div class="cd-playhead" id="cd-playhead"></div>
+        </div>
+
+        <div class="cd-transport">
+          <button class="btn btn--primary" id="cd-play">Play</button>
+          <button class="btn btn--sm" id="cd-select-all">Whole clip</button>
+          <button class="btn btn--sm" id="cd-undo" disabled>Undo</button>
+          <p class="cd-hint">Drag across the waveform to choose a region.</p>
+        </div>
+
+        <div class="cd-stats" id="cd-stats"></div>
+
+        <section class="card cd-card">
+          <h2 class="cd-subhead">Edit</h2>
+          <div class="cd-actions">
+            <button class="btn btn--sm" id="cd-trim">Keep selection</button>
+            <button class="btn btn--sm" id="cd-cut">Remove selection</button>
+            <button class="btn btn--sm" id="cd-trim-silence">Trim silence</button>
+            <button class="btn btn--sm" id="cd-fade-in">Fade in</button>
+            <button class="btn btn--sm" id="cd-fade-out">Fade out</button>
+            <button class="btn btn--sm" id="cd-normalise">Normalise</button>
+            <button class="btn btn--sm" id="cd-normalise-rms">Match loudness</button>
+            <button class="btn btn--sm" id="cd-gain">Change level</button>
+            <button class="btn btn--sm" id="cd-speed">Change speed</button>
+            <button class="btn btn--sm" id="cd-resample">Resample</button>
+            <button class="btn btn--sm" id="cd-reverse">Reverse</button>
+            <button class="btn btn--sm" id="cd-mono">To mono</button>
+            <button class="btn btn--sm" id="cd-stereo">To stereo</button>
+          </div>
+        </section>
+
+        <section class="card cd-card">
+          <h2 class="cd-subhead">Settings</h2>
+          <div class="cd-settings">
+            <label class="field-row"><span>Export format</span><select class="field" id="cd-format"></select></label>
+            <label class="field-row"><span>Fade length, seconds</span><input class="field" id="cd-fade-length" type="number" min="0" max="60" step="0.25" /></label>
+            <label class="field-row"><span>Crossfade, seconds</span><input class="field" id="cd-crossfade" type="number" min="0" max="30" step="0.05" /></label>
+            <label class="field-row"><span>Normalise target, dBFS</span><input class="field" id="cd-target" type="number" min="-40" max="0" step="0.5" /></label>
+            <label class="field-row"><span>Silence threshold, dBFS</span><input class="field" id="cd-threshold" type="number" min="-90" max="-10" step="1" /></label>
+          </div>
+          <p class="cd-hint">Changing speed moves the pitch with it. That is what happens without a pitch shifter, and there is no honest way to hide it.</p>
+        </section>
+      </main>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountCadence } from '../apps/cadence/ui';
+  const root = document.getElementById('cadence-root');
+  if (root) void mountCadence(root as HTMLElement);
+</script>
+
+<style is:global>
+  .cd { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 1.25rem; align-items: start; padding: 1.25rem 0 3rem; }
+  .cd-subhead { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.5rem; }
+  .cd-hint { font-size: 0.78rem; color: var(--ink-soft); margin: 0; }
+  .cd-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 1rem; }
+  .cd-head .cd-subhead { margin: 0; }
+
+  .cd-side { min-width: 0; display: grid; gap: 0.5rem; align-content: start; }
+  .cd-capture { display: flex; align-items: center; gap: 0.6rem; }
+  .cd-recordbtn { flex: 1; }
+  .cd-recordbtn.is-recording { background: #b91c1c; border-color: #b91c1c; animation: cd-pulse 1.4s ease-in-out infinite; }
+  @keyframes cd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
+  .cd-record-time { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--ink-soft); min-width: 4.2rem; }
+
+  .cd-drop { display: grid; gap: 0.3rem; justify-items: center; padding: 0.85rem; border: 1px dashed var(--rule); border-radius: 0.6rem; text-align: center; }
+  .cd-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+  .cd-drop p { margin: 0; font-size: 0.78rem; color: var(--ink-soft); }
+
+  .cd-list { display: grid; gap: 0.35rem; max-height: 44vh; overflow: auto; }
+  .cd-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.4rem; border: 1px solid var(--rule); border-radius: 0.5rem; background: var(--paper-raised); padding: 0.35rem 0.5rem; }
+  .cd-row[aria-current='true'] { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .cd-row__pick { display: flex; align-items: center; }
+  .cd-row__open { display: grid; gap: 0.15rem; text-align: left; background: none; border: 0; cursor: pointer; font: inherit; color: inherit; min-width: 0; padding: 0.2rem 0; }
+  .cd-row__open strong { font-size: 0.87rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cd-row__open span { font-size: 0.73rem; color: var(--ink-soft); }
+  .cd-row__remove { border: 0; background: none; color: var(--ink-soft); cursor: pointer; font-size: 1.15rem; line-height: 1; padding: 0.2rem 0.3rem; }
+  .cd-row__remove:hover { color: #b91c1c; }
+  .cd-storage { font-size: 0.74rem; color: var(--ink-soft); margin: 0.4rem 0 0; }
+
+  .cd-work { min-width: 0; display: grid; gap: 0.9rem; }
+  .cd-name { font-size: 1.05rem; font-weight: 600; }
+  .cd-wavewrap { position: relative; border: 1px solid var(--rule); border-radius: 0.6rem; background: var(--paper-raised); overflow: hidden; }
+  .cd-wave { display: block; width: 100%; height: 180px; touch-action: none; cursor: crosshair; }
+  .cd-selection { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.18; pointer-events: none; }
+  .cd-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: 0; pointer-events: none; }
+
+  .cd-transport { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .cd-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.5rem; }
+  .cd-stat { display: grid; gap: 0.1rem; padding: 0.5rem 0.65rem; border: 1px solid var(--rule); border-radius: 0.5rem; background: var(--paper-raised); }
+  .cd-stat span { font-size: 0.68rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-soft); }
+  .cd-stat strong { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+
+  .cd-card { padding: 1rem; }
+  .cd-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .cd-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.7rem; margin-bottom: 0.7rem; }
+
+  @media (max-width: 880px) {
+    .cd { grid-template-columns: minmax(0, 1fr); }
+    .cd-list { max-height: 200px; }
+    .cd-wave { height: 130px; }
+  }
+</style>
