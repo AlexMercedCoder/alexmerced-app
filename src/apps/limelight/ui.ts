@@ -22,12 +22,13 @@ import {
   type Settings,
 } from './store';
 import {
-  addText, constrainText, MIN_TEXT, removeText, updateText, type TextBlock,
+  addText, constrainText, duplicateText, MIN_TEXT, removeText, splitText, updateText,
+  type TextBlock,
 } from './text';
 import { defaultZoom, zoomAt, type ZoomSettings } from './zoom';
 import {
-  addBlock, blocksFromInterest, constrain, mergeBlocks, removeBlock, reviveBlocks,
-  trackFromBlocks, type ZoomBlock,
+  addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
+  reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
 } from './zooms';
 
 
@@ -875,6 +876,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       }
 
       bar.addEventListener('pointerdown', (event) => beginZoomDrag(event, zoom.id, 'move'));
+      bar.addEventListener('contextmenu', (event) => { selected = zoom.id; zoomMenu(event, zoom.id); });
       bar.addEventListener('dblclick', () => {
         zooms = removeBlock(zooms, zoom.id);
         renderZooms();
@@ -1026,6 +1028,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       }
 
       bar.addEventListener('pointerdown', (event) => beginTextDrag(event, text.id, 'move'));
+      bar.addEventListener('contextmenu', (event) => { selectedText = text.id; textMenu(event, text.id); });
       bar.addEventListener('dblclick', () => {
         texts = removeText(texts, text.id);
         if (selectedText === text.id) selectedText = null;
@@ -1195,6 +1198,194 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     previewTime = Number(scrubber.value);
     $<HTMLSpanElement>('ll-time').textContent = formatClock(previewTime);
     void drawPreview();
+  });
+
+  // ------------------------------------------------------------------ block menu
+
+  /**
+   * The right-click menu on a timeline block.
+   *
+   * Built and thrown away each time rather than kept hidden, because the items
+   * it offers depend on where the playhead is: a split is only possible when
+   * the playhead is inside the block with room on both sides, and offering a
+   * greyed-out item that is usually greyed out is worse than not offering it.
+   */
+  let menuEl: HTMLDivElement | null = null;
+
+  function closeMenu(): void {
+    menuEl?.remove();
+    menuEl = null;
+  }
+
+  function openMenu(event: MouseEvent, items: { label: string; enabled: boolean; run: () => void }[]): void {
+    closeMenu();
+    event.preventDefault();
+
+    const menu = document.createElement('div');
+    menu.className = 'll-menu';
+    menu.setAttribute('role', 'menu');
+
+    for (const item of items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('role', 'menuitem');
+      button.textContent = item.label;
+      button.disabled = !item.enabled;
+      button.addEventListener('click', () => { closeMenu(); item.run(); });
+      menu.append(button);
+    }
+
+    document.body.append(menu);
+    // Placed after it is in the document, so its real size is known and it can
+    // be nudged back inside the window rather than opening off the edge.
+    const box = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(4, Math.min(window.innerWidth - box.width - 4, event.clientX))}px`;
+    menu.style.top = `${Math.max(4, Math.min(window.innerHeight - box.height - 4, event.clientY))}px`;
+    menuEl = menu;
+
+    const dismiss = (dismissal: Event) => {
+      if (dismissal.target instanceof Node && menu.contains(dismissal.target)) return;
+      closeMenu();
+      window.removeEventListener('pointerdown', dismiss, true);
+      window.removeEventListener('keydown', onEscape, true);
+      window.removeEventListener('scroll', dismiss, true);
+    };
+    const onEscape = (key: KeyboardEvent) => { if (key.key === 'Escape') dismiss(key); };
+    window.addEventListener('pointerdown', dismiss, true);
+    window.addEventListener('keydown', onEscape, true);
+    window.addEventListener('scroll', dismiss, true);
+  }
+
+  function zoomMenu(event: MouseEvent, id: string): void {
+    if (!recording) return;
+    const zoom = zooms.find((entry) => entry.id === id);
+    if (!zoom) return;
+    const canSplit = previewTime - zoom.start >= MIN_BLOCK && zoom.end - previewTime >= MIN_BLOCK;
+
+    openMenu(event, [
+      {
+        label: 'Duplicate',
+        enabled: duplicateBlock(zooms, id, recording.duration).length > zooms.length,
+        run: () => {
+          zooms = duplicateBlock(zooms, id, recording!.duration);
+          renderZooms();
+          persistZooms();
+          void drawPreview();
+        },
+      },
+      {
+        label: 'Split at the playhead',
+        enabled: canSplit,
+        run: () => {
+          zooms = splitBlock(zooms, id, previewTime);
+          renderZooms();
+          persistZooms();
+          void drawPreview();
+        },
+      },
+      {
+        label: 'Remove',
+        enabled: true,
+        run: () => {
+          zooms = removeBlock(zooms, id);
+          if (selected === id) selected = null;
+          renderZooms();
+          persistZooms();
+          void drawPreview();
+        },
+      },
+    ]);
+  }
+
+  function textMenu(event: MouseEvent, id: string): void {
+    if (!recording) return;
+    const text = texts.find((entry) => entry.id === id);
+    if (!text) return;
+    const canSplit = previewTime - text.start >= MIN_TEXT && text.end - previewTime >= MIN_TEXT;
+
+    openMenu(event, [
+      {
+        label: 'Duplicate',
+        enabled: true,
+        run: () => {
+          texts = duplicateText(texts, id, recording!.duration);
+          renderTexts();
+          persistTexts();
+          void drawPreview();
+        },
+      },
+      {
+        label: 'Split at the playhead',
+        enabled: canSplit,
+        run: () => {
+          texts = splitText(texts, id, previewTime);
+          renderTexts();
+          persistTexts();
+          void drawPreview();
+        },
+      },
+      {
+        label: 'Remove',
+        enabled: true,
+        run: () => {
+          texts = removeText(texts, id);
+          if (selectedText === id) selectedText = null;
+          renderTexts();
+          persistTexts();
+          void drawPreview();
+        },
+      },
+    ]);
+  }
+
+  // ------------------------------------------------------------------ pop out
+
+  /**
+   * Floats the preview in a window of its own.
+   *
+   * The preview is a canvas, and picture in picture only accepts a video, so
+   * the canvas is streamed into one. What floats is exactly what the editor is
+   * drawing, which means it follows the scrubber and every setting rather than
+   * being a second, slightly different renderer.
+   */
+  const popoutButton = $<HTMLButtonElement>('ll-popout');
+  let popout: HTMLVideoElement | null = null;
+
+  const canPopOut = typeof document !== 'undefined'
+    && 'pictureInPictureEnabled' in document
+    && document.pictureInPictureEnabled
+    && typeof (canvas as HTMLCanvasElement).captureStream === 'function';
+
+  popoutButton.hidden = !canPopOut;
+
+  popoutButton.addEventListener('click', async () => {
+    if (!canPopOut) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        return;
+      }
+
+      if (!popout) {
+        popout = document.createElement('video');
+        popout.muted = true;
+        popout.playsInline = true;
+        popout.addEventListener('leavepictureinpicture', () => {
+          popoutButton.textContent = 'Pop out';
+        });
+      }
+      // A fresh stream each time, since the canvas is resized when the output
+      // size changes and a stream captured from the old size would be stale.
+      popout.srcObject = (canvas as HTMLCanvasElement).captureStream(30);
+      await popout.play();
+      await popout.requestPictureInPicture();
+      popoutButton.textContent = 'Put back';
+      // The stream only carries frames the canvas actually draws, so an idle
+      // editor would show a still. Redrawing once gives it something to start on.
+      await drawPreview();
+    } catch {
+      toast('This browser would not open a floating preview.');
+    }
   });
 
   // ------------------------------------------------------------------ controls

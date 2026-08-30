@@ -71,6 +71,7 @@ const app = getApp('limelight');
           <div class="ll-trim__range" id="ll-trim-range"></div>
         </div>
         <div class="ll-scrubrow">
+          <button class="btn btn--sm" id="ll-popout" hidden>Pop out</button>
           <button class="btn btn--sm" id="ll-crop">Crop</button>
           <button class="btn btn--sm" id="ll-trim-start">Start here</button>
           <button class="btn btn--sm" id="ll-trim-end">End here</button>
@@ -129,7 +130,8 @@ const app = getApp('limelight');
           <span><kbd>C</kbd> crop</span>
           <span><kbd>I</kbd> start here</span>
           <span><kbd>O</kbd> end here</span>
-          <span><kbd>Delete</kbd> remove the selected zoom</span>
+          <span><kbd>Delete</kbd> remove the selected block</span>
+          <span>Right-click a block to duplicate or split it</span>
           <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
         </p>
 
@@ -300,6 +302,17 @@ const app = getApp('limelight');
   .ll-text-words textarea { font: inherit; resize: vertical; }
   .ll-text-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.4rem 1rem; }
   .ll-text-colour { padding: 0; height: 2rem; }
+  .ll-menu {
+    position: fixed; z-index: 70; min-width: 10rem; padding: 0.25rem;
+    display: grid; gap: 0.1rem; background: var(--surface); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 0.5rem; box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  }
+  .ll-menu button {
+    font: inherit; font-size: 0.85rem; text-align: left; padding: 0.35rem 0.6rem;
+    background: none; border: 0; border-radius: 0.35rem; color: inherit; cursor: pointer;
+  }
+  .ll-menu button:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+  .ll-menu button:disabled { opacity: 0.45; cursor: default; }
   .ll-keys { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.82rem; color: var(--muted); }
   .ll-keys kbd { font: inherit; font-weight: 600; padding: 0.05rem 0.35rem; border: 1px solid var(--rule); border-radius: 0.3rem; background: var(--surface); color: var(--ink); }
   .ll-preview.is-cropping { cursor: crosshair; }

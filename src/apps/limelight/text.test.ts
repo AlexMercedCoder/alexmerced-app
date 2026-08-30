@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addText, constrainText, defaultText, MIN_TEXT, opacityAt, removeText, reviveTexts,
-  textsAt, updateText, wrapText, type TextBlock,
+  addText, constrainText, defaultText, duplicateText, MIN_TEXT, opacityAt, removeText,
+  reviveTexts, splitText, textsAt, updateText, wrapText, type TextBlock,
 } from './text';
 
 const block = (overrides: Partial<TextBlock> = {}): TextBlock => ({
@@ -222,5 +222,62 @@ describe('wrapText', () => {
 
   it('returns one empty line for nothing at all', () => {
     expect(wrapText('', 100, measure)).toEqual(['']);
+  });
+});
+
+describe('splitText', () => {
+  const one = () => [block({ id: 'a', start: 1, end: 5, text: 'Both halves' })];
+
+  it('makes two out of one', () => {
+    const after = splitText(one(), 'a', 3);
+    expect(after).toHaveLength(2);
+    expect(after[0].end).toBe(3);
+    expect(after[1].start).toBe(3);
+  });
+
+  it('keeps the same words in both, since half a sentence reads as a mistake', () => {
+    for (const half of splitText(one(), 'a', 3)) expect(half.text).toBe('Both halves');
+  });
+
+  it('gives the new half its own identity', () => {
+    const after = splitText(one(), 'a', 3);
+    expect(after[0].id).not.toBe(after[1].id);
+  });
+
+  it('refuses a cut that would leave a sliver', () => {
+    expect(splitText(one(), 'a', 1.1)).toHaveLength(1);
+    expect(splitText(one(), 'a', 4.95)).toHaveLength(1);
+  });
+
+  it('does nothing for a caption that is not there', () => {
+    expect(splitText(one(), 'missing', 3)).toHaveLength(1);
+  });
+});
+
+describe('duplicateText', () => {
+  it('places the copy after the original', () => {
+    const blocks = [block({ id: 'a', start: 1, end: 3 })];
+    const copy = duplicateText(blocks, 'a', 10).find((entry) => entry.id !== 'a')!;
+    expect(copy.start).toBe(3);
+    expect(copy.end).toBe(5);
+  });
+
+  it('pulls the copy back inside a recording with no room left', () => {
+    const blocks = [block({ id: 'a', start: 6, end: 9 })];
+    const copy = duplicateText(blocks, 'a', 10).find((entry) => entry.id !== 'a')!;
+    expect(copy.end).toBeLessThanOrEqual(10);
+    expect(copy.end - copy.start).toBeCloseTo(3, 6);
+  });
+
+  it('copies the words and the look, not the identity', () => {
+    const blocks = [block({ id: 'a', text: 'Copy me', colour: '#f00', size: 0.09 })];
+    const copy = duplicateText(blocks, 'a', 20).find((entry) => entry.id !== 'a')!;
+    expect(copy.text).toBe('Copy me');
+    expect(copy.colour).toBe('#f00');
+    expect(copy.size).toBe(0.09);
+  });
+
+  it('does nothing for a caption that is not there', () => {
+    expect(duplicateText([], 'missing', 10)).toEqual([]);
   });
 });

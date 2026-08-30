@@ -234,3 +234,57 @@ export function reviveBlocks(value: unknown): ZoomBlock[] {
 
 /** Kept so the automatic path and the edited path cannot diverge. */
 export { buildZoomTrack };
+
+/**
+ * Cuts a zoom in two at a moment.
+ *
+ * Both halves have to be worth having, so a cut too near either end is refused
+ * rather than producing a sliver that cannot be grabbed. The list comes back
+ * unchanged in that case, which the caller can notice by its length.
+ */
+export function splitBlock(blocks: ZoomBlock[], id: string, at: number): ZoomBlock[] {
+  const block = blocks.find((entry) => entry.id === id);
+  if (!block) return blocks;
+  if (at - block.start < MIN_BLOCK || block.end - at < MIN_BLOCK) return blocks;
+
+  return sortBlocks([
+    ...blocks.filter((entry) => entry.id !== id),
+    { ...block, end: at, pinned: true },
+    { ...block, id: createId('zoom'), start: at, pinned: true },
+  ]);
+}
+
+/**
+ * Copies a zoom into the first gap that will hold it.
+ *
+ * Zooms may not overlap, so a copy has to go somewhere free. The gap after the
+ * original is tried first, since that is where a copy is usually wanted, and
+ * the search then walks the rest of the timeline before giving up.
+ */
+export function duplicateBlock(blocks: ZoomBlock[], id: string, duration: number): ZoomBlock[] {
+  const block = blocks.find((entry) => entry.id === id);
+  if (!block) return blocks;
+
+  const length = Math.min(block.end - block.start, duration);
+  const sorted = sortBlocks(blocks);
+
+  // Every gap between blocks, plus the one before the first and after the last.
+  const gaps: { start: number; end: number }[] = [];
+  let cursor = 0;
+  for (const entry of sorted) {
+    if (entry.start - cursor >= length) gaps.push({ start: cursor, end: entry.start });
+    cursor = Math.max(cursor, entry.end);
+  }
+  if (duration - cursor >= length) gaps.push({ start: cursor, end: duration });
+
+  // Nearest gap that starts at or after the original, else the nearest before.
+  const after = gaps.filter((gap) => gap.start >= block.start).sort((a, b) => a.start - b.start)[0];
+  const before = gaps.filter((gap) => gap.start < block.start).sort((a, b) => b.start - a.start)[0];
+  const gap = after ?? before;
+  if (!gap) return blocks;
+
+  return sortBlocks([
+    ...blocks,
+    { ...block, id: createId('zoom'), start: gap.start, end: gap.start + length, pinned: true },
+  ]);
+}

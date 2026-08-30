@@ -176,3 +176,39 @@ export function wrapText(text: string, maxWidth: number, measure: (line: string)
   }
   return lines;
 }
+
+/**
+ * Cuts a caption in two at a moment.
+ *
+ * Both halves keep the same words, since a caption split down the middle of a
+ * sentence would leave half a thought on screen. Splitting is for changing when
+ * something is said, not what.
+ */
+export function splitText(blocks: TextBlock[], id: string, at: number): TextBlock[] {
+  const block = blocks.find((entry) => entry.id === id);
+  if (!block) return blocks;
+  if (at - block.start < MIN_TEXT || block.end - at < MIN_TEXT) return blocks;
+
+  return [
+    ...blocks.filter((entry) => entry.id !== id),
+    { ...block, end: at },
+    { ...block, id: createId('txt'), start: at },
+  ].sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Copies a caption, starting where the original ended.
+ *
+ * Captions may overlap, so unlike a zoom there is always somewhere to put one.
+ * It is placed after the original because that is what a second caption in a
+ * sequence wants, and pulled back inside the recording if it would run off.
+ */
+export function duplicateText(blocks: TextBlock[], id: string, duration: number): TextBlock[] {
+  const block = blocks.find((entry) => entry.id === id);
+  if (!block) return blocks;
+
+  const length = Math.min(block.end - block.start, duration);
+  const start = Math.max(0, Math.min(block.end, duration - length));
+  return [...blocks, { ...block, id: createId('txt'), start, end: start + length }]
+    .sort((a, b) => a.start - b.start);
+}

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Interest } from './attention';
 import { defaultZoom, zoomAt, type ZoomSettings } from './zoom';
 import {
-  addBlock, blocksFromInterest, constrain, mergeBlocks, MIN_BLOCK, overlaps, removeBlock,
-  reviveBlocks, sortBlocks, trackFromBlocks, type ZoomBlock,
+  addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, overlaps,
+  removeBlock, reviveBlocks, sortBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
 } from './zooms';
 
 const settings = (overrides: Partial<ZoomSettings> = {}): ZoomSettings => ({ ...defaultZoom, ...overrides });
@@ -266,5 +266,98 @@ describe('sortBlocks', () => {
   it('orders by start, then by end', () => {
     const sorted = sortBlocks([block(5, 6), block(1, 9), block(1, 3)]);
     expect(sorted.map((entry) => [entry.start, entry.end])).toEqual([[1, 3], [1, 9], [5, 6]]);
+  });
+});
+
+describe('splitBlock', () => {
+  const one = (): ZoomBlock[] => [
+    { id: 'a', start: 1, end: 5, scale: 2, x: 0.5, y: 0.5, pinned: false },
+  ];
+
+  it('makes two out of one', () => {
+    const after = splitBlock(one(), 'a', 3);
+    expect(after).toHaveLength(2);
+    expect(after[0].end).toBe(3);
+    expect(after[1].start).toBe(3);
+  });
+
+  it('leaves no gap and no overlap at the cut', () => {
+    const after = splitBlock(one(), 'a', 2.5);
+    expect(after[0].end).toBe(after[1].start);
+  });
+
+  it('carries the settings into both halves', () => {
+    const after = splitBlock(one(), 'a', 3);
+    for (const half of after) {
+      expect(half.scale).toBe(2);
+      expect(half.pinned).toBe(true);
+    }
+  });
+
+  it('gives the new half its own identity', () => {
+    const after = splitBlock(one(), 'a', 3);
+    expect(after[0].id).not.toBe(after[1].id);
+  });
+
+  it('refuses a cut that would leave a sliver', () => {
+    expect(splitBlock(one(), 'a', 1.1)).toHaveLength(1);
+    expect(splitBlock(one(), 'a', 4.95)).toHaveLength(1);
+  });
+
+  it('refuses a cut outside the block', () => {
+    expect(splitBlock(one(), 'a', 9)).toHaveLength(1);
+  });
+
+  it('does nothing for a block that is not there', () => {
+    expect(splitBlock(one(), 'missing', 3)).toEqual(one());
+  });
+});
+
+describe('duplicateBlock', () => {
+  it('puts the copy in the space after the original', () => {
+    const blocks: ZoomBlock[] = [{ id: 'a', start: 1, end: 2, scale: 2, x: 0.5, y: 0.5, pinned: true }];
+    const after = duplicateBlock(blocks, 'a', 10);
+    expect(after).toHaveLength(2);
+    const copy = after.find((entry) => entry.id !== 'a')!;
+    expect(copy.start).toBe(2);
+    expect(copy.end - copy.start).toBe(1);
+  });
+
+  it('never overlaps what is already there', () => {
+    const blocks: ZoomBlock[] = [
+      { id: 'a', start: 0, end: 2, scale: 2, x: 0.5, y: 0.5, pinned: true },
+      { id: 'b', start: 2, end: 4, scale: 2, x: 0.5, y: 0.5, pinned: true },
+    ];
+    const after = duplicateBlock(blocks, 'a', 10);
+    const copy = after.find((entry) => entry.id !== 'a' && entry.id !== 'b')!;
+    expect(copy.start).toBeGreaterThanOrEqual(4);
+  });
+
+  it('looks backwards when there is no room ahead', () => {
+    const blocks: ZoomBlock[] = [
+      { id: 'a', start: 4, end: 6, scale: 2, x: 0.5, y: 0.5, pinned: true },
+    ];
+    // Room from 0 to 4, and only one second left at the end.
+    const after = duplicateBlock(blocks, 'a', 7);
+    const copy = after.find((entry) => entry.id !== 'a')!;
+    expect(copy.start).toBe(0);
+    expect(copy.end).toBe(2);
+  });
+
+  it('gives up when there is nowhere at all', () => {
+    const blocks: ZoomBlock[] = [{ id: 'a', start: 0, end: 5, scale: 2, x: 0.5, y: 0.5, pinned: true }];
+    expect(duplicateBlock(blocks, 'a', 5)).toHaveLength(1);
+  });
+
+  it('copies the settings, not the identity', () => {
+    const blocks: ZoomBlock[] = [{ id: 'a', start: 0, end: 1, scale: 2.7, x: 0.2, y: 0.3, pinned: true }];
+    const copy = duplicateBlock(blocks, 'a', 10).find((entry) => entry.id !== 'a')!;
+    expect(copy.scale).toBe(2.7);
+    expect(copy.x).toBe(0.2);
+    expect(copy.id).not.toBe('a');
+  });
+
+  it('does nothing for a block that is not there', () => {
+    expect(duplicateBlock([], 'missing', 10)).toEqual([]);
   });
 });
