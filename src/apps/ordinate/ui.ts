@@ -3,6 +3,8 @@ import { downloadBlob, downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { parseInput, SAMPLE_DATA, suggestFields, type Table } from './data';
 import { PALETTES, renderChart, type ChartSpec, type ChartType } from './render';
+import { registerTools } from '../../lib/webmcp';
+import { ordinateTools } from './mcp';
 import {
   applyImport, buildExport, clearAll, createChart, deleteChart, loadCharts, loadSelected,
   saveChart, saveSelected, sortCharts, type SavedChart,
@@ -377,6 +379,9 @@ export async function mountOrdinate(root: HTMLElement): Promise<void> {
 
   charts = await loadCharts();
   select(loadSelected() ?? charts[0]?.id ?? '');
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(ordinateTools());
 }
 
 /**

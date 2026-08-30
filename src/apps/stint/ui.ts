@@ -1,6 +1,8 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
+import { registerTools } from '../../lib/webmcp';
+import { stintTools } from './mcp';
 import {
   APP_ID, PROJECT_COLORS, ROUNDING_INCREMENTS, createEntry, createProject, dayOf, dayOfEntry,
   durationMs, entriesForDay, entriesInRange, entriesToCsv, formatDuration, isRunning, parseDuration,
@@ -562,6 +564,19 @@ export async function mountStint(root: HTMLElement): Promise<void> {
     entryList.querySelector<HTMLInputElement>(`[data-edit-description="${entry.id}"]`)?.focus();
   });
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> {
+    const workspace = await loadWorkspace();
+    projects = workspace.projects;
+    entries = workspace.entries;
+    settings = loadSettings();
+    render();
+  }
+
   wireDataMenu(root, {
     app: APP_ID,
     buildExport: () => buildExport(),
@@ -569,13 +584,7 @@ export async function mountStint(root: HTMLElement): Promise<void> {
       const result = await applyImport(text, mode);
       return `Imported ${result.projects} project${result.projects === 1 ? '' : 's'} and ${result.entries} entr${result.entries === 1 ? 'y' : 'ies'}.`;
     },
-    onImported: async () => {
-      const workspace = await loadWorkspace();
-      projects = workspace.projects;
-      entries = workspace.entries;
-      settings = loadSettings();
-      render();
-    },
+    onImported: refreshFromStore,
     onClearAll: async () => { await clearAll(); },
     clearWarning: 'This deletes every project and time entry Stint has stored on this device. Export first if you want a copy. Continue?',
   });
@@ -585,4 +594,7 @@ export async function mountStint(root: HTMLElement): Promise<void> {
   entries = workspace.entries;
   render();
   startTicking();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(stintTools(refreshFromStore));
 }

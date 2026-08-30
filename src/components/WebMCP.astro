@@ -15,6 +15,79 @@ const catalog = apps.map((app) => ({
 
 const categories = CATEGORIES.map((category) => ({ id: category.id, label: category.label, blurb: category.blurb }));
 
+const agentTools = [
+  { slug: 'quarry', url: 'https://alexmerced.app/quarry', tools: [
+    'quarry_load_data: load CSV, JSON or NDJSON as a table',
+    'quarry_run_sql: run real SQL over it, joins and window functions included',
+    'quarry_list_tables: read the schema before writing a query',
+    'quarry_export_parquet: get a result back as a Parquet file',
+  ] },
+  { slug: 'ordinate', url: 'https://alexmerced.app/ordinate', tools: [
+    'ordinate_render_chart: turn data into standalone SVG',
+    'ordinate_describe_data: see the columns and which chart would suit',
+  ] },
+  { slug: 'decanter', url: 'https://alexmerced.app/decanter', tools: [
+    'decanter_convert: JSON, NDJSON, CSV, YAML and TOML in any direction',
+    'decanter_infer_schema: fields, or SQL, Iceberg or JSON Schema',
+    'decanter_reshape: flatten, unflatten, or query by path',
+  ] },
+  { slug: 'tessera', url: 'https://alexmerced.app/tessera', tools: [
+    'tessera_generate_qr: a QR code as SVG and PNG, with payloads built for you',
+    'tessera_read_qr: read a code out of an image, and say whether it is safe to follow',
+    'tessera_decode_matrix: read a code from a grid of modules',
+  ] },
+  { slug: 'fabler', url: 'https://alexmerced.app/fabler', tools: [
+    'fabler_list_field_kinds: what can be generated',
+    'fabler_generate: seeded sample data with working foreign keys',
+  ] },
+  { slug: 'sift', url: 'https://alexmerced.app/sift', tools: [
+    'sift_test_regex: run a pattern and see every match and group',
+    'sift_replace: apply a replacement',
+    'sift_explain_regex: what each piece of a pattern does, in plain English',
+  ] },
+  { slug: 'reckoner', url: 'https://alexmerced.app/reckoner', tools: [
+    'reckoner_evaluate: evaluate an expression with a real parser, not eval',
+    'reckoner_evaluate_many: a list of them at once',
+  ] },
+  { slug: 'tally', url: 'https://alexmerced.app/tally', tools: [
+    'tally_compute_totals: invoice arithmetic in whole cents',
+    'tally_create_invoice: build one, save it, get a PDF back',
+    'tally_list_invoices: what is outstanding',
+    'tally_export_invoice: PDF, plain text, or CSV',
+  ] },
+  { slug: 'warren', url: 'https://alexmerced.app/warren', tools: [
+    'warren_list_pages, warren_read_page, warren_search: read the notebook',
+    'warren_create_page, warren_append_to_page: write to it, in Markdown',
+  ] },
+  { slug: 'jotterbug', url: 'https://alexmerced.app/jotterbug', tools: [
+    'jotterbug_list_notes, jotterbug_search_notes: read the board',
+    'jotterbug_create_note, jotterbug_update_note, jotterbug_delete_note: change it',
+  ] },
+  { slug: 'laneway', url: 'https://alexmerced.app/laneway', tools: [
+    'laneway_get_board: columns, cards, limits, due dates',
+    'laneway_add_card, laneway_move_card, laneway_archive_card: change the board',
+    'laneway_whats_due: what needs doing, across every board',
+  ] },
+  { slug: 'stint', url: 'https://alexmerced.app/stint', tools: [
+    'stint_current, stint_start_timer, stint_stop_timer: run the clock',
+    'stint_log_time: record work already done',
+    'stint_summary: where the time went, by project',
+  ] },
+  { slug: 'rote', url: 'https://alexmerced.app/rote', tools: [
+    'rote_list_decks, rote_due_cards, rote_search_cards: read the decks',
+    'rote_add_cards: turn an explanation into flashcards',
+    'rote_review_card: record an answer and get the next interval',
+  ] },
+  { slug: 'rostrum', url: 'https://alexmerced.app/rostrum', tools: [
+    'rostrum_create_deck: Markdown into a deck, and out as PDF or HTML',
+    'rostrum_list_decks, rostrum_read_deck',
+  ] },
+  { slug: 'loupe', url: 'https://alexmerced.app/loupe', tools: [
+    'loupe_read_exif: what a photograph is carrying, including GPS',
+    'loupe_plan_resize: what an image would become at a given size',
+  ] },
+];
+
 const storagePolicy = {
   summary:
     'Every app runs entirely in the visitor’s browser. Records go in IndexedDB, interface preferences in localStorage. Nothing is uploaded, there is no account, and there is no analytics or third-party code.',
@@ -30,7 +103,7 @@ const storagePolicy = {
 };
 ---
 
-<script is:inline define:vars={{ catalog, categories, storagePolicy }}>
+<script is:inline define:vars={{ catalog, categories, storagePolicy, agentTools }}>
   (function () {
     // The proposal has moved between navigator and document; accept either.
     const ctx = navigator.modelContext || document.modelContext;
@@ -98,6 +171,23 @@ const storagePolicy = {
         execute: async ({ slug }) => {
           const app = catalog.find((entry) => entry.slug === slug);
           return ok(app || { error: `No app with slug "${slug}".`, available: catalog.map((entry) => entry.slug) });
+        },
+      },
+      {
+        name: 'get_agent_tools',
+        description:
+          'List what an agent can actually do on each page of alexmerced.app, as opposed to what each tool is for. Every app page registers its own tools when it loads, so navigating to a page makes that app\u2019s capabilities available: running SQL, rendering a chart, reading a QR code, converting between data formats, adding a card to a board, and so on. Call this to find out which page to open for a given job.',
+        inputSchema: {
+          type: 'object',
+          properties: { slug: { type: 'string', description: 'Optional. Just this app\u2019s tools.' } },
+        },
+        execute: async ({ slug } = {}) => {
+          const list = slug ? agentTools.filter((entry) => entry.slug === slug) : agentTools;
+          return ok({
+            note:
+              'These become callable once the page is open. Everything runs in this browser against this browser\u2019s own storage; none of it reaches a network.',
+            apps: list,
+          });
         },
       },
       {

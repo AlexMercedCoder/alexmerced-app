@@ -2,6 +2,8 @@ import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { APP_ID } from './constants';
+import { registerTools } from '../../lib/webmcp';
+import { decanterTools } from './mcp';
 import {
   FORMATS, ParseError, detectFormat, parse, write, type FormatId, type Json,
 } from './formats';
@@ -296,4 +298,7 @@ export async function mountDecanter(root: HTMLElement): Promise<void> {
   renderControls();
   renderSnippets();
   run();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(decanterTools());
 }

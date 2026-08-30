@@ -9,6 +9,8 @@ import {
   type OutputFormat, type Recipe,
 } from './model';
 import { applyImport, buildExport, clearAll, loadPresets, loadRecipe, savePresets, saveRecipe, type Preset } from './store';
+import { registerTools } from '../../lib/webmcp';
+import { loupeTools } from './mcp';
 
 type Item = {
   id: string;
@@ -405,4 +407,7 @@ export async function mountLoupe(root: HTMLElement): Promise<void> {
   renderControls();
   renderPresets();
   renderList();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(loupeTools());
 }

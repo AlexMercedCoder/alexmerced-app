@@ -5,6 +5,8 @@ import { CameraScanner, describePayload, fitToScan, type Reading } from './reade
 import { scanImage, ScanError, type ScanResult } from './scan';
 import { PAYLOADS, buildPayload, payloadByKind, type PayloadKind } from './payloads';
 import { QrError, capacityFor, drawToCanvas, encodeQr, toSvg, type EcLevel, type QrCode } from './qr';
+import { registerTools } from '../../lib/webmcp';
+import { tesseraTools } from './mcp';
 import {
   APP_ID,
   applyImport,
@@ -420,6 +422,9 @@ export async function mountTessera(root: HTMLElement): Promise<void> {
   library = await loadCodes();
   renderForm();
   render();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(tesseraTools());
 }
 
 // --------------------------------------------------------------------- reading

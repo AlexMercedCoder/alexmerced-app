@@ -233,7 +233,22 @@ export function displayValue(value: unknown): string {
   if (typeof value === 'object') {
     // Arrow rows and structs expose toJSON or toArray rather than plain keys.
     const candidate = value as { toJSON?: () => unknown; toArray?: () => unknown[] };
-    if (typeof candidate.toJSON === 'function') return stringifySafely(candidate.toJSON());
+    if (typeof candidate.toJSON === 'function') {
+      const plain = candidate.toJSON();
+      if (typeof plain === 'string') {
+        // Arrow's decimal type returns a JSON-encoded string here, quote
+        // characters and all, so the total 305 arrives as the five characters
+        // "305". Decoding it once gives back the number that was meant.
+        try {
+          const unwrapped: unknown = JSON.parse(plain);
+          if (typeof unwrapped === 'string' || typeof unwrapped === 'number') return String(unwrapped);
+        } catch {
+          // Not JSON, so it was already the value.
+        }
+        return plain;
+      }
+      return plain !== null && typeof plain === 'object' ? stringifySafely(plain) : displayValue(plain);
+    }
     if (typeof candidate.toArray === 'function') return `[${candidate.toArray().map(displayValue).join(', ')}]`;
     return stringifySafely(value);
   }

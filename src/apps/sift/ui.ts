@@ -1,5 +1,7 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { toast } from '../../lib/toast';
+import { registerTools } from '../../lib/webmcp';
+import { siftTools } from './mcp';
 import {
   APP_ID,
   FLAGS,
@@ -380,6 +382,9 @@ export async function mountSift(root: HTMLElement): Promise<void> {
   renderLibrary();
   renderSaved();
   run();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(siftTools());
 }
 
 function truncate(text: string, max = 40): string {

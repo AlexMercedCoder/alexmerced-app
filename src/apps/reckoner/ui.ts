@@ -1,5 +1,7 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { toast } from '../../lib/toast';
+import { registerTools } from '../../lib/webmcp';
+import { reckonerTools } from './mcp';
 import {
   CalculationError,
   FUNCTIONS,
@@ -395,4 +397,7 @@ export function mountReckoner(root: HTMLElement): void {
   setKeypadVisible(settings.showKeypad);
   renderPreview();
   input.focus();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(reckonerTools());
 }

@@ -2,7 +2,12 @@ import { formatBytes } from '../../lib/bytes';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadBlob, downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
-import { canRun, Engine, engine, EngineError, ENGINE_BYTES, SAMPLE_CSV, type QueryResult, type TableInfo } from './engine';
+import {
+  canRun, Engine, engine, EngineError, engineStarted, ENGINE_BYTES, SAMPLE_CSV,
+  type QueryResult, type TableInfo,
+} from './engine';
+import { registerTools } from '../../lib/webmcp';
+import { quarryTools } from './mcp';
 import {
   APP_ID, displayValue, formatCount, formatDuration, isNumericType, SAMPLE_QUERIES, tableNameFrom,
   toCsv, toJson, toMarkdown, uniqueTableName,
@@ -445,6 +450,24 @@ export async function mountQuarry(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ start
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> {
+    queries = await loadQueries();
+    renderQueries();
+    // An agent tool can start the engine and load data without the page's own
+    // controls being touched, so the workspace has to be revealed here too.
+    if (!database && engineStarted()) database = await engine();
+    if (database) {
+      bootEl.hidden = true;
+      workspaceEl.hidden = false;
+      await refreshSchema();
+    }
+  }
+
   wireDataMenu(root, {
     app: APP_ID,
     buildExport,
@@ -452,10 +475,7 @@ export async function mountQuarry(root: HTMLElement): Promise<void> {
       const count = await applyImport(text, mode);
       return `${count} quer${count === 1 ? 'y' : 'ies'} in place.`;
     },
-    onImported: async () => {
-      queries = await loadQueries();
-      renderQueries();
-    },
+    onImported: refreshFromStore,
     onClearAll: async () => {
       await clearAll();
       queries = [];
@@ -478,6 +498,9 @@ export async function mountQuarry(root: HTMLElement): Promise<void> {
   queries = await loadQueries();
   renderQueries();
   updateExportButtons();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(quarryTools(() => loaded.map((entry) => entry.table), refreshFromStore));
 }
 
 function suggestName(sql: string): string {

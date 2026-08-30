@@ -10,6 +10,8 @@ import {
   toNdjson, toSqlInserts, type Dataset, type Field, type OutputFormat, type Table,
 } from './model';
 import { applyImport, buildExport, clearAll, loadDataset, loadView, saveDataset, saveView, type ViewPrefs } from './store';
+import { registerTools } from '../../lib/webmcp';
+import { fablerTools } from './mcp';
 
 export async function mountFabler(root: HTMLElement): Promise<void> {
   let dataset: Dataset = loadDataset();
@@ -429,4 +431,7 @@ export async function mountFabler(root: HTMLElement): Promise<void> {
   formatSelect.value = view.format;
   rowsPreview.value = String(view.previewRows);
   update();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(fablerTools());
 }

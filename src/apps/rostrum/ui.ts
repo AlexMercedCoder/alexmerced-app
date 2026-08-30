@@ -8,6 +8,8 @@ import {
   type LayoutId, type Slide, type ThemeId,
 } from './model';
 import { renderSlide, toPdf, toStandaloneHtml } from './render';
+import { registerTools } from '../../lib/webmcp';
+import { rostrumTools } from './mcp';
 import {
   applyImport, buildExport, clearAll, deleteDeck, loadDecks, loadImages, loadView,
   saveDeck, saveImage, saveView, type ViewPrefs,
@@ -497,6 +499,18 @@ export async function mountRostrum(root: HTMLElement): Promise<void> {
   });
   window.addEventListener('resize', fitStage);
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> {
+    decks = await loadDecks();
+    if (!decks.some((item) => item.id === view.deckId)) view = { deckId: decks[0]?.id ?? null, slideIndex: 0 };
+    await loadImageUrls();
+    render();
+  }
+
   wireDataMenu(root, {
     app: APP_ID,
     buildExport: () => buildExport(),
@@ -504,12 +518,7 @@ export async function mountRostrum(root: HTMLElement): Promise<void> {
       const count = await applyImport(text, mode);
       return `Imported. You now have ${count} deck${count === 1 ? '' : 's'}. Images are stored separately and are not carried in the file.`;
     },
-    onImported: async () => {
-      decks = await loadDecks();
-      if (!decks.some((item) => item.id === view.deckId)) view = { deckId: decks[0]?.id ?? null, slideIndex: 0 };
-      await loadImageUrls();
-      render();
-    },
+    onImported: refreshFromStore,
     onClearAll: async () => { await clearAll(); },
     clearWarning: 'This deletes every deck and stored image Rostrum holds on this device. Export first if you want a copy. Continue?',
   });
@@ -519,6 +528,9 @@ export async function mountRostrum(root: HTMLElement): Promise<void> {
   if (view.slideIndex >= (deck()?.slides.length ?? 1)) view = { ...view, slideIndex: 0 };
   await loadImageUrls();
   render();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(rostrumTools(refreshFromStore));
 }
 
 function slugify(text: string): string {

@@ -1,6 +1,8 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { toast } from '../../lib/toast';
 import { createId } from '../../lib/id';
+import { registerTools } from '../../lib/webmcp';
+import { lanewayTools } from './mcp';
 import {
   APP_ID,
   LABEL_COLORS,
@@ -771,6 +773,22 @@ export async function mountLaneway(root: HTMLElement): Promise<void> {
     render();
   });
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> {
+    const workspace = await loadWorkspace();
+    boards = workspace.boards;
+    cards = workspace.cards;
+    if (!boards.some((item) => item.id === view.boardId)) {
+      view = { ...view, boardId: boards[0]?.id ?? null };
+      saveView(view);
+    }
+    render();
+  }
+
   wireDataMenu(root, {
     app: APP_ID,
     buildExport: () => buildExport(),
@@ -778,16 +796,7 @@ export async function mountLaneway(root: HTMLElement): Promise<void> {
       const result = await applyImport(text, mode);
       return `Imported ${result.boards} board${result.boards === 1 ? '' : 's'} and ${result.cards} card${result.cards === 1 ? '' : 's'}.`;
     },
-    onImported: async () => {
-      const workspace = await loadWorkspace();
-      boards = workspace.boards;
-      cards = workspace.cards;
-      if (!boards.some((item) => item.id === view.boardId)) {
-        view = { ...view, boardId: boards[0]?.id ?? null };
-        saveView(view);
-      }
-      render();
-    },
+    onImported: refreshFromStore,
     onClearAll: async () => { await clearAll(); },
     clearWarning: 'This deletes every board and card Laneway has stored on this device. Export first if you want a copy. Continue?',
   });
@@ -800,4 +809,7 @@ export async function mountLaneway(root: HTMLElement): Promise<void> {
     saveView(view);
   }
   render();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(lanewayTools(refreshFromStore));
 }

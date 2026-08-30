@@ -8,6 +8,8 @@ import {
   type DiscountKind, type Invoice, type LineItem, type Party,
 } from './model';
 import { toCsv, toPdf, toPlainText, type Theme } from './render';
+import { registerTools } from '../../lib/webmcp';
+import { tallyTools } from './mcp';
 import {
   applyImport, buildExport, clearAll, deleteInvoice, loadInvoices, loadSelected, loadSender,
   saveInvoice, saveSelected, saveSender, sortInvoices,
@@ -453,6 +455,16 @@ export async function mountTally(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ start
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> {
+    invoices = await loadInvoices();
+    select(loadSelected() ?? invoices[0]?.id ?? '');
+  }
+
   wireDataMenu(root, {
     app: 'tally',
     buildExport,
@@ -460,10 +472,7 @@ export async function mountTally(root: HTMLElement): Promise<void> {
       const count = await applyImport(text, mode);
       return `${count} invoice${count === 1 ? '' : 's'} in place.`;
     },
-    onImported: async () => {
-      invoices = await loadInvoices();
-      select(loadSelected() ?? invoices[0]?.id ?? '');
-    },
+    onImported: refreshFromStore,
     onClearAll: async () => {
       await clearAll();
       invoices = await loadInvoices();
@@ -476,6 +485,9 @@ export async function mountTally(root: HTMLElement): Promise<void> {
   fontEl.value = theme.font;
   markAccents();
   select(loadSelected() ?? invoices[0]?.id ?? '');
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(tallyTools(refreshFromStore));
 }
 
 function escapeHtml(value: string): string {

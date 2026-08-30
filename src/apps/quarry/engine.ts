@@ -54,6 +54,17 @@ export function engine(onProgress?: (stage: string) => void): Promise<Engine> {
   return instance;
 }
 
+/**
+ * Whether the engine is already running, without starting it.
+ *
+ * An agent tool can start the database on a page whose own controls have not
+ * been touched, and the page needs to notice so it can show the workspace
+ * rather than the button offering to download thirty four megabytes.
+ */
+export function engineStarted(): boolean {
+  return instance !== null;
+}
+
 export class Engine {
   private constructor(
     private readonly db: duckdb.AsyncDuckDB,

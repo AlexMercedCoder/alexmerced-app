@@ -1,5 +1,7 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { toast } from '../../lib/toast';
+import { registerTools } from '../../lib/webmcp';
+import { jotterbugTools } from './mcp';
 import {
   APP_ID,
   NOTE_COLORS,
@@ -622,6 +624,13 @@ export async function mountJotterbug(root: HTMLElement): Promise<void> {
     }
   });
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> { notes = await loadNotes(); render(); }
+
   wireDataMenu(root, {
     app: APP_ID,
     buildExport: () => buildExport(),
@@ -629,11 +638,14 @@ export async function mountJotterbug(root: HTMLElement): Promise<void> {
       const count = await applyImport(text, mode);
       return `Imported. You now have ${count} ${count === 1 ? 'note' : 'notes'}.`;
     },
-    onImported: async () => { notes = await loadNotes(); render(); },
+    onImported: refreshFromStore,
     onClearAll: async () => { await clearAll(); notes = []; },
     clearWarning: 'This deletes every note Jotterbug has stored on this device, including the archive and trash. Export first if you want a copy. Continue?',
   });
 
   notes = await loadNotes();
   render();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(jotterbugTools(refreshFromStore));
 }

@@ -233,6 +233,23 @@ describe('displayValue', () => {
     expect(displayValue({ toJSON: () => ({ a: 1 }) })).toBe('{"a":1}');
   });
 
+  it('does not re-quote a toJSON that already gave back a string', () => {
+    expect(displayValue({ toJSON: () => '305' })).toBe('305');
+    expect(displayValue({ toJSON: () => 42 })).toBe('42');
+    expect(displayValue({ toJSON: () => null })).toBe('');
+  });
+
+  it('unwraps a decimal, whose toJSON hands back a JSON-encoded string', () => {
+    // This is exactly what Arrow's DecimalBigNum does: sum(amount) over a
+    // BIGINT column comes back as the five characters "305", quotes included.
+    expect(displayValue({ toJSON: () => '"305"' })).toBe('305');
+    expect(displayValue({ toJSON: () => '"-1.25"' })).toBe('-1.25');
+  });
+
+  it('leaves a plain string from toJSON alone', () => {
+    expect(displayValue({ toJSON: () => 'North' })).toBe('North');
+  });
+
   it('uses toArray when a value offers one', () => {
     expect(displayValue({ toArray: () => [1, 2] })).toBe('[1, 2]');
   });

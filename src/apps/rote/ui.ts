@@ -1,6 +1,8 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadFile, pickTextFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
+import { registerTools } from '../../lib/webmcp';
+import { roteTools } from './mcp';
 import {
   APP_ID,
   GRADES,
@@ -361,6 +363,22 @@ export async function mountRote(root: HTMLElement): Promise<void> {
     setMode(view.mode);
   }
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> {
+    const workspace = await loadWorkspace();
+    decks = workspace.decks;
+    cards = workspace.cards;
+    if (!decks.some((item) => item.id === view.deckId)) {
+      view = { ...view, deckId: decks[0]?.id ?? null };
+      saveView(view);
+    }
+    render();
+  }
+
   wireDataMenu(root, {
     app: APP_ID,
     buildExport: () => buildExport(),
@@ -368,16 +386,7 @@ export async function mountRote(root: HTMLElement): Promise<void> {
       const result = await applyImport(text, mode);
       return `Imported ${result.decks} deck${result.decks === 1 ? '' : 's'} and ${result.cards} card${result.cards === 1 ? '' : 's'}.`;
     },
-    onImported: async () => {
-      const workspace = await loadWorkspace();
-      decks = workspace.decks;
-      cards = workspace.cards;
-      if (!decks.some((item) => item.id === view.deckId)) {
-        view = { ...view, deckId: decks[0]?.id ?? null };
-        saveView(view);
-      }
-      render();
-    },
+    onImported: refreshFromStore,
     onClearAll: async () => { await clearAll(); },
     clearWarning: 'This deletes every deck and card Rote has stored on this device, including your review history. Export first if you want a copy. Continue?',
   });
@@ -390,4 +399,7 @@ export async function mountRote(root: HTMLElement): Promise<void> {
     saveView(view);
   }
   render();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(roteTools(refreshFromStore));
 }

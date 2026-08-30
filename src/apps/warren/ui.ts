@@ -1,6 +1,8 @@
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
+import { registerTools } from '../../lib/webmcp';
+import { warrenTools } from './mcp';
 import {
   APP_ID,
   BLOCK_TYPES,
@@ -817,6 +819,21 @@ export async function mountWarren(root: HTMLElement): Promise<void> {
     if (event.key === '/' && !typing) { event.preventDefault(); searchInput.focus(); }
   });
 
+  /**
+   * Reloads everything from storage and redraws. Shared by the import
+   * flow and by the agent tools, so a change an agent makes shows up on
+   * the page rather than sitting invisibly in the database.
+   */
+  async function refreshFromStore(): Promise<void> {
+    pages = await loadPages();
+    if (!pages.some((page) => page.id === view.openPageId && !page.trashedAt)) {
+      view = { ...view, openPageId: childrenOf(pages, null)[0]?.id ?? null };
+      saveView(view);
+    }
+    renderTree();
+    renderEditor();
+  }
+
   wireDataMenu(root, {
     app: APP_ID,
     buildExport: () => buildExport(),
@@ -824,15 +841,7 @@ export async function mountWarren(root: HTMLElement): Promise<void> {
       const count = await applyImport(text, mode);
       return `Imported. You now have ${count} page${count === 1 ? '' : 's'}.`;
     },
-    onImported: async () => {
-      pages = await loadPages();
-      if (!pages.some((page) => page.id === view.openPageId && !page.trashedAt)) {
-        view = { ...view, openPageId: childrenOf(pages, null)[0]?.id ?? null };
-        saveView(view);
-      }
-      renderTree();
-      renderEditor();
-    },
+    onImported: refreshFromStore,
     onClearAll: async () => {
       await clearAll();
       pages = [];
@@ -849,4 +858,7 @@ export async function mountWarren(root: HTMLElement): Promise<void> {
   }
   renderTree();
   renderEditor();
+
+  // Everything this app can do, offered to an agent on this page.
+  registerTools(warrenTools(refreshFromStore));
 }
