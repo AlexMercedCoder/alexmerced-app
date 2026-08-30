@@ -5,8 +5,9 @@ import { registerTools } from '../../lib/webmcp';
 import type { Interest } from './attention';
 import { canCapture, CaptureError, Session, type Recording, type Source } from './capture';
 import {
-  cameraRect, defaultComposition, OUTPUT_SIZES, PRESETS, QUALITY,
-  type CameraCorner, type Composition,
+  cameraRect, CROP_ASPECTS, cropToAspect, defaultComposition, FULL_CROP, isFullCrop, MIN_CROP,
+  normaliseCrop, OUTPUT_SIZES, PRESETS, QUALITY,
+  type CameraCorner, type Composition, type Crop,
 } from './layout';
 import { limelightTools } from './mcp';
 import {
@@ -50,6 +51,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let previewTime = 0;
   let stored: StoredProject | null = null;
   let zooms: ZoomBlock[] = [];
+  let crop: Crop = { ...FULL_CROP };
   let trim = { start: 0, end: 0 };
   let saveTimer = 0;
 
@@ -65,6 +67,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       stored.settings = settings;
       stored.start = trim.start;
       stored.end = trim.end;
+      stored.crop = crop;
       queueSave();
     }
   };
@@ -89,6 +92,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       sourceHeight: video.videoHeight || recording.height,
       pointer: recording.pointer,
       clicks: recording.clicks,
+      crop,
       composition: settings.composition,
       zoom: settings.zoom,
       frameRate: settings.frameRate,
@@ -195,6 +199,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     stored = project;
     settings = project.settings;
     zooms = project.zooms;
+    crop = project.crop;
     saveCurrentId(project.id);
 
     await renderProjects();
@@ -241,6 +246,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remember();
     }
 
+    if (!stored) crop = { ...FULL_CROP };
+
     trim = range && range.end > range.start
       ? { start: Math.max(0, range.start), end: Math.min(recording.duration, range.end) }
       : { start: 0, end: recording.duration };
@@ -258,6 +265,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     renderControls();
     renderTrim();
+    renderCrop();
     renderZooms();
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
@@ -431,6 +439,270 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     remember();
   });
 
+  // ------------------------------------------------------------------ crop
+
+  const cropRow = $<HTMLDivElement>('ll-croprow');
+  const cropLabel = $<HTMLSpanElement>('ll-crop-label');
+  const cropButton = $<HTMLButtonElement>('ll-crop');
+
+  /**
+   * Cropping shows the recording as it was captured, not as it will look.
+   *
+   * The composed preview has a background, padding and a moving zoom over it,
+   * and dragging a rectangle across all that would mean guessing what part of
+   * the source you were actually choosing. So the picture goes plain while the
+   * crop is being set, and comes back when it is done.
+   */
+  let cropping = false;
+  let cropAspect = 'free';
+  /** What a drag is moving: a corner, an edge, or the whole rectangle. */
+  let cropGrab: { handle: string; startX: number; startY: number; from: Crop } | null = null;
+
+  /** How close to an edge counts as grabbing it, in source fractions. */
+  const GRIP = 0.03;
+
+  function aspectRatio(): number | null {
+    const entry = CROP_ASPECTS.find((item) => item.id === cropAspect);
+    if (!entry || entry.ratio === null) return null;
+    // "Match output" follows whatever output size is selected.
+    if (entry.ratio === 0) return settings.composition.width / settings.composition.height;
+    return entry.ratio;
+  }
+
+  function renderCrop(): void {
+    cropRow.hidden = !cropping;
+    cropButton.setAttribute('aria-pressed', String(cropping));
+    cropButton.textContent = cropping ? 'Cropping' : isFullCrop(crop) ? 'Crop' : 'Cropped';
+    canvas.classList.toggle('is-cropping', cropping);
+    if (!cropping) canvas.style.cursor = '';
+
+    for (const button of cropRow.querySelectorAll<HTMLButtonElement>('.ll-cropaspect')) {
+      button.setAttribute('aria-pressed', String(button.dataset.aspect === cropAspect));
+    }
+
+    const width = Math.round((video?.videoWidth ?? recording?.width ?? 0) * crop.width);
+    const height = Math.round((video?.videoHeight ?? recording?.height ?? 0) * crop.height);
+    cropLabel.textContent = isFullCrop(crop)
+      ? 'The whole picture'
+      : `Keeping ${width} by ${height} of the recording`;
+  }
+
+  const aspectsEl = $<HTMLDivElement>('ll-crop-aspects');
+  for (const entry of CROP_ASPECTS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'll-cropaspect';
+    button.dataset.aspect = entry.id;
+    button.textContent = entry.label;
+    button.addEventListener('click', () => {
+      cropAspect = entry.id;
+      const ratio = aspectRatio();
+      if (ratio !== null && video) {
+        crop = cropToAspect(crop, ratio, video.videoWidth, video.videoHeight);
+        remember();
+      }
+      renderCrop();
+      void drawPreview();
+    });
+    aspectsEl.append(button);
+  }
+
+  cropButton.addEventListener('click', () => {
+    cropping = !cropping;
+    renderCrop();
+    void drawPreview();
+  });
+
+  $<HTMLButtonElement>('ll-crop-done').addEventListener('click', () => {
+    cropping = false;
+    renderCrop();
+    void drawPreview();
+  });
+
+  $<HTMLButtonElement>('ll-crop-reset').addEventListener('click', () => {
+    crop = { ...FULL_CROP };
+    cropAspect = 'free';
+    remember();
+    renderCrop();
+    void drawPreview();
+  });
+
+  /** Where a pointer is over the canvas, as a fraction of the source. */
+  function cropPointAt(event: PointerEvent): { x: number; y: number } {
+    const box = canvas.getBoundingClientRect();
+    // The canvas is drawn at the source's own shape while cropping, but the
+    // element is letterboxed inside its box by object-fit, so the drawn area
+    // has to be worked out rather than assumed to fill it.
+    const scale = Math.min(box.width / canvas.width, box.height / canvas.height);
+    const drawnWidth = canvas.width * scale;
+    const drawnHeight = canvas.height * scale;
+    const left = box.left + (box.width - drawnWidth) / 2;
+    const top = box.top + (box.height - drawnHeight) / 2;
+    return {
+      x: Math.max(0, Math.min(1, (event.clientX - left) / drawnWidth)),
+      y: Math.max(0, Math.min(1, (event.clientY - top) / drawnHeight)),
+    };
+  }
+
+  /** Which part of the rectangle a point is on. */
+  function cropHandleAt(point: { x: number; y: number }): string {
+    const near = (value: number, edge: number) => Math.abs(value - edge) <= GRIP;
+    const vertical = near(point.y, crop.y) ? 'n' : near(point.y, crop.y + crop.height) ? 's' : '';
+    const horizontal = near(point.x, crop.x) ? 'w' : near(point.x, crop.x + crop.width) ? 'e' : '';
+
+    const insideX = point.x >= crop.x - GRIP && point.x <= crop.x + crop.width + GRIP;
+    const insideY = point.y >= crop.y - GRIP && point.y <= crop.y + crop.height + GRIP;
+    if ((vertical || horizontal) && insideX && insideY) return vertical + horizontal;
+
+    // When nothing has been cropped yet there is no rectangle to move and
+    // every point is inside one, so a drag has to mean drawing a new one.
+    if (isFullCrop(crop)) return 'new';
+
+    const inside = point.x > crop.x && point.x < crop.x + crop.width
+      && point.y > crop.y && point.y < crop.y + crop.height;
+    return inside ? 'move' : 'new';
+  }
+
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!cropping || !video) return;
+    event.preventDefault();
+    const point = cropPointAt(event);
+    const handle = cropHandleAt(point);
+
+    if (handle === 'new') {
+      // Dragging on the discarded area starts a fresh rectangle from that corner.
+      crop = normaliseCrop({ x: point.x, y: point.y, width: MIN_CROP, height: MIN_CROP });
+      cropGrab = { handle: 'se', startX: point.x, startY: point.y, from: { ...crop } };
+    } else {
+      cropGrab = { handle, startX: point.x, startY: point.y, from: { ...crop } };
+    }
+    try { canvas.setPointerCapture(event.pointerId); } catch { /* No capture, but the drag still tracks. */ }
+    void drawPreview();
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    if (!cropping) return;
+    if (!cropGrab) {
+      canvas.style.cursor = cursorFor(cropHandleAt(cropPointAt(event)));
+      return;
+    }
+    const point = cropPointAt(event);
+    crop = dragCrop(cropGrab, point.x - cropGrab.startX, point.y - cropGrab.startY);
+    renderCrop();
+    void drawPreview();
+  });
+
+  const endCrop = () => {
+    if (!cropGrab) return;
+    cropGrab = null;
+    remember();
+    renderCrop();
+    void drawPreview();
+  };
+  canvas.addEventListener('pointerup', endCrop);
+  canvas.addEventListener('pointercancel', endCrop);
+
+  function cursorFor(handle: string): string {
+    if (handle === 'move') return 'move';
+    if (handle === 'new') return 'crosshair';
+    if (handle === 'n' || handle === 's') return 'ns-resize';
+    if (handle === 'e' || handle === 'w') return 'ew-resize';
+    if (handle === 'nw' || handle === 'se') return 'nwse-resize';
+    return 'nesw-resize';
+  }
+
+  /**
+   * Applies a drag to the rectangle.
+   *
+   * Moving is a plain offset. Resizing works on whichever edges the handle
+   * names, and when a shape is locked the result is refitted to it around the
+   * corner that was not being dragged, so that corner stays put.
+   */
+  function dragCrop(
+    grab: { handle: string; from: Crop }, deltaX: number, deltaY: number,
+  ): Crop {
+    const from = grab.from;
+    if (grab.handle === 'move') {
+      return normaliseCrop({ ...from, x: from.x + deltaX, y: from.y + deltaY });
+    }
+
+    let { x, y, width, height } = from;
+    if (grab.handle.includes('w')) {
+      const right = from.x + from.width;
+      x = Math.min(right - MIN_CROP, from.x + deltaX);
+      width = right - x;
+    }
+    if (grab.handle.includes('e')) width = from.width + deltaX;
+    if (grab.handle.includes('n')) {
+      const bottom = from.y + from.height;
+      y = Math.min(bottom - MIN_CROP, from.y + deltaY);
+      height = bottom - y;
+    }
+    if (grab.handle.includes('s')) height = from.height + deltaY;
+
+    const next = normaliseCrop({ x, y, width, height });
+    const ratio = aspectRatio();
+    if (ratio === null || !video) return next;
+
+    const fitted = cropToAspect(next, ratio, video.videoWidth, video.videoHeight);
+    // Anchor to the corner opposite the one being dragged, so the side you are
+    // not touching does not creep.
+    const anchorX = grab.handle.includes('w') ? next.x + next.width : next.x;
+    const anchorY = grab.handle.includes('n') ? next.y + next.height : next.y;
+    return normaliseCrop({
+      ...fitted,
+      x: grab.handle.includes('w') ? anchorX - fitted.width : anchorX,
+      y: grab.handle.includes('n') ? anchorY - fitted.height : anchorY,
+    });
+  }
+
+  /** Draws the source with everything outside the crop dimmed, plus the grips. */
+  function drawCropEditor(context: CanvasRenderingContext2D): void {
+    if (!video) return;
+    const { width, height } = canvas;
+    context.clearRect(0, 0, width, height);
+    context.drawImage(video, 0, 0, width, height);
+
+    const box = {
+      x: crop.x * width, y: crop.y * height,
+      width: crop.width * width, height: crop.height * height,
+    };
+
+    // Dim what is being thrown away, using an even-odd fill so the kept part
+    // stays untouched rather than being drawn over and lightened back.
+    const shade = new Path2D();
+    shade.rect(0, 0, width, height);
+    shade.rect(box.x, box.y, box.width, box.height);
+    context.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    context.fill(shade, 'evenodd');
+
+    const line = Math.max(2, Math.min(width, height) * 0.004);
+    context.strokeStyle = '#ffffff';
+    context.lineWidth = line;
+    context.strokeRect(box.x, box.y, box.width, box.height);
+
+    // Thirds, which is what people actually compose against.
+    context.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    context.lineWidth = line / 2;
+    context.beginPath();
+    for (let step = 1; step < 3; step += 1) {
+      context.moveTo(box.x + (box.width * step) / 3, box.y);
+      context.lineTo(box.x + (box.width * step) / 3, box.y + box.height);
+      context.moveTo(box.x, box.y + (box.height * step) / 3);
+      context.lineTo(box.x + box.width, box.y + (box.height * step) / 3);
+    }
+    context.stroke();
+
+    const grip = Math.max(8, Math.min(width, height) * 0.018);
+    context.fillStyle = '#ffffff';
+    for (const cx of [box.x, box.x + box.width / 2, box.x + box.width]) {
+      for (const cy of [box.y, box.y + box.height / 2, box.y + box.height]) {
+        if (cx === box.x + box.width / 2 && cy === box.y + box.height / 2) continue;
+        context.fillRect(cx - grip / 2, cy - grip / 2, grip, grip);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ zoom track
 
   const zoomTrackEl = $<HTMLDivElement>('ll-zoomtrack');
@@ -591,12 +863,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!current || !video || drawing) return;
     drawing = true;
     try {
-      canvas.width = settings.composition.width;
-      canvas.height = settings.composition.height;
+      // While cropping, the canvas takes the source's own shape so the
+      // rectangle can be dragged in the recording's coordinates directly.
+      const size = cropping
+        ? { width: video.videoWidth || current.sourceWidth, height: video.videoHeight || current.sourceHeight }
+        : settings.composition;
+      canvas.width = size.width;
+      canvas.height = size.height;
       const context = canvas.getContext('2d');
       if (!context) return;
 
       await seekSafely(video, Math.min(current.duration - 1e-3, previewTime));
+      if (cropping) { drawCropEditor(context); return; }
+
       if (cameraVideo) await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), previewTime));
 
       const track = trackFromBlocks(zooms, current.duration, settings.zoom);
@@ -900,7 +1179,25 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   const last = loadCurrentId();
   if (last) await open(last).catch(() => {});
 
-  registerTools(limelightTools(() => ({ recording, points, interestSource, settings })));
+  registerTools(limelightTools(
+    () => ({
+      recording,
+      points,
+      interestSource,
+      settings,
+      track: trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom),
+      crop,
+      trim,
+    }),
+    (change) => {
+      if (change.crop) { crop = change.crop; cropAspect = 'free'; }
+      if (change.trim) trim = { ...change.trim };
+      remember();
+      renderTrim();
+      renderCrop();
+      void drawPreview();
+    },
+  ));
 }
 
 function once(target: HTMLVideoElement, event: string): Promise<void> {

@@ -2,7 +2,7 @@ import { createId } from '../../lib/id';
 import { Collection, openDatabase } from '../../lib/idb';
 import { readPref, writePref } from '../../lib/prefs';
 import type { ClickSample, PointerSample } from './attention';
-import { defaultComposition, type Composition } from './layout';
+import { defaultComposition, FULL_CROP, reviveCrop, type Composition, type Crop } from './layout';
 import { defaultZoom, type ZoomKeyframe, type ZoomSettings } from './zoom';
 import { reviveBlocks, type ZoomBlock } from './zooms';
 
@@ -64,6 +64,8 @@ export type Project = {
   /** Where the export begins and ends, in seconds. */
   start: number;
   end: number;
+  /** The part of the picture to keep, as fractions of the source. */
+  crop: Crop;
   /**
    * The zoom blocks, which are what a person edits. The keyframe track is
    * derived from these, so these are what has to be kept.
@@ -138,6 +140,7 @@ export function reviveProject(value: unknown): Project | null {
     clicks: points(project.clicks),
     start: Math.max(0, typeof project.start === 'number' ? project.start : 0),
     end: typeof project.end === 'number' && project.end > 0 ? project.end : duration,
+    crop: reviveCrop(project.crop),
     zooms: reviveBlocks(project.zooms),
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
     settings: reviveSettings(project.settings),
@@ -148,8 +151,8 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms'>
-    & Partial<Pick<Project, 'settings' | 'keyframes' | 'start' | 'end' | 'zooms'>>,
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop'>
+    & Partial<Pick<Project, 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -158,6 +161,7 @@ export function createProject(
     name,
     zooms: [],
     keyframes: null,
+    crop: { ...FULL_CROP },
     start: 0,
     end: detail.duration,
     settings: { ...defaultSettings },

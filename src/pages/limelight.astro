@@ -60,10 +60,19 @@ const app = getApp('limelight');
           <div class="ll-trim__range" id="ll-trim-range"></div>
         </div>
         <div class="ll-scrubrow">
+          <button class="btn btn--sm" id="ll-crop">Crop</button>
           <button class="btn btn--sm" id="ll-trim-start">Start here</button>
           <button class="btn btn--sm" id="ll-trim-end">End here</button>
           <button class="btn btn--sm btn--ghost" id="ll-trim-reset">Whole recording</button>
           <span class="ll-time" id="ll-trim-label"></span>
+        </div>
+
+        <div class="ll-croprow" id="ll-croprow" hidden>
+          <span class="ll-tracklabel">Shape</span>
+          <div class="ll-cropaspects" id="ll-crop-aspects"></div>
+          <button class="btn btn--sm btn--ghost" id="ll-crop-reset">Whole picture</button>
+          <button class="btn btn--sm btn--primary" id="ll-crop-done">Done</button>
+          <span class="ll-time" id="ll-crop-label"></span>
         </div>
 
         <div class="ll-zoomrow">
@@ -211,6 +220,11 @@ const app = getApp('limelight');
   .ll-bar__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.15s linear; }
 
   .ll-stage { display: grid; gap: 0.6rem; }
+  .ll-preview.is-cropping { cursor: crosshair; }
+  .ll-croprow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .ll-cropaspects { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .ll-cropaspect { font: inherit; font-size: 0.8rem; padding: 0.2rem 0.55rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--surface); color: inherit; cursor: pointer; }
+  .ll-cropaspect[aria-pressed='true'] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .ll-preview { display: block; width: 100%; max-height: 62vh; object-fit: contain; border: 1px solid var(--rule); border-radius: 0.6rem; background: repeating-conic-gradient(#e8e8e8 0% 25%, #fbfbfb 0% 50%) 50% / 20px 20px; }
   .ll-scrubrow { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
   .ll-scrub { flex: 1 1 240px; min-width: 0; }

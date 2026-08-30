@@ -47,11 +47,12 @@ describe('modelContext', () => {
     }
   });
 
-  it('prefers navigator.modelContext, which is where the proposal now says', () => {
+  it('prefers document.modelContext, the current standards-shaped entry point', () => {
     const onNavigator = { registerTool: () => {} };
     Object.defineProperty(globalThis, 'navigator', { value: { modelContext: onNavigator }, writable: true, configurable: true });
     Object.defineProperty(globalThis, 'document', { value: { modelContext: { registerTool: () => {} } }, writable: true, configurable: true });
-    expect(modelContext()).toBe(onNavigator);
+    expect(modelContext()).not.toBe(onNavigator);
+    expect(modelContext()).toBe((globalThis.document as unknown as { modelContext: unknown }).modelContext);
   });
 
   it('ignores a modelContext that carries no registerTool', () => {
@@ -59,9 +60,9 @@ describe('modelContext', () => {
     expect(modelContext()).toBeNull();
   });
 
-  it('registers through navigator.modelContext, which is the shape that matters', () => {
+  it('registers through document.modelContext', () => {
     const seen: string[] = [];
-    Object.defineProperty(globalThis, 'navigator', {
+    Object.defineProperty(globalThis, 'document', {
       value: { modelContext: { registerTool: (entry: { name: string }) => seen.push(entry.name) } },
       writable: true, configurable: true,
     });

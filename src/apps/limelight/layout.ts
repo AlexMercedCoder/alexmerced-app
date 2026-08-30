@@ -10,6 +10,20 @@
 
 export type Rect = { x: number; y: number; width: number; height: number };
 
+/**
+ * The part of the recording to keep, as fractions of the source.
+ *
+ * Fractions rather than pixels because a project can be reopened against a
+ * recording whose dimensions were never stored, and because a crop set on a
+ * 4K capture should mean the same thing if the source is ever swapped.
+ */
+export type Crop = { x: number; y: number; width: number; height: number };
+
+export const FULL_CROP: Crop = { x: 0, y: 0, width: 1, height: 1 };
+
+/** The smallest crop that is still worth having, as a fraction of the source. */
+export const MIN_CROP = 0.05;
+
 export type BackgroundKind = 'none' | 'solid' | 'gradient' | 'blur';
 
 export type CameraCorner = 'bottomRight' | 'bottomLeft' | 'topRight' | 'topLeft';
@@ -55,6 +69,87 @@ export const PRESETS: { id: string; label: string; colours: [string, string]; ba
   { id: 'moss', label: 'Moss', colours: ['#243b2f', '#4a7a5c'], background: 'gradient' },
   { id: 'rust', label: 'Rust', colours: ['#3b1f18', '#a8562f'], background: 'gradient' },
   { id: 'none', label: 'No background', colours: ['#000000', '#000000'], background: 'none' },
+];
+
+/** Whether a crop takes anything at all, within rounding. */
+export function isFullCrop(crop: Crop): boolean {
+  return crop.x <= 1e-4 && crop.y <= 1e-4 && crop.width >= 1 - 1e-4 && crop.height >= 1 - 1e-4;
+}
+
+/**
+ * Pulls a crop back inside the source and refuses to let it collapse.
+ *
+ * Everything downstream divides by the crop's width and height, so a zero one
+ * would produce a frame of nothing rather than an error anybody could act on.
+ */
+export function normaliseCrop(crop: Crop): Crop {
+  const width = Math.max(MIN_CROP, Math.min(1, crop.width));
+  const height = Math.max(MIN_CROP, Math.min(1, crop.height));
+  return {
+    x: Math.max(0, Math.min(1 - width, crop.x)),
+    y: Math.max(0, Math.min(1 - height, crop.y)),
+    width,
+    height,
+  };
+}
+
+export function reviveCrop(value: unknown): Crop {
+  if (typeof value !== 'object' || value === null) return { ...FULL_CROP };
+  const crop = value as Partial<Crop>;
+  const part = (input: unknown, fallback: number) =>
+    typeof input === 'number' && Number.isFinite(input) ? input : fallback;
+  return normaliseCrop({
+    x: part(crop.x, 0),
+    y: part(crop.y, 0),
+    width: part(crop.width, 1),
+    height: part(crop.height, 1),
+  });
+}
+
+/** The crop in source pixels, which is what the drawing code needs. */
+export function cropRect(crop: Crop | null | undefined, sourceWidth: number, sourceHeight: number): Rect {
+  if (sourceWidth <= 0 || sourceHeight <= 0) return { x: 0, y: 0, width: Math.max(1, sourceWidth), height: Math.max(1, sourceHeight) };
+  const safe = normaliseCrop(crop ?? FULL_CROP);
+  return {
+    x: safe.x * sourceWidth,
+    y: safe.y * sourceHeight,
+    width: safe.width * sourceWidth,
+    height: safe.height * sourceHeight,
+  };
+}
+
+/**
+ * The largest crop of a given shape that fits, centred on the current one.
+ *
+ * The ratio is a width over height in the finished picture, so the source's own
+ * shape has to be divided out: a 1:1 crop of a 16:9 recording is a tall, narrow
+ * slice of the source, not a square one.
+ */
+export function cropToAspect(crop: Crop, ratio: number, sourceWidth: number, sourceHeight: number): Crop {
+  if (!(ratio > 0) || sourceWidth <= 0 || sourceHeight <= 0) return normaliseCrop(crop);
+  const current = normaliseCrop(crop);
+
+  // In source fractions, a picture of shape `ratio` has width/height equal to
+  // ratio divided by the source's own aspect.
+  const target = ratio / (sourceWidth / sourceHeight);
+
+  let width = current.width;
+  let height = width / target;
+  if (height > 1) { height = 1; width = height * target; }
+  if (width > 1) { width = 1; height = width / target; }
+
+  const centreX = current.x + current.width / 2;
+  const centreY = current.y + current.height / 2;
+  return normaliseCrop({ x: centreX - width / 2, y: centreY - height / 2, width, height });
+}
+
+export const CROP_ASPECTS: { id: string; label: string; ratio: number | null }[] = [
+  { id: 'free', label: 'Free', ratio: null },
+  { id: 'source', label: 'Match output', ratio: 0 },
+  { id: '16:9', label: '16:9', ratio: 16 / 9 },
+  { id: '4:3', label: '4:3', ratio: 4 / 3 },
+  { id: '1:1', label: 'Square', ratio: 1 },
+  { id: '9:16', label: '9:16', ratio: 9 / 16 },
 ];
 
 /**

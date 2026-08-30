@@ -32,15 +32,15 @@ type Host = { modelContext?: ModelContext; registerTool?: (tool: unknown) => unk
 /**
  * Finds wherever this browser put the tool registry.
  *
- * The proposal has moved: it has lived on navigator.modelContext and on
- * document.modelContext, and some builds expose registerTool directly on one
- * or the other. All four are accepted, because guessing wrong means every tool
- * on the site silently fails to register and nothing says so.
+ * The current proposal uses document.modelContext. Earlier experiments used
+ * navigator.modelContext, and some builds exposed registerTool directly on
+ * either host. All four are accepted so older bridges keep working, while the
+ * standards-shaped document entry point wins when both are present.
  */
 export function modelContext(): ModelContext | null {
   const scope = globalThis as unknown as { navigator?: Host; document?: Host };
 
-  for (const host of [scope.navigator, scope.document]) {
+  for (const host of [scope.document, scope.navigator]) {
     if (!host) continue;
     if (host.modelContext && typeof host.modelContext.registerTool === 'function') return host.modelContext;
     if (typeof host.registerTool === 'function') return host as ModelContext;

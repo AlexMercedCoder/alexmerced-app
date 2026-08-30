@@ -39,7 +39,8 @@ const REGISTERED: Record<string, { name: string; description: string; inputSchem
   limelight: limelightTools(() => ({
     recording: null, points: [], interestSource: 'none',
     settings: { composition: {} as never, zoom: {} as never, frameRate: 30, showClicks: true, showCursor: true },
-  })),
+    track: [], crop: { x: 0, y: 0, width: 1, height: 1 }, trim: { start: 0, end: 0 },
+  }), noop),
   loupe: loupeTools(),
   ordinate: ordinateTools(noop),
   quarry: quarryTools(() => [], noop),

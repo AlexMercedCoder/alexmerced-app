@@ -202,10 +202,11 @@ export const AGENT_TOOLS: AppTools[] = [
   },
   {
     slug: 'limelight', app: 'Limelight', page: '/limelight',
-    purpose: 'Screen recording with automatic zoom. Read only: capture needs a person.',
+    purpose: 'Screen recording with automatic zoom. Capture needs a person; the framing does not.',
     tools: [
-      { name: 'limelight_describe_recording', summary: 'What was recorded, and how zoom is deciding.' },
+      { name: 'limelight_describe_recording', summary: 'What was recorded, how it is framed, and how zoom is deciding.' },
       { name: 'limelight_zoom_plan', summary: 'The camera move the export will make.' },
+      { name: 'limelight_set_frame', summary: 'Set the crop and the range to export.' },
     ],
   },
 ];

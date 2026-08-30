@@ -44,7 +44,8 @@ Alex Merced, Head of Developer Relations at Dremio. Writing on data and AI at ht
 
 ## Notes for agents
 
-- The site exposes read-only WebMCP tools in the browser: list_apps, search_apps, get_app, and get_storage_policy.
+- The site exposes WebMCP discovery tools in the browser: list_apps, search_apps, get_app, get_agent_tools, build_skill, and get_storage_policy. Each app page registers its own task tools after navigation.
+- A static discovery manifest is available at [/.well-known/webmcp.json](${SITE}/.well-known/webmcp.json). Live page discovery remains authoritative for execution.
 - Structured data is published as JSON-LD on every page, including WebSite, Person, SoftwareApplication, CollectionPage, ItemList and BreadcrumbList nodes.
 - Every app page is static HTML and can be fetched directly.
 `;

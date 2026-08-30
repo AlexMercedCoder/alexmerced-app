@@ -7,8 +7,8 @@ import {
   type ClickSample, type Interest, type PointerSample,
 } from './attention';
 import {
-  cameraCrop, cameraRect, contentRect, cornerRadius, evenSize, ripple, roundedPath,
-  type Composition,
+  cameraCrop, cameraRect, contentRect, cornerRadius, cropRect, evenSize, ripple, roundedPath,
+  type Composition, type Crop,
 } from './layout';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
@@ -36,6 +36,8 @@ export type Project = {
   sourceHeight: number;
   pointer: PointerSample[];
   clicks: ClickSample[];
+  /** The part of the source to keep. Everything outside it is never drawn. */
+  crop?: Crop | null;
   composition: Composition;
   zoom: ZoomSettings;
   frameRate: number;
@@ -152,16 +154,31 @@ export function drawFrame(
     context.fillRect(0, 0, width, height);
   } else {
     // A blurred, enlarged copy of the recording itself behind the inset one.
+    const behind = cropRect(project.crop, project.sourceWidth, project.sourceHeight);
     context.filter = 'blur(48px) brightness(0.7)';
-    context.drawImage(project.video, -width * 0.1, -height * 0.1, width * 1.2, height * 1.2);
+    context.drawImage(
+      project.video,
+      behind.x, behind.y, behind.width, behind.height,
+      -width * 0.1, -height * 0.1, width * 1.2, height * 1.2,
+    );
     context.filter = 'none';
   }
   context.restore();
 
   // ------------------------------------------------------------- recording
-  const content = contentRect(composition, project.sourceWidth, project.sourceHeight);
+  // The crop is the recording as far as everything below is concerned: it sets
+  // the shape that gets fitted to the frame, and the zoom moves around inside
+  // it rather than around the original.
+  const region = cropRect(project.crop, project.sourceWidth, project.sourceHeight);
+  const content = contentRect(composition, region.width, region.height);
   const radius = cornerRadius(composition, content);
-  const source = viewRect(view, project.sourceWidth, project.sourceHeight);
+  const inner = viewRect(view, region.width, region.height);
+  const source = {
+    x: region.x + inner.x,
+    y: region.y + inner.y,
+    width: inner.width,
+    height: inner.height,
+  };
 
   if (composition.shadow > 0 && composition.background !== 'none') {
     context.save();

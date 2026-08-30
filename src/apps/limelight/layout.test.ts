@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cameraCrop, cameraRect, contentRect, cornerRadius, defaultComposition, evenSize, ripple,
+  cameraCrop, cameraRect, contentRect, cornerRadius, cropRect, cropToAspect, defaultComposition,
+  evenSize, isFullCrop, MIN_CROP, normaliseCrop, reviveCrop, ripple,
   type Composition,
 } from './layout';
 
@@ -174,5 +175,115 @@ describe('ripple', () => {
     const end = ripple(0.6)!;
     expect(end.radius).toBeCloseTo(1, 5);
     expect(end.opacity).toBeCloseTo(0, 5);
+  });
+});
+
+describe('normaliseCrop', () => {
+  it('leaves a sensible crop alone', () => {
+    const crop = { x: 0.1, y: 0.2, width: 0.5, height: 0.6 };
+    expect(normaliseCrop(crop)).toEqual(crop);
+  });
+
+  it('refuses to let a crop collapse to nothing', () => {
+    const crop = normaliseCrop({ x: 0.5, y: 0.5, width: 0, height: -1 });
+    expect(crop.width).toBe(MIN_CROP);
+    expect(crop.height).toBe(MIN_CROP);
+  });
+
+  it('pushes a crop that hangs off the right edge back inside', () => {
+    const crop = normaliseCrop({ x: 0.8, y: 0, width: 0.5, height: 1 });
+    expect(crop.x).toBeCloseTo(0.5, 6);
+    expect(crop.x + crop.width).toBeCloseTo(1, 6);
+  });
+
+  it('caps a crop larger than the source', () => {
+    expect(normaliseCrop({ x: -1, y: -1, width: 3, height: 3 })).toEqual({ x: 0, y: 0, width: 1, height: 1 });
+  });
+});
+
+describe('isFullCrop', () => {
+  it('recognises the whole picture', () => {
+    expect(isFullCrop({ x: 0, y: 0, width: 1, height: 1 })).toBe(true);
+  });
+
+  it('recognises anything less', () => {
+    expect(isFullCrop({ x: 0, y: 0, width: 0.9, height: 1 })).toBe(false);
+    expect(isFullCrop({ x: 0.05, y: 0, width: 0.95, height: 1 })).toBe(false);
+  });
+});
+
+describe('reviveCrop', () => {
+  it('reads a stored crop back', () => {
+    expect(reviveCrop({ x: 0.25, y: 0.1, width: 0.5, height: 0.5 }))
+      .toEqual({ x: 0.25, y: 0.1, width: 0.5, height: 0.5 });
+  });
+
+  it('falls back to the whole picture for anything unreadable', () => {
+    for (const value of [null, undefined, 'crop', 42, {}]) {
+      expect(reviveCrop(value)).toEqual({ x: 0, y: 0, width: 1, height: 1 });
+    }
+  });
+
+  it('repairs a partly broken crop rather than discarding it', () => {
+    expect(reviveCrop({ x: 0.2, y: 'no', width: 0.5 }))
+      .toEqual({ x: 0.2, y: 0, width: 0.5, height: 1 });
+  });
+});
+
+describe('cropRect', () => {
+  it('turns fractions into source pixels', () => {
+    expect(cropRect({ x: 0.25, y: 0.5, width: 0.5, height: 0.25 }, 1920, 1080))
+      .toEqual({ x: 480, y: 540, width: 960, height: 270 });
+  });
+
+  it('treats a missing crop as the whole picture', () => {
+    expect(cropRect(null, 1280, 720)).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
+  });
+
+  it('never reports a zero size, whatever it is given', () => {
+    const rect = cropRect({ x: 0, y: 0, width: 0, height: 0 }, 0, 0);
+    expect(rect.width).toBeGreaterThan(0);
+    expect(rect.height).toBeGreaterThan(0);
+  });
+});
+
+describe('cropToAspect', () => {
+  const full = { x: 0, y: 0, width: 1, height: 1 };
+
+  it('takes a tall slice for a square picture out of a wide recording', () => {
+    const crop = cropToAspect(full, 1, 1920, 1080);
+    // A square of a 16:9 source is 9/16 of its width and all of its height.
+    expect(crop.height).toBeCloseTo(1, 6);
+    expect(crop.width).toBeCloseTo(1080 / 1920, 6);
+  });
+
+  it('leaves a matching shape untouched', () => {
+    const crop = cropToAspect(full, 16 / 9, 1920, 1080);
+    expect(crop).toEqual(full);
+  });
+
+  it('produces the aspect it was asked for, in output pixels', () => {
+    const crop = cropToAspect({ x: 0.1, y: 0.1, width: 0.6, height: 0.6 }, 9 / 16, 1920, 1080);
+    const pixels = cropRect(crop, 1920, 1080);
+    expect(pixels.width / pixels.height).toBeCloseTo(9 / 16, 4);
+  });
+
+  it('keeps the middle where it was', () => {
+    const before = { x: 0.5, y: 0.2, width: 0.4, height: 0.4 };
+    const after = cropToAspect(before, 4 / 3, 1920, 1080);
+    expect(after.x + after.width / 2).toBeCloseTo(0.7, 6);
+    expect(after.y + after.height / 2).toBeCloseTo(0.4, 6);
+  });
+
+  it('stays inside the source when the middle is near an edge', () => {
+    const after = cropToAspect({ x: 0.9, y: 0, width: 0.1, height: 1 }, 1, 1920, 1080);
+    expect(after.x).toBeGreaterThanOrEqual(0);
+    expect(after.x + after.width).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it('ignores a ratio that makes no sense', () => {
+    const crop = { x: 0.1, y: 0.1, width: 0.5, height: 0.5 };
+    expect(cropToAspect(crop, 0, 1920, 1080)).toEqual(crop);
+    expect(cropToAspect(crop, Number.NaN, 1920, 1080)).toEqual(crop);
   });
 });
