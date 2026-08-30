@@ -10,6 +10,9 @@ import {
   cameraAspect, cameraCrop, cameraRect, contentRect, cornerRadius, coverRect, cropRect, evenSize,
   ripple, roundedPath, type Composition, type Crop,
 } from './layout';
+import {
+  cornersBounds, hasTilt, plateMotion, tiltCorners, type MotionSettings, type Point, type Tilt,
+} from './plate';
 import { textsAt, wrapText, type TextBlock } from './text';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
@@ -43,6 +46,10 @@ export type Project = {
   wallpaper?: CanvasImageSource | null;
   /** Captions laid over the finished frame. */
   texts?: TextBlock[];
+  /** How the recording plate leans in space. */
+  tilt?: Tilt;
+  /** How the plate arrives and leaves. */
+  motion?: MotionSettings;
   composition: Composition;
   zoom: ZoomSettings;
   frameRate: number;
@@ -179,7 +186,23 @@ export function drawFrame(
   // the shape that gets fitted to the frame, and the zoom moves around inside
   // it rather than around the original.
   const region = cropRect(project.crop, project.sourceWidth, project.sourceHeight);
-  const content = contentRect(composition, region.width, region.height);
+  const placed = contentRect(composition, region.width, region.height);
+
+  // An entrance moves and fades the plate, so it has to be settled before the
+  // shadow is drawn under it or the two would come apart.
+  const move = project.motion
+    ? plateMotion(project.motion, time, project.start, project.end)
+    : { opacity: 1, scale: 1, offsetX: 0, offsetY: 0 };
+  const content = move.scale === 1 && move.offsetX === 0 && move.offsetY === 0
+    ? placed
+    : {
+        x: placed.x + (placed.width * (1 - move.scale)) / 2 + move.offsetX * width,
+        y: placed.y + (placed.height * (1 - move.scale)) / 2 + move.offsetY * height,
+        width: placed.width * move.scale,
+        height: placed.height * move.scale,
+      };
+
+  const tilt = project.tilt;
   const radius = cornerRadius(composition, content);
   const inner = viewRect(view, region.width, region.height);
   const source = {
@@ -189,23 +212,38 @@ export function drawFrame(
     height: inner.height,
   };
 
-  if (composition.shadow > 0 && composition.background !== 'none') {
+  if (composition.shadow > 0 && composition.background !== 'none' && move.opacity > 0) {
     context.save();
+    context.globalAlpha = move.opacity;
     context.shadowColor = `rgba(0, 0, 0, ${Math.min(1, composition.shadow) * 0.55})`;
     context.shadowBlur = Math.max(8, Math.min(width, height) * 0.045);
     context.shadowOffsetY = Math.max(4, Math.min(width, height) * 0.012);
     context.fillStyle = '#000';
-    context.fill(roundedPath(content, radius));
+    if (tilt && hasTilt(tilt)) {
+      const corners = tiltCorners(content, tilt);
+      context.beginPath();
+      context.moveTo(corners[0].x, corners[0].y);
+      for (const corner of corners.slice(1)) context.lineTo(corner.x, corner.y);
+      context.closePath();
+      context.fill();
+    } else {
+      context.fill(roundedPath(content, radius));
+    }
     context.restore();
   }
 
   context.save();
-  context.clip(roundedPath(content, radius));
-  context.drawImage(
-    project.video,
-    source.x, source.y, source.width, source.height,
-    content.x, content.y, content.width, content.height,
-  );
+  context.globalAlpha = move.opacity;
+  if (tilt && hasTilt(tilt)) {
+    drawTilted(context, project.video, source, content, radius, tilt);
+  } else {
+    context.clip(roundedPath(content, radius));
+    context.drawImage(
+      project.video,
+      source.x, source.y, source.width, source.height,
+      content.x, content.y, content.width, content.height,
+    );
+  }
   context.restore();
 
   // ------------------------------------------------------------- cursor and clicks
@@ -276,6 +314,89 @@ export function drawFrame(
   // Last, so a caption is never half hidden behind the camera bubble.
   if (project.texts && project.texts.length > 0) {
     drawTexts(context, project.texts, time, width, height);
+  }
+}
+
+/**
+ * Draws the recording onto a tilted plate.
+ *
+ * Canvas only has an affine transform, which cannot make parallel lines
+ * converge. So the plate is cut into thin horizontal strips and each is placed
+ * with its own matrix, following the quad's left and right edges down. A strip
+ * of a trapezium is a parallelogram to within a fraction of a pixel once it is
+ * thin enough, and the seams are covered by drawing each strip a touch taller
+ * than its share.
+ *
+ * The rounded corners are applied first, on an offscreen plate, because
+ * rounding a shape that is already tilted would round it in the wrong space and
+ * the corners would come out lopsided.
+ */
+function drawTilted(
+  context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+  video: CanvasImageSource,
+  source: { x: number; y: number; width: number; height: number },
+  content: { x: number; y: number; width: number; height: number },
+  radius: number,
+  tilt: Tilt,
+): void {
+  const plateWidth = Math.max(2, Math.round(content.width));
+  const plateHeight = Math.max(2, Math.round(content.height));
+
+  const plate = scratch(plateWidth, plateHeight);
+  const plateContext = plate.getContext('2d');
+  if (!plateContext) return;
+
+  plateContext.setTransform(1, 0, 0, 1, 0, 0);
+  plateContext.clearRect(0, 0, plateWidth, plateHeight);
+  plateContext.save();
+  plateContext.clip(roundedPath({ x: 0, y: 0, width: plateWidth, height: plateHeight }, radius));
+  plateContext.drawImage(
+    video,
+    source.x, source.y, source.width, source.height,
+    0, 0, plateWidth, plateHeight,
+  );
+  plateContext.restore();
+
+  const [topLeft, topRight, bottomRight, bottomLeft] = tiltCorners(content, tilt);
+  const mix = (a: Point, b: Point, t: number): Point => ({
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  });
+
+  // Enough strips that the tallest edge moves less than a pixel across one.
+  const span = Math.max(1, cornersBounds([topLeft, topRight, bottomRight, bottomLeft]).height);
+  const strips = Math.max(24, Math.min(600, Math.ceil(span)));
+  const step = 1 / strips;
+  const sliceHeight = plateHeight / strips;
+
+  for (let index = 0; index < strips; index += 1) {
+    const top = index * step;
+    const bottom = top + step;
+
+    const leftTop = mix(topLeft, bottomLeft, top);
+    const rightTop = mix(topRight, bottomRight, top);
+    const leftBottom = mix(topLeft, bottomLeft, bottom);
+
+    context.save();
+    // The matrix that carries the plate's own coordinates onto this strip:
+    // across follows the strip's top edge, down follows the left edge. It
+    // multiplies with whatever transform is already in place rather than
+    // replacing it, so this composes instead of resetting the frame.
+    context.transform(
+      (rightTop.x - leftTop.x) / plateWidth,
+      (rightTop.y - leftTop.y) / plateWidth,
+      (leftBottom.x - leftTop.x) / sliceHeight,
+      (leftBottom.y - leftTop.y) / sliceHeight,
+      leftTop.x,
+      leftTop.y,
+    );
+    // A hair of overlap, so neighbouring strips leave no gap between them.
+    context.drawImage(
+      plate,
+      0, index * sliceHeight, plateWidth, sliceHeight + 1,
+      0, 0, plateWidth, sliceHeight + 1,
+    );
+    context.restore();
   }
 }
 
@@ -663,4 +784,19 @@ function wallpaperSize(source: CanvasImageSource): { width: number; height: numb
     width: candidate.naturalWidth || (typeof candidate.width === 'number' ? candidate.width : 0) || 1,
     height: candidate.naturalHeight || (typeof candidate.height === 'number' ? candidate.height : 0) || 1,
   };
+}
+
+/**
+ * A reusable offscreen canvas.
+ *
+ * The plate is redrawn every frame, and allocating a fresh canvas of a couple
+ * of megapixels thirty times a second is the kind of thing that makes an export
+ * spend its time in the garbage collector rather than in the encoder.
+ */
+let scratchCanvas: OffscreenCanvas | null = null;
+function scratch(width: number, height: number): OffscreenCanvas {
+  if (!scratchCanvas || scratchCanvas.width !== width || scratchCanvas.height !== height) {
+    scratchCanvas = new OffscreenCanvas(width, height);
+  }
+  return scratchCanvas;
 }

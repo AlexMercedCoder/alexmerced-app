@@ -207,7 +207,7 @@ export const AGENT_TOOLS: AppTools[] = [
       { name: 'limelight_describe_recording', summary: 'What was recorded, how it is framed, and how zoom is deciding.' },
       { name: 'limelight_zoom_plan', summary: 'The camera move the export will make.' },
       { name: 'limelight_set_frame', summary: 'Set the crop and the range to export.' },
-      { name: 'limelight_set_look', summary: 'Set the background, output size and camera bubble.' },
+      { name: 'limelight_set_look', summary: 'Set the background, output size, camera bubble, tilt and arrival.' },
       { name: 'limelight_add_text', summary: 'Put a caption on the recording.' },
       { name: 'limelight_remove_text', summary: 'Take a caption off again.' },
       { name: 'limelight_text_at', summary: 'Which captions are showing at a moment.' },

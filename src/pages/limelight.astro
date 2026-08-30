@@ -161,6 +161,19 @@ const app = getApp('limelight');
         </section>
 
         <section class="card ll-card">
+          <h2 class="ll-subhead">Angle and arrival</h2>
+          <label class="ll-slider"><span>Lean back</span><input type="range" id="ll-tilt-x" min="-45" max="45" step="1" /><em id="ll-tilt-x-out"></em></label>
+          <label class="ll-slider"><span>Turn</span><input type="range" id="ll-tilt-y" min="-45" max="45" step="1" /><em id="ll-tilt-y-out"></em></label>
+          <label class="ll-slider"><span>Rotate</span><input type="range" id="ll-tilt-rotate" min="-30" max="30" step="1" /><em id="ll-tilt-rotate-out"></em></label>
+          <label class="ll-slider"><span>Depth</span><input type="range" id="ll-tilt-depth" min="0" max="1" step="0.05" /><em id="ll-tilt-depth-out"></em></label>
+          <button class="btn btn--sm btn--ghost" id="ll-tilt-reset">Lay it flat</button>
+          <label class="field-row"><span>How it arrives</span><select class="field" id="ll-motion-in"></select></label>
+          <label class="field-row"><span>How it leaves</span><select class="field" id="ll-motion-out"></select></label>
+          <label class="ll-slider"><span>How long</span><input type="range" id="ll-motion-seconds" min="0.1" max="3" step="0.05" /><em id="ll-motion-seconds-out"></em></label>
+          <p class="ll-note">The arrival is measured from where the export begins, not from the start of the recording.</p>
+        </section>
+
+        <section class="card ll-card">
           <h2 class="ll-subhead">Zoom</h2>
           <label class="ll-check"><input type="checkbox" id="ll-zoom-on" /><span>Zoom in on what is happening</span></label>
           <label class="ll-slider"><span>How far</span><input type="range" id="ll-zoom-scale" min="1" max="3" step="0.05" /><em id="ll-zoom-scale-out"></em></label>

@@ -38,7 +38,11 @@ const REGISTERED: Record<string, { name: string; description: string; inputSchem
   laneway: lanewayTools(noop),
   limelight: limelightTools(() => ({
     recording: null, points: [], interestSource: 'none',
-    settings: { composition: {} as never, zoom: {} as never, frameRate: 30, showClicks: true, showCursor: true },
+    settings: {
+      composition: {} as never, zoom: {} as never, frameRate: 30, showClicks: true, showCursor: true,
+      tilt: { x: 0, y: 0, rotate: 0, depth: 0.35 },
+      motion: { entrance: 'none' as const, exit: 'none' as const, seconds: 0.6 },
+    },
     track: [], crop: { x: 0, y: 0, width: 1, height: 1 }, trim: { start: 0, end: 0 }, texts: [],
   }), noop),
   loupe: loupeTools(),

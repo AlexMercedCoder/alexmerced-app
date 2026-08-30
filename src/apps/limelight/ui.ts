@@ -11,6 +11,7 @@ import {
 } from './layout';
 import { countdown } from './countdown';
 import { History } from './history';
+import { defaultTilt, MOTIONS, type Motion } from './plate';
 import { limelightTools } from './mcp';
 import {
   capabilities, drawFrame, findInterest, render, RenderError, type OutputFormat, type Project,
@@ -208,6 +209,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       wallpaper,
       composition: settings.composition,
       zoom: settings.zoom,
+      tilt: settings.tilt,
+      motion: settings.motion,
       frameRate: settings.frameRate,
       bitrate: suggestBitrate(),
       showClicks: settings.showClicks,
@@ -1251,6 +1254,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     ['ll-zoom-hold', (value) => { settings.zoom.holdSeconds = value; }, () => settings.zoom.holdSeconds],
     ['ll-zoom-move', (value) => { settings.zoom.moveSeconds = value; }, () => settings.zoom.moveSeconds],
     ['ll-camera-size', (value) => { settings.composition.camera.size = value; }, () => settings.composition.camera.size],
+    ['ll-tilt-x', (value) => { settings.tilt.x = value; }, () => settings.tilt.x],
+    ['ll-tilt-y', (value) => { settings.tilt.y = value; }, () => settings.tilt.y],
+    ['ll-tilt-rotate', (value) => { settings.tilt.rotate = value; }, () => settings.tilt.rotate],
+    ['ll-tilt-depth', (value) => { settings.tilt.depth = value; }, () => settings.tilt.depth],
+    ['ll-motion-seconds', (value) => { settings.motion.seconds = value; }, () => settings.motion.seconds],
   ];
   for (const [id, apply] of sliders) {
     const input = $<HTMLInputElement>(id);
@@ -1277,6 +1285,28 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       void drawPreview();
     });
   }
+
+  for (const [id, key] of [['ll-motion-in', 'entrance'], ['ll-motion-out', 'exit']] as [string, 'entrance' | 'exit'][]) {
+    const select = $<HTMLSelectElement>(id);
+    for (const entry of MOTIONS) {
+      const option = document.createElement('option');
+      option.value = entry.id;
+      option.textContent = entry.label;
+      select.append(option);
+    }
+    select.addEventListener('change', () => {
+      settings.motion[key] = select.value as Motion;
+      remember();
+      void drawPreview();
+    });
+  }
+
+  $<HTMLButtonElement>('ll-tilt-reset').addEventListener('click', () => {
+    settings.tilt = { ...defaultTilt };
+    remember();
+    renderControls();
+    void drawPreview();
+  });
 
   const shapeEl = $<HTMLSelectElement>('ll-camera-shape');
   for (const shape of CAMERA_SHAPES) {
@@ -1358,6 +1388,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     for (const [id, , read] of toggles) $<HTMLInputElement>(id).checked = read();
     cornerEl.value = settings.composition.camera.corner;
     shapeEl.value = settings.composition.camera.shape;
+    $<HTMLSelectElement>('ll-motion-in').value = settings.motion.entrance;
+    $<HTMLSelectElement>('ll-motion-out').value = settings.motion.exit;
     countdownEl.value = String(settings.countdown);
     $<HTMLInputElement>('ll-countdown-sound').checked = settings.countdownSound;
     $<HTMLInputElement>('ll-camera-blur').checked = settings.cameraBlur;
@@ -1381,6 +1413,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       ['ll-zoom-hold-out', `${settings.zoom.holdSeconds.toFixed(1)}s`],
       ['ll-zoom-move-out', `${settings.zoom.moveSeconds.toFixed(2)}s`],
       ['ll-camera-size-out', `${Math.round(settings.composition.camera.size * 100)}%`],
+      ['ll-tilt-x-out', `${Math.round(settings.tilt.x)}\u00b0`],
+      ['ll-tilt-y-out', `${Math.round(settings.tilt.y)}\u00b0`],
+      ['ll-tilt-rotate-out', `${Math.round(settings.tilt.rotate)}\u00b0`],
+      ['ll-tilt-depth-out', `${Math.round(settings.tilt.depth * 100)}%`],
+      ['ll-motion-seconds-out', `${settings.motion.seconds.toFixed(2)}s`],
     ];
     for (const [id, text] of readouts) $<HTMLSpanElement>(id).textContent = text;
     $<HTMLSpanElement>('ll-bitrate-out').textContent = `${Math.round(suggestBitrate() / 1000)} kbps`;
@@ -1782,6 +1819,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       if (change.crop) { crop = change.crop; cropAspect = 'free'; }
       if (change.trim) trim = { ...change.trim };
       if (change.texts) { texts = change.texts; selectedText = null; }
+      if (change.tilt) settings.tilt = change.tilt;
+      if (change.motion) settings.motion = change.motion;
       if (change.composition) {
         settings.composition = { ...settings.composition, ...change.composition };
         // A background chosen by name is no longer a picture, so the stored one

@@ -4,6 +4,9 @@ import {
 import type { Interest } from './attention';
 import type { Recording } from './capture';
 import {
+  MOTIONS, reviveMotion, reviveTilt, type Motion, type MotionSettings, type Tilt,
+} from './plate';
+import {
   addText, removeText, textsAt, updateText, type TextAlign, type TextBlock,
 } from './text';
 import { zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
@@ -16,7 +19,10 @@ type State = {
   recording: Recording | null;
   points: Interest[];
   interestSource: 'pointer' | 'motion' | 'none';
-  settings: { composition: Composition; zoom: ZoomSettings; frameRate: number; showClicks: boolean; showCursor: boolean };
+  settings: {
+    composition: Composition; zoom: ZoomSettings; frameRate: number;
+    showClicks: boolean; showCursor: boolean; tilt: Tilt; motion: MotionSettings;
+  };
   /** The camera move as the timeline actually has it, hand edits included. */
   track: ZoomKeyframe[];
   crop: Crop;
@@ -30,6 +36,8 @@ type Edit = (change: {
   trim?: { start: number; end: number };
   composition?: Partial<Composition>;
   texts?: TextBlock[];
+  tilt?: Tilt;
+  motion?: MotionSettings;
 }) => void;
 
 /**
@@ -226,6 +234,16 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
             type: 'string',
             description: 'Where the bubble sits: bottomRight, bottomLeft, topRight or topLeft.',
           },
+          tiltX: { type: 'number', description: 'Degrees to lean the top away, -45 to 45.' },
+          tiltY: { type: 'number', description: 'Degrees to turn the right side away, -45 to 45.' },
+          tiltRotate: { type: 'number', description: 'Degrees of roll in the plane, -30 to 30.' },
+          tiltDepth: { type: 'number', description: 'How strong the perspective is, 0 to 1.' },
+          entrance: {
+            type: 'string',
+            description: `How the recording arrives, one of: ${MOTIONS.map((entry) => entry.id).join(', ')}.`,
+          },
+          exit: { type: 'string', description: 'How it leaves, from the same list.' },
+          motionSeconds: { type: 'number', description: 'How long the arrival and the departure take.' },
         },
       },
       execute: (input) => {
@@ -280,18 +298,56 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
         }
         if (touchedCamera) change.camera = camera;
 
+        const tiltKeys = ['tiltX', 'tiltY', 'tiltRotate', 'tiltDepth'];
+        let tilt: Tilt | undefined;
+        if (tiltKeys.some((key) => key in input)) {
+          tilt = reviveTilt({
+            x: readNumber(input, 'tiltX', state.settings.tilt.x),
+            y: readNumber(input, 'tiltY', state.settings.tilt.y),
+            rotate: readNumber(input, 'tiltRotate', state.settings.tilt.rotate),
+            depth: readNumber(input, 'tiltDepth', state.settings.tilt.depth),
+          });
+        }
+
+        const motionKeys = ['entrance', 'exit', 'motionSeconds'];
+        let motion: MotionSettings | undefined;
+        if (motionKeys.some((key) => key in input)) {
+          const named = (key: 'entrance' | 'exit', spare: Motion): Motion => {
+            const value = readString(input, key).trim();
+            if (!value) return spare;
+            if (!MOTIONS.some((entry) => entry.id === value)) {
+              unknown.push(`${key} "${value}"`);
+              return spare;
+            }
+            return value as Motion;
+          };
+          motion = reviveMotion({
+            entrance: named('entrance', state.settings.motion.entrance),
+            exit: named('exit', state.settings.motion.exit),
+            seconds: readNumber(input, 'motionSeconds', state.settings.motion.seconds),
+          });
+        }
+
         if (unknown.length > 0) {
           return errorResult(`This does not recognise ${unknown.join(' or ')}.`, {
             backgrounds: PRESETS.map((entry) => entry.id),
             sizes: OUTPUT_SIZES.map((entry) => entry.id),
             cameraShapes: CAMERA_SHAPES.map((entry) => entry.id),
             cameraCorners: ['bottomRight', 'bottomLeft', 'topRight', 'topLeft'],
+            movements: MOTIONS.map((entry) => entry.id),
           });
         }
-        if (Object.keys(change).length === 0) return errorResult('Nothing to change.');
+        if (Object.keys(change).length === 0 && !tilt && !motion) {
+          return errorResult('Nothing to change.');
+        }
 
-        edit({ composition: change });
-        const after = read().settings.composition;
+        edit({
+          ...(Object.keys(change).length > 0 ? { composition: change } : {}),
+          ...(tilt ? { tilt } : {}),
+          ...(motion ? { motion } : {}),
+        });
+        const settings = read().settings;
+        const after = settings.composition;
         return textResult({
           background: after.background,
           colours: after.colours,
@@ -300,6 +356,8 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
           radius: after.radius,
           shadow: after.shadow,
           camera: after.camera,
+          tilt: settings.tilt,
+          motion: settings.motion,
         });
       },
     },

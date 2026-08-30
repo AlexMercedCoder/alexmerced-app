@@ -7,6 +7,9 @@ import {
   type CameraShape, type Composition, type Crop,
 } from './layout';
 import { defaultZoom, type ZoomKeyframe, type ZoomSettings } from './zoom';
+import {
+  defaultMotion, defaultTilt, reviveMotion, reviveTilt, type MotionSettings, type Tilt,
+} from './plate';
 import { reviveTexts, type TextBlock } from './text';
 import { reviveBlocks, type ZoomBlock } from './zooms';
 
@@ -30,6 +33,10 @@ const CURRENT_KEY = 'limelight:current';
 export type Settings = {
   composition: Composition;
   zoom: ZoomSettings;
+  /** How the recording plate leans in space. */
+  tilt: Tilt;
+  /** How the plate arrives and leaves. */
+  motion: MotionSettings;
   frameRate: number;
   showClicks: boolean;
   showCursor: boolean;
@@ -46,6 +53,8 @@ export type Settings = {
 export const defaultSettings: Settings = {
   composition: defaultComposition,
   zoom: defaultZoom,
+  tilt: defaultTilt,
+  motion: defaultMotion,
   frameRate: 30,
   showClicks: true,
   showCursor: true,
@@ -108,6 +117,8 @@ export function reviveSettings(value: unknown): Settings {
       camera: cameraSettings(stored.composition?.camera),
     },
     zoom: { ...defaultZoom, ...(stored.zoom ?? {}) },
+    tilt: reviveTilt(stored.tilt),
+    motion: reviveMotion(stored.motion),
     frameRate: typeof stored.frameRate === 'number' && stored.frameRate > 0 ? stored.frameRate : 30,
     showClicks: flag('showClicks'),
     showCursor: flag('showCursor'),
