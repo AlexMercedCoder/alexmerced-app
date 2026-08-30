@@ -33,6 +33,18 @@ const app = getApp('limelight');
         </p>
       </section>
 
+      <section class="card ll-projects-panel">
+        <div class="ll-head">
+          <h2 class="ll-subhead">Recordings kept here</h2>
+          <span class="ll-storage" id="ll-storage"></span>
+        </div>
+        <div class="ll-projects" id="ll-projects"></div>
+        <div class="empty" id="ll-projects-empty">
+          <strong>Nothing saved yet</strong>
+          <p>A recording is kept in this browser as soon as it stops, so closing the tab or reloading will not lose it.</p>
+        </div>
+      </section>
+
       <p class="ll-status" id="ll-status" data-state="idle">Nothing recorded yet.</p>
       <div class="ll-bar" id="ll-bar" hidden><div class="ll-bar__fill" id="ll-bar-fill"></div></div>
       <p class="ll-source-note" id="ll-source-note" hidden></p>
@@ -42,6 +54,19 @@ const app = getApp('limelight');
         <div class="ll-scrubrow">
           <input type="range" id="ll-scrub" class="ll-scrub" min="0" max="10" step="0.04" value="0" aria-label="Preview position" />
           <span class="ll-time" id="ll-time">0:00</span>
+        </div>
+
+        <div class="ll-trim" id="ll-trim" aria-label="Trim range">
+          <div class="ll-trim__range" id="ll-trim-range"></div>
+        </div>
+        <div class="ll-scrubrow">
+          <button class="btn btn--sm" id="ll-trim-start">Start here</button>
+          <button class="btn btn--sm" id="ll-trim-end">End here</button>
+          <button class="btn btn--sm btn--ghost" id="ll-trim-reset">Whole recording</button>
+          <span class="ll-time" id="ll-trim-label"></span>
+        </div>
+
+        <div class="ll-scrubrow">
           <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
           <button class="btn btn--sm btn--danger" id="ll-discard">Discard</button>
         </div>
@@ -84,6 +109,7 @@ const app = getApp('limelight');
             <label class="ll-check"><input type="checkbox" id="ll-camera-round" /><span>Round</span></label>
           </div>
 
+          <label class="ll-check"><input type="checkbox" id="ll-audio" /><span>Keep the sound that was recorded</span></label>
           <label class="field-row"><span>Frames a second</span>
             <select class="field" id="ll-fps">
               <option value="24">24</option>
@@ -105,6 +131,22 @@ const app = getApp('limelight');
 </script>
 
 <style is:global>
+
+  .ll-projects-panel { padding: 1rem; display: grid; gap: 0.6rem; }
+  .ll-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+  .ll-head .ll-subhead { margin: 0; }
+  .ll-storage { font-size: 0.75rem; color: var(--ink-soft); }
+  .ll-projects { display: grid; gap: 0.35rem; max-height: 30vh; overflow: auto; }
+  .ll-project { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border: 1px solid var(--rule); border-radius: 0.5rem; background: var(--paper-raised); }
+  .ll-project[aria-current='true'] { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .ll-project__open { display: grid; gap: 0.12rem; text-align: left; background: none; border: 0; cursor: pointer; font: inherit; color: inherit; padding: 0.5rem 0.6rem; min-width: 0; }
+  .ll-project__open strong { font-size: 0.87rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ll-project__open span { font-size: 0.74rem; color: var(--ink-soft); }
+  .ll-project__remove { border: 0; background: none; color: var(--ink-soft); cursor: pointer; font-size: 1.15rem; padding: 0.3rem 0.55rem; }
+  .ll-project__remove:hover { color: #b91c1c; }
+
+  .ll-trim { position: relative; height: 2.2rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--paper-raised); cursor: ew-resize; touch-action: none; overflow: hidden; }
+  .ll-trim__range { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.22; border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); }
   .ll { display: grid; gap: 1rem; padding: 1.25rem 0 3rem; }
   .ll-subhead { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.7rem; }
   .ll-note { font-size: 0.79rem; color: var(--ink-soft); margin: 0.6rem 0 0; line-height: 1.55; }

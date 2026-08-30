@@ -1,6 +1,5 @@
 import { formatBytes } from '../../lib/bytes';
 import { downloadBlob } from '../../lib/portable';
-import { readPref, writePref } from '../../lib/prefs';
 import { toast } from '../../lib/toast';
 import { registerTools } from '../../lib/webmcp';
 import type { Interest } from './attention';
@@ -10,22 +9,13 @@ import {
 } from './layout';
 import { limelightTools } from './mcp';
 import { drawFrame, findInterest, render, RenderError, type Project } from './render';
+import {
+  createProject, deleteProject, loadCurrentId, loadProject, loadProjects, loadSettings,
+  saveCurrentId, saveProject, saveSettings, storedBytes, type Project as StoredProject,
+  type Settings,
+} from './store';
 import { buildZoomTrack, defaultZoom, zoomAt, type ZoomSettings } from './zoom';
 
-const SETTINGS_KEY = 'limelight:settings';
-
-type Settings = { composition: Composition; zoom: ZoomSettings; frameRate: number; showClicks: boolean; showCursor: boolean };
-
-function loadSettings(): Settings {
-  const stored = readPref<Partial<Settings>>(SETTINGS_KEY, {});
-  return {
-    composition: { ...defaultComposition, ...(stored.composition ?? {}), camera: { ...defaultComposition.camera, ...(stored.composition?.camera ?? {}) } },
-    zoom: { ...defaultZoom, ...(stored.zoom ?? {}) },
-    frameRate: typeof stored.frameRate === 'number' ? stored.frameRate : 30,
-    showClicks: stored.showClicks !== false,
-    showCursor: stored.showCursor !== false,
-  };
-}
 
 export async function mountLimelight(root: HTMLElement): Promise<void> {
   const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!;
@@ -51,13 +41,32 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let interestSource: 'pointer' | 'motion' | 'none' = 'none';
   let controller: AbortController | null = null;
   let previewTime = 0;
+  let stored: StoredProject | null = null;
+  let trim = { start: 0, end: 0 };
+  let saveTimer = 0;
 
   const setStatus = (message: string, state: 'idle' | 'busy' | 'good' | 'bad') => {
     statusEl.textContent = message;
     statusEl.dataset.state = state;
   };
 
-  const remember = () => writePref(SETTINGS_KEY, settings);
+  const remember = () => {
+    saveSettings(settings);
+    // The settings belong to the project too, so reopening it looks the same.
+    if (stored) {
+      stored.settings = settings;
+      stored.start = trim.start;
+      stored.end = trim.end;
+      queueSave();
+    }
+  };
+
+  /** Writing tens of megabytes on every slider nudge would make this stutter. */
+  function queueSave(): void {
+    if (!stored) return;
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => { if (stored) void saveProject(stored); }, 600);
+  }
 
   // ------------------------------------------------------------------ project
 
@@ -66,6 +75,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     return {
       video,
       camera: cameraVideo,
+      source: recording.blob,
       duration: recording.duration,
       sourceWidth: video.videoWidth || recording.width,
       sourceHeight: video.videoHeight || recording.height,
@@ -77,6 +87,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       bitrate: suggestBitrate(),
       showClicks: settings.showClicks,
       showCursor: settings.showCursor && recording.pointer.length > 0,
+      keepAudio: settings.keepAudio && recording.hasAudio,
+      start: trim.start,
+      end: trim.end > trim.start ? trim.end : recording.duration,
     };
   }
 
@@ -98,6 +111,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       try {
         const result = await session.stop();
         await load(result);
+        await keep({
+          ...result,
+          duration: recording?.duration ?? result.duration,
+          width: video?.videoWidth || result.width,
+          height: video?.videoHeight || result.height,
+        }, `Recording ${new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}`);
       } catch (error) {
         setStatus(error instanceof Error ? error.message : 'The recording could not be finished.', 'bad');
       } finally {
@@ -137,7 +156,47 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ loading
 
-  async function load(result: Recording): Promise<void> {
+  /** Stores a fresh recording so a reload cannot lose it. */
+  async function keep(result: Recording, name: string): Promise<void> {
+    const project = createProject(name, {
+      bytes: new Uint8Array(await result.blob.arrayBuffer()),
+      mime: result.blob.type || 'video/webm',
+      cameraBytes: result.camera ? new Uint8Array(await result.camera.arrayBuffer()) : null,
+      duration: result.duration,
+      width: result.width,
+      height: result.height,
+      hasAudio: result.hasAudio,
+      pointer: result.pointer,
+      clicks: result.clicks,
+      settings,
+    });
+    stored = project;
+    saveCurrentId(project.id);
+    await saveProject(project);
+    await renderProjects();
+  }
+
+  /** Reopens one that was stored earlier. */
+  async function open(id: string): Promise<void> {
+    const project = await loadProject(id);
+    if (!project) return;
+    stored = project;
+    settings = project.settings;
+    saveCurrentId(project.id);
+
+    await load({
+      blob: new Blob([project.bytes as unknown as BlobPart], { type: project.mime }),
+      duration: project.duration,
+      width: project.width,
+      height: project.height,
+      pointer: project.pointer,
+      clicks: project.clicks,
+      camera: project.cameraBytes ? new Blob([project.cameraBytes as unknown as BlobPart], { type: project.mime }) : null,
+      hasAudio: project.hasAudio,
+    }, { start: project.start, end: project.end });
+  }
+
+  async function load(result: Recording, range?: { start: number; end: number }): Promise<void> {
     release();
     recording = result;
 
@@ -168,11 +227,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remember();
     }
 
+    trim = range && range.end > range.start
+      ? { start: Math.max(0, range.start), end: Math.min(recording.duration, range.end) }
+      : { start: 0, end: recording.duration };
+
     stageEl.hidden = false;
     editorEl.hidden = false;
     scrubber.max = String(Math.max(0.1, recording.duration));
-    scrubber.value = '0';
-    previewTime = 0;
+    scrubber.value = String(trim.start);
+    previewTime = trim.start;
 
     setStatus(
       `${video.videoWidth} by ${video.videoHeight}, ${formatClock(recording.duration)}, ${formatBytes(result.blob.size)}.`,
@@ -180,6 +243,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     );
 
     renderControls();
+    renderTrim();
     await analyse();
     await drawPreview();
   }
@@ -219,6 +283,132 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     barFill.style.width = `${progress.total > 0 ? (progress.done / progress.total) * 100 : 0}%`;
     setStatus(`${progress.stage}: ${progress.done} of ${progress.total}.`, 'busy');
   }
+
+  // ------------------------------------------------------------------ projects
+
+  async function renderProjects(): Promise<void> {
+    const list = $<HTMLDivElement>('ll-projects');
+    const projects = await loadProjects();
+    list.innerHTML = '';
+
+    for (const project of projects) {
+      const row = document.createElement('div');
+      row.className = 'll-project';
+      if (stored && project.id === stored.id) row.setAttribute('aria-current', 'true');
+
+      const openButton = document.createElement('button');
+      openButton.type = 'button';
+      openButton.className = 'll-project__open';
+      openButton.innerHTML = `<strong>${escapeHtml(project.name)}</strong>`
+        + `<span>${formatClock(project.duration)} · ${project.width} by ${project.height}`
+        + `${project.hasAudio ? ' · sound' : ''}</span>`;
+      openButton.addEventListener('click', () => { void open(project.id); });
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'll-project__remove';
+      remove.innerHTML = '&times;';
+      remove.title = `Delete ${project.name}`;
+      remove.setAttribute('aria-label', `Delete ${project.name}`);
+      remove.addEventListener('click', async () => {
+        if (!confirm(`Delete "${project.name}"? The recording cannot be made again.`)) return;
+        await deleteProject(project.id);
+        if (stored?.id === project.id) {
+          stored = null;
+          saveCurrentId(null);
+        }
+        await renderProjects();
+        void refreshStorage();
+      });
+
+      row.append(openButton, remove);
+      list.append(row);
+    }
+
+    $<HTMLDivElement>('ll-projects-empty').hidden = projects.length > 0;
+    void refreshStorage();
+  }
+
+  async function refreshStorage(): Promise<void> {
+    const total = await storedBytes();
+    $<HTMLSpanElement>('ll-storage').textContent = total > 0 ? `${formatBytes(total)} of recordings kept here` : '';
+  }
+
+  // ------------------------------------------------------------------ trim
+
+  const trimEl = $<HTMLDivElement>('ll-trim');
+  const trimRange = $<HTMLDivElement>('ll-trim-range');
+
+  function renderTrim(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    trimRange.style.left = `${(trim.start / duration) * 100}%`;
+    trimRange.style.width = `${((trim.end - trim.start) / duration) * 100}%`;
+    $<HTMLSpanElement>('ll-trim-label').textContent =
+      `${formatClock(trim.start)} to ${formatClock(trim.end)}, ${formatClock(trim.end - trim.start)} long`;
+  }
+
+  let trimming: 'start' | 'end' | null = null;
+
+  function trimTimeAt(event: PointerEvent): number {
+    if (!recording) return 0;
+    const box = trimEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
+  }
+
+  trimEl.addEventListener('pointerdown', (event) => {
+    if (!recording) return;
+    const time = trimTimeAt(event);
+    // Grab whichever handle is nearer, so a drag anywhere moves the closer end.
+    trimming = Math.abs(time - trim.start) <= Math.abs(time - trim.end) ? 'start' : 'end';
+    trimEl.setPointerCapture(event.pointerId);
+    applyTrim(time);
+  });
+
+  trimEl.addEventListener('pointermove', (event) => {
+    if (trimming) applyTrim(trimTimeAt(event));
+  });
+
+  const endTrim = () => {
+    if (!trimming) return;
+    trimming = null;
+    remember();
+    previewTime = trim.start;
+    scrubber.value = String(previewTime);
+    void drawPreview();
+  };
+  trimEl.addEventListener('pointerup', endTrim);
+  trimEl.addEventListener('pointercancel', endTrim);
+
+  function applyTrim(time: number): void {
+    if (!recording || !trimming) return;
+    if (trimming === 'start') trim.start = Math.min(time, trim.end - 0.1);
+    else trim.end = Math.max(time, trim.start + 0.1);
+    trim.start = Math.max(0, trim.start);
+    trim.end = Math.min(recording.duration, trim.end);
+    renderTrim();
+  }
+
+  $<HTMLButtonElement>('ll-trim-start').addEventListener('click', () => {
+    if (!recording) return;
+    trim.start = Math.min(previewTime, trim.end - 0.1);
+    renderTrim();
+    remember();
+  });
+
+  $<HTMLButtonElement>('ll-trim-end').addEventListener('click', () => {
+    if (!recording) return;
+    trim.end = Math.max(previewTime, trim.start + 0.1);
+    renderTrim();
+    remember();
+  });
+
+  $<HTMLButtonElement>('ll-trim-reset').addEventListener('click', () => {
+    if (!recording) return;
+    trim = { start: 0, end: recording.duration };
+    renderTrim();
+    remember();
+  });
 
   // ------------------------------------------------------------------ preview
 
@@ -327,6 +517,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     ['ll-cursor', (value) => { settings.showCursor = value; }, () => settings.showCursor],
     ['ll-camera-on', (value) => { settings.composition.camera.enabled = value; }, () => settings.composition.camera.enabled],
     ['ll-camera-round', (value) => { settings.composition.camera.round = value; }, () => settings.composition.camera.round],
+    ['ll-audio', (value) => { settings.keepAudio = value; }, () => settings.keepAudio],
   ];
   for (const [id, apply] of toggles) {
     const input = $<HTMLInputElement>(id);
@@ -395,9 +586,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     try {
       const result = await render(current, points, onProgress, controller.signal);
-      downloadBlob('limelight.webm', result.blob);
+      downloadBlob(`${(stored?.name ?? 'limelight').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.webm`, result.blob);
       setStatus(
-        `Saved ${formatBytes(result.blob.size)} from ${result.frames} frames, in ${((performance.now() - started) / 1000).toFixed(1)} seconds.`,
+        `Saved ${formatBytes(result.blob.size)} from ${result.frames} frames`
+        + `${result.hasAudio ? ', with sound' : ', silent'}`
+        + `, in ${((performance.now() - started) / 1000).toFixed(1)} seconds.`,
         'good',
       );
       toast('Saved to your downloads folder.', { kind: 'good' });
@@ -440,10 +633,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!file) return;
     setStatus(`Reading ${file.name}.`, 'busy');
     try {
-      await load({
+      const opened: Recording = {
         blob: file, duration: 0, width: 0, height: 0,
-        pointer: [], clicks: [], camera: null, hasAudio: false,
-      });
+        pointer: [], clicks: [], camera: null, hasAudio: true,
+      };
+      await load(opened);
+      // The size and length are only known once the browser has read the file,
+      // so the project is stored from what load worked out, not from the guess.
+      await keep({
+        ...opened,
+        duration: recording?.duration ?? 0,
+        width: video?.videoWidth ?? 0,
+        height: video?.videoHeight ?? 0,
+      }, file.name.replace(/\.[a-z0-9]+$/i, ''));
     } catch {
       setStatus(`${file.name} could not be opened as a video.`, 'bad');
     }
@@ -465,6 +667,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   window.addEventListener('pagehide', () => { session?.cancel(); release(); });
 
   renderControls();
+  await renderProjects();
+
+  // Reopen whatever was last worked on, so a reload picks up where it left off.
+  const last = loadCurrentId();
+  if (last) await open(last).catch(() => {});
+
   registerTools(limelightTools(() => ({ recording, points, interestSource, settings })));
 }
 
@@ -488,4 +696,9 @@ function formatClock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
   const whole = Math.floor(seconds);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"]/g, (character) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]!);
 }

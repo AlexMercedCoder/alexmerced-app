@@ -1,3 +1,4 @@
+import { alignToZero, encodeOpus } from '../../lib/opus';
 import { muxWebm, type WebmSample, type WebmTrack } from '../../lib/webm';
 import {
   interestFromPointer, mergeInterest, motionCentre, motionGrid, sampleAt, smoothPath,
@@ -26,6 +27,8 @@ export type Progress = { stage: string; done: number; total: number };
 export type Project = {
   video: HTMLVideoElement;
   camera: HTMLVideoElement | null;
+  /** The recording itself, which is where the audio still lives. */
+  source: Blob | null;
   duration: number;
   sourceWidth: number;
   sourceHeight: number;
@@ -37,6 +40,11 @@ export type Project = {
   bitrate: number;
   showClicks: boolean;
   showCursor: boolean;
+  /** Whether to carry the recorded audio into the export. */
+  keepAudio: boolean;
+  /** Seconds into the recording that the export begins and ends. */
+  start: number;
+  end: number;
 };
 
 function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
@@ -258,7 +266,7 @@ function drawCursor(
   context.restore();
 }
 
-export type ExportResult = { blob: Blob; frames: number };
+export type ExportResult = { blob: Blob; frames: number; hasAudio: boolean };
 
 /** Renders the whole thing and encodes it. */
 export async function render(
@@ -307,7 +315,11 @@ export async function render(
     latencyMode: 'quality',
   });
 
-  const total = Math.max(1, Math.round(project.duration * project.frameRate));
+  const from = Math.max(0, project.start);
+  const to = Math.min(project.duration, project.end > project.start ? project.end : project.duration);
+  const span = Math.max(1 / project.frameRate, to - from);
+
+  const total = Math.max(1, Math.round(span * project.frameRate));
   const step = 1 / project.frameRate;
   const durationUs = Math.round(1_000_000 / project.frameRate);
   const keyframeEvery = Math.max(1, Math.round(project.frameRate * 2));
@@ -316,14 +328,17 @@ export async function render(
     if (signal.aborted) { encoder.close(); throw new RenderError('Cancelled.'); }
     if (failure) { encoder.close(); throw failure; }
 
+    // Output time runs from zero; source time runs from the trim point.
     const time = index * step;
-    await seekTo(project.video, Math.min(project.duration - 1e-3, time));
+    const sourceTime = from + time;
+    await seekTo(project.video, Math.min(project.duration - 1e-3, sourceTime));
     if (project.camera) {
       // The camera runs on its own clock, so it is seeked to the same moment.
-      await seekTo(project.camera, Math.min(Math.max(0, project.camera.duration - 1e-3), time)).catch(() => {});
+      await seekTo(project.camera, Math.min(Math.max(0, project.camera.duration - 1e-3), sourceTime)).catch(() => {});
     }
 
-    drawFrame(context, project, time, zoomAt(track, time), cursorTrack.length ? sampleAt(cursorTrack, time) : null);
+    // The zoom track and the cursor are both in source time.
+    drawFrame(context, project, sourceTime, zoomAt(track, sourceTime), cursorTrack.length ? sampleAt(cursorTrack, sourceTime) : null);
 
     const frame = new VideoFrame(canvas, { timestamp: Math.round(time * 1_000_000), duration: durationUs });
     try {
@@ -340,8 +355,6 @@ export async function render(
   encoder.close();
   if (failure) throw failure;
 
-  onProgress({ stage: 'Writing the file', done: total, total });
-
   const videoTrack: WebmTrack = {
     kind: 'video',
     codec: codec.startsWith('vp09') ? 'V_VP9' : 'V_VP8',
@@ -350,6 +363,32 @@ export async function render(
     frameDuration: Math.round(1_000_000_000 / project.frameRate),
   };
 
-  const file = muxWebm({ tracks: [videoTrack], writingApp: 'Limelight on alexmerced.app' }, samples);
-  return { blob: new Blob([file as unknown as BlobPart], { type: 'video/webm' }), frames: total };
+  const tracks: WebmTrack[] = [videoTrack];
+  const all: WebmSample[] = [...samples];
+
+  // The recording carries the microphone and whatever system audio was shared.
+  // Dropping it would make the export silent, which is not what anyone who
+  // turned the microphone on is expecting.
+  if (project.keepAudio && project.source) {
+    onProgress({ stage: 'Encoding the sound', done: 0, total: 1 });
+    const audio = await encodeOpus(project.source, {
+      start: project.start,
+      end: project.end,
+      track: 2,
+    });
+    if (audio) {
+      tracks.push(audio.track);
+      // The video is re-timed from the trim point, so the audio has to be too,
+      // or the two drift apart by however far in the trim began.
+      all.push(...alignToZero(audio.samples));
+    }
+  }
+
+  onProgress({ stage: 'Writing the file', done: total, total });
+  const file = muxWebm({ tracks, writingApp: 'Limelight on alexmerced.app' }, all);
+  return {
+    blob: new Blob([file as unknown as BlobPart], { type: 'video/webm' }),
+    frames: total,
+    hasAudio: tracks.length > 1,
+  };
 }

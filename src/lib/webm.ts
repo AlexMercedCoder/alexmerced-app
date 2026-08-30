@@ -49,6 +49,8 @@ const ID = {
   SamplingFrequency: 0xb5,
   Channels: 0x9f,
   BitDepth: 0x6264,
+  CodecDelay: 0x56aa,
+  SeekPreRoll: 0x56bb,
 
   Cluster: 0x1f43b675,
   Timestamp: 0xe7,
@@ -215,6 +217,14 @@ function trackEntry(track: WebmTrack, number: number): Uint8Array {
       element(ID.DisplayHeight, encodeUnsigned(track.height)),
     ])));
   } else {
+    // Opus needs both of these. The delay is the encoder's pre-skip, which the
+    // player has to discard, and the pre-roll is how much audio it must decode
+    // before a seek to sound right. Leaving them out makes a file that some
+    // players reject and others play with a click at the start.
+    if (track.codec === 'A_OPUS') {
+      parts.push(element(ID.CodecDelay, encodeUnsigned(preSkipNanos(track.codecPrivate))));
+      parts.push(element(ID.SeekPreRoll, encodeUnsigned(80_000_000)));
+    }
     parts.push(element(ID.Audio, concat([
       element(ID.SamplingFrequency, encodeFloat(track.sampleRate)),
       element(ID.Channels, encodeUnsigned(track.channels)),
@@ -223,6 +233,19 @@ function trackEntry(track: WebmTrack, number: number): Uint8Array {
   }
 
   return element(ID.TrackEntry, concat(parts));
+}
+
+/**
+ * The pre-skip from an OpusHead, in nanoseconds.
+ *
+ * It sits at byte ten of the header as a little-endian count of samples at
+ * 48 kHz. Without a header, zero is the honest answer.
+ */
+export function preSkipNanos(codecPrivate?: Uint8Array): number {
+  if (!codecPrivate || codecPrivate.length < 12) return 0;
+  const view = new DataView(codecPrivate.buffer, codecPrivate.byteOffset, codecPrivate.byteLength);
+  const samples = view.getUint16(10, true);
+  return Math.round((samples / 48000) * 1_000_000_000);
 }
 
 /** How long a cluster may run before a new one has to start, in milliseconds. */
@@ -239,6 +262,19 @@ export type MuxOptions = { tracks: WebmTrack[]; writingApp?: string };
  */
 export function muxWebm(options: MuxOptions, samples: WebmSample[]): Uint8Array {
   if (options.tracks.length === 0) throw new Error('A WebM file needs at least one track.');
+
+  // Tracks are numbered from one by position, so a block pointing at a number
+  // outside that range names a track the file does not contain. Players do not
+  // complain about this: they simply produce nothing, which is far worse to
+  // debug than being told now.
+  const highest = options.tracks.length;
+  for (const sample of samples) {
+    if (!Number.isInteger(sample.track) || sample.track < 1 || sample.track > highest) {
+      throw new Error(
+        `A frame refers to track ${sample.track}, but this file has ${highest === 1 ? 'only track 1' : `tracks 1 to ${highest}`}.`,
+      );
+    }
+  }
 
   const header = element(ID.EBML, concat([
     element(ID.EBMLVersion, encodeUnsigned(1)),

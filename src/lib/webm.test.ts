@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   children, concat, element, encodeFloat, encodeLength, encodeString, encodeUnsigned, findChild,
-  muxWebm, readElement, readFloat, readString, readUnsigned, simpleBlock, TIMESTAMP_SCALE,
+  muxWebm, preSkipNanos, readElement, readFloat, readString, readUnsigned, simpleBlock, TIMESTAMP_SCALE,
   WEBM_IDS, type WebmSample, type WebmTrack,
 } from './webm';
 
@@ -306,5 +306,88 @@ describe('concat', () => {
   it('joins byte runs in order', () => {
     expect(Array.from(concat([Uint8Array.from([1, 2]), Uint8Array.from([3])]))).toEqual([1, 2, 3]);
     expect(concat([])).toHaveLength(0);
+  });
+});
+
+describe('Opus in Matroska', () => {
+  /** An OpusHead with a pre-skip, which is what a real encoder hands back. */
+  function opusHead(preSkip: number): Uint8Array {
+    const head = new Uint8Array(19);
+    head.set(new TextEncoder().encode('OpusHead'), 0);
+    head[8] = 1;
+    head[9] = 2;
+    new DataView(head.buffer).setUint16(10, preSkip, true);
+    new DataView(head.buffer).setUint32(12, 48000, true);
+    return head;
+  }
+
+  function audioEntry(track: WebmTrack) {
+    const file = muxWebm({ tracks: [track] }, frames(4, 1, 20_000));
+    const header = readElement(file, 0)!;
+    const segment = readElement(file, header.headerSize + header.size)!;
+    const tracks = findChild(segment.payload, WEBM_IDS.Tracks)!;
+    return findChild(tracks.payload, WEBM_IDS.TrackEntry)!;
+  }
+
+  it('carries the OpusHead as CodecPrivate, without which nothing can decode it', () => {
+    const head = opusHead(312);
+    const entry = audioEntry({ ...AUDIO, codecPrivate: head });
+    expect(Array.from(findChild(entry.payload, WEBM_IDS.CodecPrivate)!.payload)).toEqual(Array.from(head));
+  });
+
+  it('writes the codec delay from the pre-skip in the header', () => {
+    // 312 samples at 48 kHz is 6.5 ms, which is 6,500,000 nanoseconds.
+    const entry = audioEntry({ ...AUDIO, codecPrivate: opusHead(312) });
+    expect(readUnsigned(findChild(entry.payload, WEBM_IDS.CodecDelay)!.payload)).toBe(6_500_000);
+  });
+
+  it('writes the eighty millisecond seek pre-roll Opus requires', () => {
+    const entry = audioEntry({ ...AUDIO, codecPrivate: opusHead(312) });
+    expect(readUnsigned(findChild(entry.payload, WEBM_IDS.SeekPreRoll)!.payload)).toBe(80_000_000);
+  });
+
+  it('writes a zero delay when there is no header to read one from', () => {
+    const entry = audioEntry(AUDIO);
+    expect(readUnsigned(findChild(entry.payload, WEBM_IDS.CodecDelay)!.payload)).toBe(0);
+  });
+
+  it('leaves those elements off a video track, where they mean nothing', () => {
+    const entry = audioEntry(VIDEO);
+    expect(findChild(entry.payload, WEBM_IDS.CodecDelay)).toBeNull();
+    expect(findChild(entry.payload, WEBM_IDS.SeekPreRoll)).toBeNull();
+  });
+
+  it('reads a pre-skip only from a header long enough to hold one', () => {
+    expect(preSkipNanos(undefined)).toBe(0);
+    expect(preSkipNanos(new Uint8Array(4))).toBe(0);
+  });
+});
+
+describe('refusing a file that would not play', () => {
+  it('rejects a frame pointing at a track that does not exist', () => {
+    // The commonest way to get this wrong: encode audio as track 2, then mux
+    // it on its own, where it is track 1. The file writes, and plays silence.
+    expect(() => muxWebm({ tracks: [AUDIO] }, [
+      { track: 2, timestamp: 0, data: new Uint8Array(1), keyframe: true },
+    ])).toThrow(/only track 1/);
+  });
+
+  it('names the range when there is more than one track', () => {
+    expect(() => muxWebm({ tracks: [VIDEO, AUDIO] }, [
+      { track: 3, timestamp: 0, data: new Uint8Array(1), keyframe: true },
+    ])).toThrow(/tracks 1 to 2/);
+  });
+
+  it('rejects track zero, which EBML cannot address', () => {
+    expect(() => muxWebm({ tracks: [VIDEO] }, [
+      { track: 0, timestamp: 0, data: new Uint8Array(1), keyframe: true },
+    ])).toThrow(/refers to track 0/);
+  });
+
+  it('accepts frames that name real tracks', () => {
+    expect(() => muxWebm({ tracks: [VIDEO, AUDIO] }, [
+      { track: 1, timestamp: 0, data: new Uint8Array(1), keyframe: true },
+      { track: 2, timestamp: 0, data: new Uint8Array(1), keyframe: true },
+    ])).not.toThrow();
   });
 });
