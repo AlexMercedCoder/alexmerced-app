@@ -1,0 +1,155 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('stint');
+---
+<Base title="Stint, a time tracker for one person" description={app.description} app="stint" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="stint-root">
+    <AppBar app="stint">
+      <button class="btn btn--sm" id="st-settings">Rounding</button>
+      <button class="btn btn--sm" id="st-export-csv">Export CSV</button>
+    </AppBar>
+
+    <div class="st-timerbar">
+      <div class="shell shell--wide st-timerbar__inner">
+        <input id="st-description" class="st-desc" list="st-suggestions" placeholder="What are you working on?" autocomplete="off" aria-label="What are you working on" />
+        <datalist id="st-suggestions"></datalist>
+        <label class="sr-only" for="st-project">Project</label>
+        <select id="st-project" class="field field--sm st-project"></select>
+        <label class="st-billable-toggle" title="Billable">
+          <input type="checkbox" id="st-billable" checked />
+          <span>Billable</span>
+        </label>
+        <span class="st-timer" id="st-timer">00:00:00</span>
+        <button class="btn btn--primary" id="st-toggle">Start</button>
+      </div>
+    </div>
+
+    <div class="shell shell--wide st">
+      <div class="st-controls">
+        <div class="st-range" id="st-range">
+          <button type="button" class="st-rangebtn" data-range="day">Day</button>
+          <button type="button" class="st-rangebtn" data-range="week">Week</button>
+        </div>
+        <button class="btn btn--sm btn--ghost" id="st-prev" aria-label="Previous">‹</button>
+        <span class="st-range-label" id="st-range-label"></span>
+        <button class="btn btn--sm btn--ghost" id="st-next" aria-label="Next">›</button>
+        <button class="btn btn--sm btn--ghost" id="st-today">Today</button>
+        <span class="st-summary" id="st-summary"></span>
+      </div>
+
+      <div class="st-grid">
+        <section class="st-left">
+          <div class="st-entries-head">
+            <h2 class="st-subhead">Entries</h2>
+            <button class="btn btn--sm" id="st-add-entry">Add by hand</button>
+          </div>
+          <div class="st-entries" id="st-entries"></div>
+          <div class="empty" id="st-entries-empty">
+            <strong>Nothing tracked here yet</strong>
+            <p>Type what you are doing above and press Start, or add an entry by hand and set its duration.</p>
+          </div>
+        </section>
+
+        <aside class="st-right">
+          <h2 class="st-subhead">This week</h2>
+          <div class="st-daybars" id="st-daybars"></div>
+
+          <h2 class="st-subhead">By project</h2>
+          <div class="st-totals" id="st-project-totals"></div>
+
+          <div class="st-projects-head">
+            <h2 class="st-subhead">Projects</h2>
+            <button class="btn btn--sm btn--ghost" id="st-add-project">Add</button>
+          </div>
+          <div class="st-projects" id="st-projects"></div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountStint } from '../apps/stint/ui';
+  const root = document.getElementById('stint-root');
+  if (root) void mountStint(root as HTMLElement);
+</script>
+
+<style is:global>
+  .st-timerbar { background: var(--paper-raised); border-bottom: 1px solid var(--rule); padding: 0.85rem 0; position: sticky; top: var(--header-h); z-index: 20; }
+  .st-timerbar__inner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+  .st-desc { flex: 1; min-width: 12rem; border: 0; background: none; font-size: 1rem; padding: 0.4rem 0; }
+  .st-desc:focus { outline: none; }
+  .st-project { max-width: 12rem; }
+  .st-billable-toggle { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--text-soft); cursor: pointer; }
+  .st-timer { font: 600 1.35rem var(--mono); letter-spacing: -0.02em; min-width: 6.5rem; text-align: right; }
+  .st-timer[data-running] { color: var(--accent); }
+
+  .st { padding: 1rem 0 3rem; display: grid; gap: 1rem; }
+  .st-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .st-range { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--radius-sm); overflow: hidden; }
+  .st-rangebtn { background: var(--paper-raised); border: 0; cursor: pointer; font: 600 0.8rem var(--sans); padding: 0.4rem 0.7rem; color: var(--text-soft); }
+  .st-rangebtn.is-active { background: var(--accent); color: #fff; }
+  .st-range-label { font: 600 0.85rem var(--sans); min-width: 12rem; }
+  .st-summary { margin-left: auto; font: 0.82rem var(--mono); color: var(--text-soft); }
+
+  .st-grid { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1.5rem; align-items: start; }
+  .st-subhead { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0.75rem 0 0.5rem; }
+  .st-entries-head, .st-projects-head { display: flex; justify-content: space-between; align-items: center; }
+
+  .st-entries { display: grid; gap: 0.25rem; }
+  .st-dayhead { display: flex; justify-content: space-between; align-items: baseline; padding: 0.6rem 0.2rem 0.3rem; font-size: 0.82rem; color: var(--text-soft); border-bottom: 1px solid var(--rule); }
+  .st-dayhead strong { font: 600 0.85rem var(--mono); }
+
+  .st-entry {
+    display: grid; grid-template-columns: auto 1fr 8rem auto auto auto auto auto; gap: 0.4rem; align-items: center;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.35rem 0.5rem;
+  }
+  .st-entry[data-running] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .st-swatch { width: 0.6rem; height: 1.6rem; border-radius: 3px; flex: none; }
+  .st-swatch--button { border: 0; cursor: pointer; padding: 0; }
+  .st-entry__desc { border: 0; background: none; font-size: 0.88rem; padding: 0.25rem 0.2rem; min-width: 0; }
+  .st-entry__desc:focus { outline: none; background: var(--paper-sunk); border-radius: 4px; }
+  .st-entry__project { border: 0; background: none; font-size: 0.78rem; color: var(--text-soft); max-width: 8rem; }
+  .st-entry__times { font: 0.72rem var(--mono); color: var(--text-faint); white-space: nowrap; }
+  .st-entry__duration { background: none; border: 0; cursor: pointer; font: 600 0.85rem var(--mono); padding: 0.2rem 0.3rem; border-radius: 4px; }
+  .st-entry__duration:hover { background: var(--paper-sunk); }
+  .st-entry__billable { background: none; border: 0; cursor: pointer; font: 700 0.85rem var(--mono); color: var(--text-faint); padding: 0.2rem 0.35rem; }
+  .st-entry__billable[aria-pressed='true'] { color: var(--good); }
+  .st-icon { background: none; border: 0; cursor: pointer; color: var(--text-faint); font-size: 0.8rem; padding: 0.2rem 0.3rem; }
+  .st-icon:hover { color: var(--text); }
+
+  .st-daybars { display: flex; align-items: flex-end; gap: 3px; height: 4rem; }
+  .st-daybar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; height: 100%; background: none; border: 0; cursor: pointer; padding: 0; }
+  .st-daybar span { width: 100%; background: var(--accent); border-radius: 2px 2px 0 0; margin-top: auto; }
+  .st-daybar span[data-empty] { background: var(--rule); }
+  .st-daybar em { font: 0.62rem var(--mono); font-style: normal; color: var(--text-faint); }
+  .st-daybar[data-active] em { color: var(--accent); font-weight: 700; }
+
+  .st-totals { display: grid; gap: 0.4rem; }
+  .st-total { display: grid; grid-template-columns: 1fr; gap: 0.15rem; }
+  .st-total__name { font-size: 0.82rem; }
+  .st-total__bar { height: 5px; background: var(--paper-sunk); border-radius: 3px; overflow: hidden; }
+  .st-total__bar span { display: block; height: 100%; }
+  .st-total__value { font: 0.72rem var(--mono); color: var(--text-faint); }
+
+  .st-projects { display: grid; gap: 0.25rem; }
+  .st-project {
+    display: grid; grid-template-columns: auto 1fr 1fr 4rem auto; gap: 0.35rem; align-items: center;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.3rem 0.4rem;
+  }
+  .st-project[data-archived] { opacity: .5; }
+  .st-project__name, .st-project__client, .st-project__rate { border: 0; background: none; font-size: 0.8rem; padding: 0.2rem; min-width: 0; }
+  .st-project__name:focus, .st-project__client:focus, .st-project__rate:focus { outline: none; background: var(--paper-sunk); border-radius: 3px; }
+  .st-project__rate { text-align: right; }
+
+  @media (max-width: 940px) {
+    .st-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 700px) {
+    .st-entry { grid-template-columns: auto 1fr auto auto; }
+    .st-entry__project, .st-entry__times { grid-column: 2 / -1; }
+    .st-summary { margin-left: 0; width: 100%; }
+  }
+</style>

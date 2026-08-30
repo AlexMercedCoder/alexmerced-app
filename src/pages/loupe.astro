@@ -1,0 +1,161 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('loupe');
+---
+<Base title="Loupe, an image toolkit that never uploads" description={app.description} app="loupe" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="loupe-root" data-mode="fit" data-lossy="false">
+    <AppBar app="loupe">
+      <button class="btn btn--sm btn--primary" id="lp-save-all">Save all</button>
+      <button class="btn btn--sm" id="lp-clear-images">Clear list</button>
+    </AppBar>
+
+    <div class="shell shell--wide lp">
+      <aside class="lp-controls">
+        <div class="lp-presets" id="lp-presets"></div>
+
+        <label class="lp-field"><span>Resize</span>
+          <select id="lp-mode" class="field field--sm">
+            <option value="fit">Fit inside a box</option>
+            <option value="exact">Exact size</option>
+            <option value="scale">Scale by percent</option>
+            <option value="none">Do not resize</option>
+          </select>
+        </label>
+
+        <div class="lp-row" data-show="box">
+          <label class="lp-field"><span>Width</span><input id="lp-width" class="field field--sm" type="number" min="1" /></label>
+          <label class="lp-field"><span>Height</span><input id="lp-height" class="field field--sm" type="number" min="1" /></label>
+        </div>
+
+        <label class="lp-field" data-show="scale"><span>Percent</span><input id="lp-percent" class="field field--sm" type="number" min="1" max="400" /></label>
+
+        <label class="lp-field"><span>Format</span>
+          <select id="lp-format" class="field field--sm">
+            <option value="keep">Keep the original</option>
+            <option value="image/jpeg">JPEG</option>
+            <option value="image/png">PNG</option>
+            <option value="image/webp">WebP</option>
+          </select>
+        </label>
+
+        <label class="lp-field" data-show="lossy">
+          <span>Quality <em id="lp-quality-out"></em></span>
+          <input id="lp-quality" type="range" min="10" max="100" step="1" />
+        </label>
+
+        <label class="lp-field"><span>Rotate</span>
+          <select id="lp-rotate" class="field field--sm">
+            <option value="0">None</option>
+            <option value="90">90° right</option>
+            <option value="180">180°</option>
+            <option value="270">90° left</option>
+          </select>
+        </label>
+
+        <div class="lp-checks">
+          <label><input type="checkbox" id="lp-fliph" /><span>Flip across</span></label>
+          <label><input type="checkbox" id="lp-flipv" /><span>Flip down</span></label>
+        </div>
+
+        <label class="lp-field" data-show="lossy"><span>Background behind transparency</span><input id="lp-background" type="color" /></label>
+        <label class="lp-field"><span>Filename suffix</span><input id="lp-suffix" class="field field--sm" placeholder="-web" /></label>
+
+        <p class="lp-note">
+          Everything happens on this device. The images are never uploaded, and re-encoding through a
+          canvas keeps only the pixels, so location and camera metadata do not survive.
+        </p>
+      </aside>
+
+      <section class="lp-main">
+        <div class="lp-drop" id="lp-drop" tabindex="0" role="button" aria-label="Choose images">
+          <strong>Drop images here</strong>
+          <span>or click to choose. JPEG, PNG, WebP, GIF, AVIF, anything your browser can decode.</span>
+          <input type="file" id="lp-file" accept="image/*" multiple hidden />
+        </div>
+
+        <p class="lp-summary" id="lp-summary"></p>
+        <div class="lp-list" id="lp-list"></div>
+        <div class="empty" id="lp-empty">
+          <strong>No images yet</strong>
+          <p>Add some above. They stay in this tab, are processed on this device, and are gone when you close it unless you save them.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountLoupe } from '../apps/loupe/ui';
+  const root = document.getElementById('loupe-root');
+  if (root) void mountLoupe(root as HTMLElement);
+</script>
+
+<style is:global>
+  .lp { display: grid; grid-template-columns: 17rem minmax(0, 1fr); gap: 1.75rem; padding: 1.25rem 0 3rem; align-items: start; }
+  .lp-controls { display: grid; gap: 0.7rem; position: sticky; top: calc(var(--header-h) + 1rem); }
+  .lp-field { display: grid; gap: 0.25rem; }
+  .lp-field > span { font: 600 0.75rem var(--sans); color: var(--text-soft); display: flex; justify-content: space-between; }
+  .lp-field em { font-style: normal; font-family: var(--mono); color: var(--text-faint); }
+  .lp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .lp-checks { display: flex; gap: 1rem; }
+  .lp-checks label { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--text-soft); cursor: pointer; }
+  .lp-note { font-size: 0.76rem; color: var(--text-faint); line-height: 1.5; margin: 0.25rem 0 0; }
+  input[type='color'] { width: 100%; height: 2.2rem; padding: 0.15rem; border: 1px solid var(--rule-strong); border-radius: var(--radius-sm); background: var(--paper-raised); cursor: pointer; }
+  #loupe-root:not([data-mode='fit']):not([data-mode='exact']) [data-show='box'] { display: none; }
+  #loupe-root:not([data-mode='scale']) [data-show='scale'] { display: none; }
+  #loupe-root[data-lossy='false'] [data-show='lossy'] { display: none; }
+
+  .lp-presets { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .lp-preset {
+    font: 600 0.74rem var(--sans); padding: 0.32rem 0.6rem; cursor: pointer;
+    border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-raised); color: var(--text-soft);
+  }
+  .lp-preset:hover { border-color: var(--accent); color: var(--accent); }
+  .lp-preset--add { border-style: dashed; }
+
+  .lp-main { display: grid; gap: 0.85rem; }
+  .lp-drop {
+    display: grid; gap: 0.3rem; place-items: center; text-align: center; cursor: pointer;
+    border: 2px dashed var(--rule-strong); border-radius: var(--radius); padding: 2rem 1rem;
+    background: var(--paper-raised); transition: border-color .14s ease, background .14s ease;
+  }
+  .lp-drop:hover, .lp-drop[data-over] { border-color: var(--accent); background: var(--accent-soft); }
+  .lp-drop strong { font-size: 1rem; }
+  .lp-drop span { font-size: 0.82rem; color: var(--text-faint); max-width: 28rem; }
+
+  .lp-summary { margin: 0; font: 0.8rem var(--mono); color: var(--text-soft); }
+  #loupe-root[data-busy] .lp-summary::after { content: ' · working…'; color: var(--accent); }
+
+  .lp-list { display: grid; gap: 0.6rem; }
+  .lp-item {
+    display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) auto; gap: 0.9rem; align-items: start;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem;
+  }
+  .lp-item__preview { width: 5.5rem; height: 5.5rem; object-fit: contain; background: var(--paper-sunk); border-radius: var(--radius-sm); }
+  .lp-item__body { display: grid; gap: 0.25rem; min-width: 0; }
+  .lp-item__body strong { font-size: 0.9rem; overflow-wrap: anywhere; }
+  .lp-item__sizes { font: 0.76rem var(--mono); color: var(--text-faint); }
+  .lp-savings { font-style: normal; color: var(--good); font-weight: 600; }
+  .lp-savings[data-grew='true'] { color: var(--warn); }
+  .lp-item__actions { display: grid; gap: 0.3rem; }
+
+  .lp-exif { font-size: 0.78rem; margin-top: 0.2rem; }
+  .lp-exif summary { cursor: pointer; color: var(--text-soft); }
+  .lp-exif summary[data-warn] { color: var(--warn); font-weight: 600; }
+  .lp-exif dl { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; margin: 0.4rem 0 0; }
+  .lp-exif dt { font-weight: 600; color: var(--text-faint); }
+  .lp-exif dd { margin: 0; font-family: var(--mono); font-size: 0.74rem; overflow-wrap: anywhere; }
+  .lp-exif dd[data-sensitive] { color: var(--warn); }
+  .lp-exif__note { margin: 0.5rem 0 0; color: var(--text-faint); font-size: 0.74rem; }
+
+  @media (max-width: 940px) {
+    .lp { grid-template-columns: 1fr; }
+    .lp-controls { position: static; }
+  }
+  @media (max-width: 600px) {
+    .lp-item { grid-template-columns: 4rem minmax(0, 1fr); }
+    .lp-item__actions { grid-column: 1 / -1; grid-auto-flow: column; justify-content: start; }
+  }
+</style>

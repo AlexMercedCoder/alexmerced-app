@@ -47,6 +47,8 @@
 [data-theme='reckoner']  { --accent: #c07a12; --accent-soft: #f7ecd8; }
 [data-theme='sift']      { --accent: #7a5195; --accent-soft: #ece4f2; }
 [data-theme='rote']      { --accent: #c2415c; --accent-soft: #f8e2e7; }
+[data-theme='stint']     { --accent: #0d7a8c; --accent-soft: #daf0f3; }
+[data-theme='loupe']     { --accent: #4a6fa5; --accent-soft: #e3ebf5; }
 
 *, *::before, *::after { box-sizing: border-box; }
 
