@@ -1,5 +1,16 @@
+export type Category = 'write' | 'plan' | 'data' | 'make' | 'count';
+
+export const CATEGORIES: { id: Category; label: string; blurb: string }[] = [
+  { id: 'write', label: 'Writing and notes', blurb: 'Places to put words, from a passing thought to a nested workspace.' },
+  { id: 'plan', label: 'Planning and time', blurb: 'What you are doing, what is left, and where the hours went.' },
+  { id: 'data', label: 'Data tools', blurb: 'Reshape, generate and interrogate structured data without uploading it.' },
+  { id: 'make', label: 'Making files', blurb: 'Produce something to hand over: an image, a PDF, a deck, a code.' },
+  { id: 'count', label: 'Working things out', blurb: 'Numbers and patterns.' },
+];
+
 export type AppEntry = {
   slug: string;
+  category: Category;
   name: string;
   tagline: string;
   description: string;
@@ -19,6 +30,7 @@ export type AppEntry = {
 export const apps: AppEntry[] = [
   {
     slug: 'warren',
+    category: 'write',
     name: 'Warren',
     tagline: 'Nested pages that go as deep as you do',
     description:
@@ -38,6 +50,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'laneway',
+    category: 'plan',
     name: 'Laneway',
     tagline: 'A kanban board sized for one person',
     description:
@@ -57,6 +70,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'jotterbug',
+    category: 'write',
     name: 'Jotterbug',
     tagline: 'Catch it before it gets away',
     description:
@@ -76,6 +90,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'tessera',
+    category: 'make',
     name: 'Tessera',
     tagline: 'QR codes for anything you need to hand over',
     description:
@@ -94,7 +109,48 @@ export const apps: AppEntry[] = [
     keywords: ['qr code generator', 'wifi qr code', 'vcard qr', 'offline qr generator'],
   },
   {
+    slug: 'rostrum',
+    category: 'make',
+    name: 'Rostrum',
+    tagline: 'Build the deck, then stand behind it',
+    description:
+      'Slides made of blocks, with a presenter view in a second window carrying your notes, a timer and the next slide. Import from Markdown, export to Markdown, a PDF, or one self-contained HTML file that runs on any machine with no network at all.',
+    action: 'Open Rostrum',
+    theme: 'rostrum',
+    accent: '#5b4bbd',
+    accentSoft: '#e6e2f7',
+    storage: 'IndexedDB and localStorage',
+    features: [
+      'Six themes, five layouts, and eight kinds of block',
+      'Presenter view with speaker notes, a timer, and the next slide',
+      'Markdown in and out, with three dashes between slides',
+      'Export a PDF, or one HTML file that needs nothing else to run',
+    ],
+    keywords: ['presentation tool', 'slide deck', 'markdown slides', 'presenter view', 'offline slides'],
+  },
+  {
+    slug: 'quire',
+    category: 'make',
+    name: 'Quire',
+    tagline: 'Rearrange PDFs without handing them to anyone',
+    description:
+      'Merge, split, reorder, rotate and extract PDF pages entirely on your own machine. Every other tool that does this uploads your documents to a server first. This one parses the file, moves the objects, and writes a new one, all in the tab you are looking at.',
+    action: 'Open Quire',
+    theme: 'quire',
+    accent: '#a03d55',
+    accentSoft: '#f6e0e6',
+    storage: 'none',
+    features: [
+      'Merge several files, reorder by dragging, rotate and delete pages',
+      'Split into chunks of any size, delivered as a ZIP',
+      'Turn images into PDF pages',
+      'Preview through your browser\u2019s own viewer, so nothing extra loads',
+    ],
+    keywords: ['merge pdf', 'split pdf', 'rotate pdf', 'pdf editor', 'offline pdf tool'],
+  },
+  {
     slug: 'fabler',
+    category: 'data',
     name: 'Fabler',
     tagline: 'Believable data, reproducible every time',
     description:
@@ -114,6 +170,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'decanter',
+    category: 'data',
     name: 'Decanter',
     tagline: 'Pour data from one shape into another',
     description:
@@ -133,6 +190,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'loupe',
+    category: 'make',
     name: 'Loupe',
     tagline: 'Resize and convert without uploading anything',
     description:
@@ -152,6 +210,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'stint',
+    category: 'plan',
     name: 'Stint',
     tagline: 'Where the hours actually went',
     description:
@@ -171,6 +230,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'rote',
+    category: 'plan',
     name: 'Rote',
     tagline: 'Flashcards that know when to ask again',
     description:
@@ -190,6 +250,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'sift',
+    category: 'count',
     name: 'Sift',
     tagline: 'Regular expressions, explained as you build them',
     description:
@@ -209,6 +270,7 @@ export const apps: AppEntry[] = [
   },
   {
     slug: 'reckoner',
+    category: 'count',
     name: 'Reckoner',
     tagline: 'A calculator that shows its working',
     description:
@@ -229,6 +291,12 @@ export const apps: AppEntry[] = [
 ];
 
 export const appsBySlug = new Map(apps.map((app) => [app.slug, app]));
+
+export function appsByCategory(): { category: (typeof CATEGORIES)[number]; entries: AppEntry[] }[] {
+  return CATEGORIES
+    .map((category) => ({ category, entries: apps.filter((app) => app.category === category.id) }))
+    .filter((group) => group.entries.length > 0);
+}
 
 export function getApp(slug: string): AppEntry {
   const app = appsBySlug.get(slug);

@@ -1,6 +1,7 @@
 ---
 import '../styles/global.css';
 import { apps } from '../data/apps';
+import WebMCP from '../components/WebMCP.astro';
 
 export interface Props {
   title: string;
@@ -20,27 +21,72 @@ const canonical = new URL(Astro.url.pathname.replace(/\/$/, '') || '/', SITE).hr
 const entry = app ? apps.find((candidate) => candidate.slug === app) : undefined;
 const fullTitle = Astro.url.pathname === '/' ? title : `${title} · alexmerced.app`;
 
+const appGraph = entry
+  ? [
+      {
+        '@type': 'SoftwareApplication',
+        '@id': `${SITE}/${entry.slug}#app`,
+        name: entry.name,
+        alternateName: `${entry.name} on alexmerced.app`,
+        url: `${SITE}/${entry.slug}`,
+        description: entry.description,
+        abstract: entry.tagline,
+        applicationCategory: 'UtilitiesApplication',
+        applicationSubCategory: entry.category,
+        operatingSystem: 'Any browser',
+        browserRequirements: 'Requires JavaScript and IndexedDB. Works offline once installed.',
+        featureList: entry.features,
+        keywords: entry.keywords.join(', '),
+        isAccessibleForFree: true,
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+        author: { '@id': `${SITE}/#alexmerced` },
+        publisher: { '@id': `${SITE}/#alexmerced` },
+        isPartOf: { '@id': `${SITE}/#website` },
+        softwareHelp: { '@type': 'CreativeWork', url: `${SITE}/about` },
+        privacyPolicy: `${SITE}/about`,
+      },
+      {
+        '@type': 'BreadcrumbList',
+        '@id': `${SITE}/${entry.slug}#breadcrumbs`,
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: 'alexmerced.app', item: `${SITE}/` },
+          { '@type': 'ListItem', position: 2, name: entry.name, item: `${SITE}/${entry.slug}` },
+        ],
+      },
+    ]
+  : [];
+
 const baseGraph = [
   {
     '@type': 'WebSite',
     '@id': `${SITE}/#website`,
     name: 'alexmerced.app',
+    alternateName: 'Alex Merced app shelf',
     url: `${SITE}/`,
     description:
-      'A shelf of small browser tools by Alex Merced. Every one runs entirely on your own machine, stores its data locally, and lets you export it to a file whenever you want.',
+      'Thirteen small browser tools by Alex Merced. Every one runs entirely on your own machine, stores its data locally, and lets you export it to a file whenever you want.',
     inLanguage: 'en-US',
     author: { '@id': `${SITE}/#alexmerced` },
+    publisher: { '@id': `${SITE}/#alexmerced` },
+    hasPart: apps.map((item) => ({ '@id': `${SITE}/${item.slug}#app` })),
   },
   {
     '@type': 'Person',
     '@id': `${SITE}/#alexmerced`,
     name: 'Alex Merced',
     url: 'https://alexmerced.com',
-    sameAs: ['https://github.com/alexmercedcoder', 'https://www.linkedin.com/in/alexmerced'],
+    jobTitle: 'Head of Developer Relations',
+    worksFor: { '@type': 'Organization', name: 'Dremio', url: 'https://www.dremio.com' },
+    sameAs: [
+      'https://alexmerced.com',
+      'https://github.com/alexmercedcoder',
+      'https://www.linkedin.com/in/alexmerced',
+      'https://alexmercedcoder.dev',
+    ],
   },
 ];
 
-const graph = { '@context': 'https://schema.org', '@graph': [...baseGraph, ...jsonLd] };
+const graph = { '@context': 'https://schema.org', '@graph': [...baseGraph, ...appGraph, ...jsonLd] };
 ---
 
 <!doctype html>
@@ -65,11 +111,18 @@ const graph = { '@context': 'https://schema.org', '@graph': [...baseGraph, ...js
     <meta property="og:image" content={`${SITE}/og.png`} />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="alexmerced.app, small tools that keep your data on your machine" />
+    <meta property="og:locale" content="en_US" />
+
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={fullTitle} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={`${SITE}/og.png`} />
+    <meta name="twitter:creator" content="@AMdatalakehouse" />
 
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
     <link rel="sitemap" type="application/xml" href="/sitemap-index.xml" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icon-180.png" />
@@ -84,6 +137,7 @@ const graph = { '@context': 'https://schema.org', '@graph': [...baseGraph, ...js
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to main content</a>
+    <WebMCP />
 
     <header class="site-header">
       <div class="shell shell--wide site-header__inner">

@@ -1,0 +1,116 @@
+---
+import { CATEGORIES, apps } from '../data/apps';
+
+const catalog = apps.map((app) => ({
+  slug: app.slug,
+  name: app.name,
+  category: app.category,
+  tagline: app.tagline,
+  description: app.description,
+  features: app.features,
+  storage: app.storage,
+  keywords: app.keywords,
+  url: `https://alexmerced.app/${app.slug}`,
+}));
+
+const categories = CATEGORIES.map((category) => ({ id: category.id, label: category.label, blurb: category.blurb }));
+
+const storagePolicy = {
+  summary:
+    'Every app runs entirely in the visitor’s browser. Records go in IndexedDB, interface preferences in localStorage. Nothing is uploaded, there is no account, and there is no analytics or third-party code.',
+  consequences: [
+    'Data is scoped to one browser on one device and does not sync.',
+    'Private windows usually discard everything on close.',
+    'Clearing site data deletes it, and it cannot be recovered by anyone.',
+    'Nobody, the author included, can see what a visitor writes.',
+  ],
+  portability:
+    'Every app exports its whole dataset as JSON using one shared envelope, and imports it back with a merge or replace choice. Merging keeps whichever copy was edited most recently.',
+  offline: 'The site installs as a progressive web app and works with no network at all after the first visit.',
+};
+---
+
+<script is:inline define:vars={{ catalog, categories, storagePolicy }}>
+  (function () {
+    // The proposal has moved between navigator and document; accept either.
+    const ctx = navigator.modelContext || document.modelContext;
+    if (!ctx || typeof ctx.registerTool !== 'function') return;
+
+    const ok = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
+
+    const tools = [
+      {
+        name: 'list_apps',
+        description:
+          'List every tool on alexmerced.app, with what it does, its features, where it stores data, and its URL. Categories are: write (notes), plan (tasks and time), data (format and generation tools), make (files: images, PDFs, decks, QR codes), and count (calculator and regex).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            category: {
+              type: 'string',
+              enum: categories.map((entry) => entry.id),
+              description: 'Optional category filter. Omit to list everything.',
+            },
+          },
+        },
+        execute: async ({ category } = {}) =>
+          ok({
+            categories,
+            apps: category ? catalog.filter((app) => app.category === category) : catalog,
+          }),
+      },
+      {
+        name: 'search_apps',
+        description:
+          'Find the tool on alexmerced.app that does a particular job. Searches names, taglines, descriptions, features and keywords. Try terms like "resize an image", "merge PDFs", "kanban", "regex", "flashcards", "csv to json", "qr code", "time tracking", or "slides".',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string', description: 'What you are trying to do.' } },
+          required: ['query'],
+        },
+        execute: async ({ query }) => {
+          const terms = String(query || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+          if (!terms.length) return ok([]);
+
+          const scored = catalog
+            .map((app) => {
+              const haystack = [app.name, app.tagline, app.description, app.features.join(' '), app.keywords.join(' ')]
+                .join(' ')
+                .toLowerCase();
+              const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0);
+              return { app, score };
+            })
+            .filter((entry) => entry.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .map((entry) => entry.app);
+
+          return ok(scored);
+        },
+      },
+      {
+        name: 'get_app',
+        description: 'Get the full description of one tool on alexmerced.app by its slug.',
+        inputSchema: {
+          type: 'object',
+          properties: { slug: { type: 'string', description: 'For example warren, laneway, tessera.' } },
+          required: ['slug'],
+        },
+        execute: async ({ slug }) => {
+          const app = catalog.find((entry) => entry.slug === slug);
+          return ok(app || { error: `No app with slug "${slug}".`, available: catalog.map((entry) => entry.slug) });
+        },
+      },
+      {
+        name: 'get_storage_policy',
+        description:
+          'Explain how alexmerced.app stores data, what that means for the visitor, and how data can be moved off the device. Use this before telling anyone their data is stored in the cloud, because it is not.',
+        inputSchema: { type: 'object', properties: {} },
+        execute: async () => ok(storagePolicy),
+      },
+    ];
+
+    for (const tool of tools) {
+      try { ctx.registerTool(tool); } catch (error) { /* unsupported, or already registered */ }
+    }
+  })();
+</script>

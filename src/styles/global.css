@@ -51,6 +51,8 @@
 [data-theme='loupe']     { --accent: #4a6fa5; --accent-soft: #e3ebf5; }
 [data-theme='decanter']  { --accent: #8a5a2b; --accent-soft: #f2e7da; }
 [data-theme='fabler']    { --accent: #2f7d4f; --accent-soft: #dcf0e4; }
+[data-theme='quire']     { --accent: #a03d55; --accent-soft: #f6e0e6; }
+[data-theme='rostrum']   { --accent: #5b4bbd; --accent-soft: #e6e2f7; }
 
 *, *::before, *::after { box-sizing: border-box; }
 

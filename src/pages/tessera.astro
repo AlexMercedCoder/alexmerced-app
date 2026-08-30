@@ -5,18 +5,6 @@ import { getApp } from '../data/apps';
 
 const app = getApp('tessera');
 
-const jsonLd = [{
-  '@type': 'SoftwareApplication',
-  '@id': 'https://alexmerced.app/tessera#app',
-  name: 'Tessera',
-  applicationCategory: 'UtilitiesApplication',
-  operatingSystem: 'Any browser',
-  url: 'https://alexmerced.app/tessera',
-  description: app.description,
-  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-  author: { '@id': 'https://alexmerced.app/#alexmerced' },
-  featureList: app.features,
-}];
 ---
 
 <Base
@@ -24,7 +12,6 @@ const jsonLd = [{
   description={app.description}
   app="tessera"
   chrome="app"
-  jsonLd={jsonLd}
   keywords={app.keywords}
 >
   <div class="app-frame" id="tessera-root">

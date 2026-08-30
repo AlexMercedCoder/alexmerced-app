@@ -2,4 +2,18 @@
 User-agent: *
 Allow: /
 
+# Thirteen browser tools that store data on the visitor's own device.
+# Crawling is welcome. There is nothing here that needs a login.
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
 Sitemap: https://alexmerced.app/sitemap-index.xml

@@ -1,0 +1,118 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('quire');
+---
+<Base title="Quire, a PDF toolkit that never uploads" description={app.description} app="quire" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="quire-root">
+    <AppBar app="quire">
+      <button class="btn btn--sm" id="qr-add-images">Add images</button>
+      <button class="btn btn--sm" id="qr-select-all">Select all</button>
+      <button class="btn btn--sm" id="qr-rotate-all">Rotate selected</button>
+      <button class="btn btn--sm" id="qr-reverse">Reverse</button>
+      <button class="btn btn--sm" id="qr-split">Split</button>
+      <button class="btn btn--sm btn--primary" id="qr-save">Save PDF</button>
+      <button class="btn btn--sm btn--danger" id="qr-clear">Clear</button>
+    </AppBar>
+
+    <div class="shell shell--wide qr">
+      <div class="qr-drop" id="qr-drop" tabindex="0" role="button" aria-label="Choose PDF files">
+        <strong>Drop PDFs here</strong>
+        <span>or click to choose. Drop images too and they become pages. Nothing is uploaded: the files are read and rewritten on this device.</span>
+        <input type="file" id="qr-file" accept="application/pdf,.pdf" multiple hidden />
+        <input type="file" id="qr-image-file" accept="image/*" multiple hidden />
+      </div>
+
+      <div class="qr-sources" id="qr-sources"></div>
+
+      <div class="qr-bar">
+        <span class="qr-summary" id="qr-summary"></span>
+        <label class="qr-inline"><span>Pages</span><input id="qr-range" class="field field--sm qr-range" placeholder="1-3, 7" /></label>
+      </div>
+
+      <div class="qr-layout">
+        <div class="qr-grid" id="qr-grid"></div>
+
+        <aside class="qr-preview-wrap" id="qr-preview-wrap" hidden>
+          <h2 class="qr-subhead">Preview</h2>
+          <iframe id="qr-preview" class="qr-preview" title="Preview of the finished PDF"></iframe>
+          <p class="qr-note">Rendered by your browser's own PDF viewer, so nothing extra is loaded.</p>
+        </aside>
+      </div>
+
+      <div class="empty" id="qr-empty">
+        <strong>No pages yet</strong>
+        <p>Add one PDF to reorder, rotate, split or extract from it. Add several to merge them. Drag pages to rearrange, and untick any you do not want in the output.</p>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountQuire } from '../apps/quire/ui';
+  const root = document.getElementById('quire-root');
+  if (root) void mountQuire(root as HTMLElement);
+</script>
+
+<style is:global>
+  .qr { padding: 1.25rem 0 3rem; display: grid; gap: 0.85rem; }
+  .qr-drop {
+    display: grid; gap: 0.3rem; place-items: center; text-align: center; cursor: pointer;
+    border: 2px dashed var(--rule-strong); border-radius: var(--radius); padding: 1.6rem 1rem;
+    background: var(--paper-raised);
+  }
+  .qr-drop:hover, .qr-drop[data-over] { border-color: var(--accent); background: var(--accent-soft); }
+  .qr-drop strong { font-size: 1rem; }
+  .qr-drop span { font-size: 0.8rem; color: var(--text-faint); max-width: 34rem; }
+
+  .qr-sources { display: grid; gap: 0.25rem; }
+  .qr-source {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 0.6rem; align-items: center;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm);
+    padding: 0.35rem 0.6rem; font-size: 0.82rem;
+  }
+  .qr-source em { font: 0.72rem var(--mono); color: var(--text-faint); font-style: normal; }
+
+  .qr-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+  .qr-summary { font: 0.8rem var(--mono); color: var(--text-soft); }
+  .qr-inline { display: inline-flex; align-items: center; gap: 0.35rem; font: 600 0.75rem var(--sans); color: var(--text-soft); margin-left: auto; }
+  .qr-range { width: 10rem; font-family: var(--mono); }
+
+  .qr-layout { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1.25rem; align-items: start; }
+  .qr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 0.7rem; }
+
+  .qr-page {
+    position: relative; background: var(--paper-raised); border: 1px solid var(--rule);
+    border-radius: var(--radius-sm); padding: 0.5rem; display: grid; gap: 0.35rem; cursor: grab;
+  }
+  .qr-page[data-selected='true'] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .qr-page[data-dragging='true'] { opacity: .4; }
+  .qr-page__thumb {
+    background: var(--paper-sunk); border: 1px solid var(--rule); border-radius: 3px;
+    display: grid; place-items: center; position: relative; min-height: 4rem;
+  }
+  .qr-page__number { font: 700 1.4rem var(--mono); color: var(--text-faint); }
+  .qr-page__rot { position: absolute; top: 0.2rem; right: 0.3rem; font: 600 0.66rem var(--mono); color: var(--accent); font-style: normal; }
+  .qr-page__meta { font: 0.66rem var(--mono); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qr-page__actions { display: flex; gap: 0.1rem; justify-content: center; }
+  .qr-page__btn { background: none; border: 0; cursor: pointer; color: var(--text-faint); font-size: 0.85rem; padding: 0.15rem 0.3rem; border-radius: 3px; }
+  .qr-page__btn:hover { background: var(--paper-sunk); color: var(--text); }
+  .qr-page__select {
+    position: absolute; top: 0.4rem; left: 0.4rem; width: 1.05rem; height: 1.05rem; z-index: 2;
+    border: 1.5px solid var(--rule-strong); border-radius: 4px; background: var(--paper-raised); cursor: pointer;
+  }
+  .qr-page__select[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); }
+  .qr-page__select[aria-pressed='true']::after { content: '✓'; color: #fff; font-size: 0.7rem; line-height: 1; display: block; }
+
+  .qr-preview-wrap { position: sticky; top: calc(var(--header-h) + 1rem); display: grid; gap: 0.4rem; }
+  .qr-subhead { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0; }
+  .qr-preview { width: 100%; height: 28rem; border: 1px solid var(--rule); border-radius: var(--radius-sm); background: var(--paper-sunk); }
+  .qr-note { margin: 0; font-size: 0.74rem; color: var(--text-faint); }
+
+  @media (max-width: 1000px) {
+    .qr-layout { grid-template-columns: 1fr; }
+    .qr-preview-wrap { position: static; }
+    .qr-preview { height: 20rem; }
+  }
+</style>

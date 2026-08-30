@@ -1,6 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
-import { apps } from '../data/apps';
+import { apps, appsByCategory } from '../data/apps';
 
 const jsonLd = [
   {
@@ -40,7 +40,7 @@ const jsonLd = [
   <section class="hero">
     <div class="shell shell--wide">
       <p class="eyebrow">alexmerced.app</p>
-      <h1>Small tools that keep<br />your data on your machine.</h1>
+      <h1>Thirteen small tools that keep your data on your machine.</h1>
       <p class="hero__lede">
         A shelf of things I wanted and could not find in a shape I liked. Each one runs entirely in
         your browser. Nothing is uploaded, nothing needs an account, and every app writes its whole
@@ -52,13 +52,19 @@ const jsonLd = [
         <li><strong>No server</strong><span>Your work is stored in this browser, in IndexedDB and localStorage.</span></li>
         <li><strong>No lock-in</strong><span>Export writes a plain JSON file. Import reads it back, anywhere.</span></li>
         <li><strong>No connection</strong><span>Install it to your phone or desktop and it keeps working with the network off.</span></li>
+        <li><strong>No dependencies</strong><span>The QR encoder, the PDF reader and writer, and every format parser are written here from scratch.</span></li>
       </ul>
     </div>
   </section>
 
-  <section class="shell shell--wide shelf" aria-label="The apps">
+  {appsByCategory().map((group) => (
+  <section class="shell shell--wide shelf" aria-labelledby={`cat-${group.category.id}`}>
+    <header class="shelf__head">
+      <h2 id={`cat-${group.category.id}`}>{group.category.label}</h2>
+      <p>{group.category.blurb}</p>
+    </header>
     <ul class="shelf__grid">
-      {apps.map((app) => (
+      {group.entries.map((app) => (
         <li class="card" style={`--card-accent:${app.accent};--card-soft:${app.accentSoft}`}>
           <a class="card__link" href={`/${app.slug}`} aria-label={`${app.action}, ${app.tagline}`}></a>
           <div class="card__head">
@@ -80,6 +86,7 @@ const jsonLd = [
       ))}
     </ul>
   </section>
+  ))}
 
   <section class="shell shell--wide explain">
     <div class="explain__grid">
@@ -123,7 +130,10 @@ const jsonLd = [
   .promises strong { font-size: 0.95rem; }
   .promises span { font-size: 0.87rem; color: var(--text-soft); }
 
-  .shelf { padding: 1.5rem 0 2rem; }
+  .shelf { padding: 0.5rem 0 1.5rem; }
+  .shelf__head { max-width: 44rem; margin-bottom: 0.9rem; }
+  .shelf__head h2 { font-size: 1.2rem; margin: 0 0 0.2rem; }
+  .shelf__head p { margin: 0; font-size: 0.88rem; color: var(--text-soft); }
   .shelf__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1.1rem; }
 
   .card {

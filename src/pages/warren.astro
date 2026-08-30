@@ -5,18 +5,6 @@ import { getApp } from '../data/apps';
 
 const app = getApp('warren');
 
-const jsonLd = [{
-  '@type': 'SoftwareApplication',
-  '@id': 'https://alexmerced.app/warren#app',
-  name: 'Warren',
-  applicationCategory: 'ProductivityApplication',
-  operatingSystem: 'Any browser',
-  url: 'https://alexmerced.app/warren',
-  description: app.description,
-  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-  author: { '@id': 'https://alexmerced.app/#alexmerced' },
-  featureList: app.features,
-}];
 ---
 
 <Base
@@ -24,7 +12,6 @@ const jsonLd = [{
   description={app.description}
   app="warren"
   chrome="app"
-  jsonLd={jsonLd}
   keywords={app.keywords}
 >
   <div class="app-frame wr-frame" id="warren-root" data-sidebar="open">
