@@ -163,7 +163,7 @@ label.stack > span { font: 600 0.75rem var(--sans); color: var(--text-soft); let
 .brand__name { font-size: 1rem; }
 .brand__app { color: var(--text-faint); font-weight: 600; }
 
-.header-nav { display: flex; align-items: center; gap: 0.35rem; }
+.header-nav { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
 .header-nav a {
   text-decoration: none; font-size: 0.87rem; font-weight: 600; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm);
   color: var(--text-soft);
@@ -251,9 +251,29 @@ dialog.sheet::backdrop { background: rgba(20, 22, 28, .45); }
 .empty strong { font-size: 1.05rem; color: var(--text); }
 .empty p { margin: 0; max-width: 28rem; font-size: 0.92rem; }
 
+@media (max-width: 860px) {
+  /* The app names stay reachable as a swipeable strip rather than being
+     hidden behind a menu, since there are only six of them. */
+  .site-header__inner { gap: 0.5rem; }
+  .brand__app { display: none; }
+  .brand__name { font-size: 0.92rem; }
+  .header-nav {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .header-nav::-webkit-scrollbar { display: none; }
+  .header-nav a { white-space: nowrap; padding: 0.4rem 0.5rem; font-size: 0.83rem; }
+  .app-bar__inner { row-gap: 0.5rem; }
+}
+
 @media (max-width: 760px) {
   :root { --shell: calc(100% - 1.75rem); }
   .shell--wide { width: calc(100% - 1.75rem); }
+  .app-bar { padding: 0.6rem 0; }
+  .btn--sm { padding: 0.38rem 0.55rem; font-size: 0.78rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

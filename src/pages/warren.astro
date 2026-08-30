@@ -264,9 +264,12 @@ const jsonLd = [{
 
   @media (max-width: 860px) {
     .wr { grid-template-columns: 1fr; }
-    .wr-sidebar { position: fixed; inset: calc(var(--header-h) + 3.4rem) 0 0 0; z-index: 30; max-height: none; }
     #warren-root[data-sidebar='closed'] .wr { grid-template-columns: 1fr; }
+    .wr-sidebar { border-right: 0; max-height: none; min-height: 60vh; }
+    /* One at a time: the tree replaces the page rather than covering it. */
+    #warren-root[data-sidebar='open'] .wr-main { display: none; }
     .wr-editor { padding: 1.5rem 1rem 5rem; }
     .wr-main { max-height: none; }
+    .wr-slash { width: min(16rem, calc(100vw - 2rem)); }
   }
 </style>

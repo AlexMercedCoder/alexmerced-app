@@ -65,10 +65,18 @@ const PRECACHE = ${JSON.stringify(files, null, 2)};
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
-      .then(() => self.skipWaiting()),
+    (async () => {
+      const cache = await caches.open(CACHE);
+      // Precache one at a time rather than with addAll. A single missing file
+      // would otherwise fail the whole install and leave visitors with no
+      // worker at all, which is worse than a cache with one gap in it.
+      await Promise.all(
+        PRECACHE.map((url) =>
+          cache.add(new Request(url, { cache: 'reload' })).catch(() => undefined),
+        ),
+      );
+      await self.skipWaiting();
+    })(),
   );
 });
 
