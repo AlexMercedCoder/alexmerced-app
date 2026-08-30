@@ -122,8 +122,24 @@ function sqlLiteral(value: Value): string {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+/**
+ * Reserved words have to be quoted even though they look like plain
+ * identifiers, or the generated DDL will not run.
+ */
+const SQL_RESERVED = new Set([
+  'all', 'alter', 'and', 'any', 'as', 'asc', 'begin', 'between', 'by', 'case', 'cast', 'check',
+  'column', 'commit', 'constraint', 'create', 'cross', 'current', 'current_date', 'current_time',
+  'current_timestamp', 'default', 'delete', 'desc', 'distinct', 'drop', 'else', 'end', 'except',
+  'exists', 'false', 'for', 'foreign', 'from', 'full', 'grant', 'group', 'having', 'in', 'index',
+  'inner', 'insert', 'intersect', 'into', 'is', 'join', 'key', 'left', 'like', 'limit', 'not',
+  'null', 'offset', 'on', 'or', 'order', 'outer', 'primary', 'references', 'right', 'rollback',
+  'select', 'set', 'table', 'then', 'to', 'true', 'union', 'unique', 'update', 'user', 'using',
+  'values', 'view', 'when', 'where', 'window', 'with',
+]);
+
 function sqlName(name: string): string {
-  return /^[a-z_][a-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+  const plain = /^[a-z_][a-z0-9_]*$/.test(name) && !SQL_RESERVED.has(name.toLowerCase());
+  return plain ? name : `"${name.replace(/"/g, '""')}"`;
 }
 
 export function toSqlInserts(rows: Row[], table: Table, batchSize = 100): string {

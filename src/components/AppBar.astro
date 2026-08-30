@@ -3,11 +3,14 @@ import { getApp } from '../data/apps';
 
 export interface Props {
   app: string;
-  /** Extra controls that belong to this app, rendered before the shared ones. */
 }
 
 const { app } = Astro.props;
 const entry = getApp(app);
+
+// An app that stores nothing has nothing to export, import, or clear, so the
+// shared controls would be dead buttons.
+const hasData = entry.storage !== 'none';
 ---
 
 <div class="app-bar">
@@ -19,11 +22,16 @@ const entry = getApp(app);
 
     <slot />
 
-    <div class="app-bar__data">
-      <button class="btn btn--sm" data-action="export" title="Download everything this app has stored as a JSON file">Export</button>
-      <button class="btn btn--sm" data-action="import" title="Load a previously exported JSON file">Import</button>
-      <button class="btn btn--sm btn--danger" data-action="clear-all" title="Delete everything this app has stored on this device">Clear</button>
-    </div>
+    {hasData && (
+      <div class="app-bar__data">
+        <button class="btn btn--sm" data-action="export" title="Download everything this app has stored as a JSON file">Export</button>
+        <button class="btn btn--sm" data-action="import" title="Load a previously exported JSON file">Import</button>
+        <button class="btn btn--sm btn--danger" data-action="clear-all" title="Delete everything this app has stored on this device">Clear</button>
+      </div>
+    )}
+    {!hasData && (
+      <span class="app-bar__nostore" title="This app keeps nothing between visits, so there is nothing to export">Stores nothing</span>
+    )}
   </div>
 </div>
 
@@ -47,6 +55,7 @@ const entry = getApp(app);
   .app-bar__title strong { font-size: 1.02rem; letter-spacing: -0.02em; }
   .app-bar__title span { font-size: 0.82rem; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .app-bar__data { display: flex; gap: 0.4rem; }
+  .app-bar__nostore { font: 0.72rem var(--mono); color: var(--text-faint); white-space: nowrap; }
   @media (max-width: 700px) {
     .app-bar__title span { display: none; }
   }

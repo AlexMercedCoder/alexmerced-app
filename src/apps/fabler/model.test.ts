@@ -244,6 +244,12 @@ describe('output', () => {
     expect(toDdl({ id: 't', name: 'my table', rows: 1, fields: [createField('id', 'id')] })).toContain('"my table"');
   });
 
+  it('quotes a reserved word used as a column or table name', () => {
+    const ddl = toDdl({ id: 't', name: 'order', rows: 1, fields: [createField('when', 'date'), createField('id', 'id')] });
+    expect(ddl).toContain('"order"');
+    expect(ddl).toContain('"when"');
+  });
+
   it('bundles several tables into one JSON object', () => {
     const bundle = JSON.parse(render(generate(starterDataset()), 'json'));
     expect(Object.keys(bundle)).toEqual(['customers', 'orders']);

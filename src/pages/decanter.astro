@@ -112,6 +112,9 @@ const app = getApp('decanter');
 
 <style is:global>
   .dc { padding: 1rem 0 3rem; display: grid; gap: 0.85rem; }
+  /* Grid and flex tracks default to a min-content floor, which lets a long
+     unbreakable row push the whole page wider than the viewport. */
+  .dc > *, .dc-panes > *, .dc-pane { min-width: 0; }
   .dc-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
   .dc-inline { display: inline-flex; align-items: center; gap: 0.35rem; font: 600 0.75rem var(--sans); color: var(--text-soft); }
   .dc-check { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; color: var(--text-soft); }
@@ -132,7 +135,7 @@ const app = getApp('decanter');
   .dc-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
   .dc-pane { display: grid; gap: 0.35rem; min-width: 0; border-radius: var(--radius); }
   .dc-pane[data-over] { outline: 2px dashed var(--accent); outline-offset: 4px; }
-  .dc-pane__head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 2rem; }
+  .dc-pane__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 0.5rem; min-height: 2rem; }
   .dc-pane__actions { display: flex; gap: 0.25rem; align-items: center; }
   .dc-subhead { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0; }
   .dc-stats { font: 0.72rem var(--mono); color: var(--text-faint); }
@@ -147,7 +150,7 @@ const app = getApp('decanter');
 
   .dc-schema-wrap { display: grid; gap: 0.35rem; }
   .dc-schema { min-height: 9rem; max-height: 18rem; }
-  .dc-schema-tabs { display: flex; gap: 0.2rem; }
+  .dc-schema-tabs { display: flex; flex-wrap: wrap; gap: 0.2rem; min-width: 0; }
   .dc-tab {
     background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
     font: 600 0.78rem var(--sans); color: var(--text-soft); padding: 0.35rem 0.55rem;
@@ -166,5 +169,10 @@ const app = getApp('decanter');
   @media (max-width: 900px) {
     .dc-panes { grid-template-columns: 1fr; }
     .dc-status { margin-left: 0; width: 100%; }
+  }
+  @media (max-width: 620px) {
+    .dc-path { width: 100%; }
+    .dc-table { width: 6rem; }
+    .dc-text { min-height: 14rem; }
   }
 </style>

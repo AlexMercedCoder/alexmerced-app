@@ -437,6 +437,14 @@ describe('schema output', () => {
     expect(toSqlDdl(odd)).toContain('"first name"');
   });
 
+  it('quotes a reserved word, which would otherwise not run', () => {
+    const reserved = inferSchema([{ when: '2026-01-01', order: 1, select: 'x' }]);
+    const ddl = toSqlDdl(reserved);
+    expect(ddl).toContain('"when"');
+    expect(ddl).toContain('"order"');
+    expect(ddl).toContain('"select"');
+  });
+
   it('writes an Iceberg schema with ids and required flags', () => {
     const schema = JSON.parse(toIcebergSchema(fields));
     expect(schema.type).toBe('struct');
