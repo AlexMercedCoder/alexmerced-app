@@ -57,6 +57,7 @@
 [data-theme='ordinate']  { --accent: #1f5f8b; --accent-soft: #dfeaf3; }
 [data-theme='cadence']   { --accent: #8c4a6b; --accent-soft: #f4e3ec; }
 [data-theme='foolscap']  { --accent: #3f6b53; --accent-soft: #dfeee6; }
+[data-theme='quarry']    { --accent: #4c5b7a; --accent-soft: #e3e7ef; }
 
 *, *::before, *::after { box-sizing: border-box; }
 

@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-duckdb.mjs",
     "dev": "astro dev",
+    "prebuild": "node scripts/copy-duckdb.mjs",
     "build": "astro build && node scripts/build-sw.mjs",
     "preview": "astro preview",
     "check": "astro check",
@@ -13,6 +15,7 @@
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.0",
+    "@duckdb/duckdb-wasm": "^1.32.0",
     "astro": "^5.16.2"
   },
   "devDependencies": {

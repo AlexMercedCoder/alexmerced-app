@@ -309,6 +309,26 @@ export const apps: AppEntry[] = [
     keywords: ['audio editor', 'voice recorder', 'trim audio', 'wav converter', 'browser audio editor'],
   },
   {
+    slug: 'quarry',
+    category: 'data',
+    name: 'Quarry',
+    tagline: 'Real SQL against your own files, in the tab',
+    description:
+      'Drop in a CSV, a JSON file, or a Parquet file and query it with DuckDB, compiled to WebAssembly and running in this tab. Joins, window functions, common table expressions, and the whole SQL surface, over files that never leave your machine. Results come back as CSV, JSON, Markdown, or Parquet.',
+    action: 'Open Quarry',
+    theme: 'quarry',
+    accent: '#4c5b7a',
+    accentSoft: '#e3e7ef',
+    storage: 'IndexedDB and localStorage',
+    features: [
+      'DuckDB in WebAssembly, served from this site rather than a CDN',
+      'Reads CSV, TSV, JSON, newline JSON, Parquet, and Arrow',
+      'Saved queries, a schema browser, and results as CSV, JSON, Markdown, or Parquet',
+      'The engine is fetched only when you ask for it, so no other page pays for it',
+    ],
+    keywords: ['sql playground', 'duckdb wasm', 'query csv with sql', 'parquet viewer', 'browser sql'],
+  },
+  {
     slug: 'ordinate',
     category: 'data',
     name: 'Ordinate',

@@ -30,6 +30,10 @@ function walk(directory) {
 const files = walk(DIST)
   .map((file) => `/${relative(DIST, file).split(sep).join('/')}`)
   .filter((url) => {
+    // The DuckDB engine is thirty four megabytes. Precaching it would make
+    // installing the app a huge download for everyone, including the people who
+    // never open the SQL tool. It is fetched on demand instead.
+    if (url.startsWith('/duckdb/')) return false;
     const name = url.split('/').pop() ?? '';
     if (SKIP.has(name)) return false;
     const dot = name.lastIndexOf('.');

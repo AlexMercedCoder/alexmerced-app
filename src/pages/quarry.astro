@@ -1,0 +1,168 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('quarry');
+---
+<Base title="Quarry, run SQL against your own files in the browser" description={app.description} app="quarry" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="quarry-root">
+    <AppBar app="quarry">
+      <button class="btn btn--sm" id="qy-copy" disabled>Copy table</button>
+      <button class="btn btn--sm" id="qy-csv" disabled>CSV</button>
+      <button class="btn btn--sm" id="qy-json" disabled>JSON</button>
+      <button class="btn btn--sm" id="qy-markdown" disabled>Markdown</button>
+      <button class="btn btn--sm btn--primary" id="qy-parquet" disabled>Parquet</button>
+    </AppBar>
+
+    <section class="shell shell--wide qy-boot" id="qy-boot" data-state="waiting">
+      <div class="qy-boot__inner">
+        <h2>A real database, running in this tab</h2>
+        <p>
+          Quarry runs DuckDB compiled to WebAssembly. Your files are read here in the browser and
+          never uploaded, which is the same promise every other app on this site makes.
+        </p>
+        <p class="qy-boot__cost">
+          The engine is about <span id="qy-boot-size"></span>, served from this site rather than from
+          somebody else's, and fetched only when you press the button. It is the one piece of this
+          site not written for it, and the only page that costs you a download.
+        </p>
+        <button class="btn btn--primary" id="qy-start">Start the database</button>
+        <p class="qy-boot__stage" id="qy-boot-stage"></p>
+        <p class="qy-boot__error" id="qy-boot-error" hidden></p>
+      </div>
+    </section>
+
+    <div class="shell shell--wide qy" id="qy-workspace" hidden>
+      <aside class="qy-side">
+        <div class="qy-head">
+          <h2 class="qy-subhead">Tables</h2>
+          <button class="btn btn--sm" id="qy-add">Add files</button>
+        </div>
+        <input type="file" id="qy-file" accept=".csv,.tsv,.txt,.json,.jsonl,.ndjson,.parquet,.arrow,.gz" multiple hidden />
+        <div class="qy-drop" id="qy-drop">
+          <p>Drop CSV, JSON, Parquet, or Arrow files here.</p>
+          <button class="btn btn--sm btn--ghost" id="qy-sample">Load the sample</button>
+        </div>
+        <div class="qy-schema" id="qy-schema"></div>
+
+        <h2 class="qy-subhead qy-subhead--spaced">Examples</h2>
+        <div class="qy-examples" id="qy-examples"></div>
+
+        <div class="qy-head qy-head--spaced">
+          <h2 class="qy-subhead">Saved</h2>
+          <button class="btn btn--sm" id="qy-save-query">Save current</button>
+        </div>
+        <div class="qy-queries" id="qy-queries"></div>
+        <div class="empty" id="qy-queries-empty">
+          <strong>Nothing saved</strong>
+          <p>Saved queries stay in this browser. Loaded files do not: they go when the tab closes.</p>
+        </div>
+      </aside>
+
+      <main class="qy-main">
+        <div class="qy-editor">
+          <textarea id="qy-sql" spellcheck="false" aria-label="SQL" placeholder="SELECT * FROM trips LIMIT 20;"></textarea>
+          <div class="qy-toolbar">
+            <button class="btn btn--primary" id="qy-run">Run</button>
+            <span class="qy-hint">Control and Enter</span>
+            <label class="qy-limit">
+              <span>Show at most</span>
+              <select class="field field--sm" id="qy-limit">
+                <option value="100">100 rows</option>
+                <option value="1000">1,000 rows</option>
+                <option value="5000">5,000 rows</option>
+                <option value="20000">20,000 rows</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <p class="qy-status" id="qy-status" data-state="idle">Ready.</p>
+        <div class="qy-table" id="qy-table"></div>
+      </main>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountQuarry } from '../apps/quarry/ui';
+  const root = document.getElementById('quarry-root');
+  if (root) void mountQuarry(root as HTMLElement);
+</script>
+
+<style is:global>
+  .qy-boot { padding: 2.5rem 0 3rem; }
+  .qy-boot__inner { max-width: 44rem; display: grid; gap: 0.75rem; }
+  .qy-boot__inner h2 { margin: 0; font-size: 1.4rem; }
+  .qy-boot__inner p { margin: 0; color: var(--ink-soft); font-size: 0.92rem; line-height: 1.6; }
+  .qy-boot__cost { font-size: 0.86rem !important; }
+  .qy-boot__inner .btn { justify-self: start; margin-top: 0.5rem; }
+  .qy-boot__stage { font-size: 0.82rem !important; font-variant-numeric: tabular-nums; }
+  .qy-boot__error { color: #92400e !important; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 0.4rem; padding: 0.5rem 0.7rem; font-size: 0.86rem !important; }
+  .qy-boot[data-state='loading'] .btn { opacity: 0.5; pointer-events: none; }
+
+  .qy { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 1.25rem; align-items: start; padding: 1.25rem 0 3rem; }
+  .qy-subhead { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.5rem; }
+  .qy-subhead--spaced { margin-top: 1.15rem; }
+  .qy-note { font-size: 0.8rem; color: var(--ink-soft); margin: 0; }
+  .qy-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .qy-head .qy-subhead { margin: 0; }
+  .qy-head--spaced { margin-top: 1.15rem; }
+
+  .qy-side { min-width: 0; display: grid; gap: 0.5rem; align-content: start; }
+  .qy-drop { display: grid; gap: 0.4rem; justify-items: center; padding: 0.8rem; border: 1px dashed var(--rule); border-radius: 0.5rem; text-align: center; }
+  .qy-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+  .qy-drop p { margin: 0; font-size: 0.78rem; color: var(--ink-soft); }
+
+  .qy-schema { display: grid; gap: 0.35rem; }
+  .qy-table-info { border: 1px solid var(--rule); border-radius: 0.5rem; background: var(--paper-raised); }
+  .qy-table-info summary { display: flex; align-items: baseline; justify-content: space-between; gap: 0.4rem; padding: 0.45rem 0.6rem; cursor: pointer; font-size: 0.85rem; }
+  .qy-table-info summary span { font-size: 0.72rem; color: var(--ink-soft); }
+  .qy-columns { list-style: none; margin: 0; padding: 0 0.6rem 0.4rem; display: grid; gap: 0.1rem; max-height: 220px; overflow: auto; }
+  .qy-columns li { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.76rem; cursor: pointer; padding: 0.12rem 0.2rem; border-radius: 0.25rem; }
+  .qy-columns li:hover { background: var(--accent-soft); }
+  .qy-columns code { font-size: 0.76rem; }
+  .qy-columns span { color: var(--ink-soft); white-space: nowrap; }
+  .qy-table-actions { display: flex; gap: 0.35rem; padding: 0 0.6rem 0.55rem; }
+
+  .qy-examples { display: grid; gap: 0.25rem; }
+  .qy-example { text-align: left; font: inherit; font-size: 0.8rem; padding: 0.35rem 0.5rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--paper-raised); color: inherit; cursor: pointer; }
+  .qy-example:hover { border-color: var(--accent); color: var(--accent); }
+
+  .qy-queries { display: grid; gap: 0.3rem; }
+  .qy-query { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border: 1px solid var(--rule); border-radius: 0.45rem; background: var(--paper-raised); }
+  .qy-query__open { display: grid; gap: 0.1rem; text-align: left; background: none; border: 0; cursor: pointer; font: inherit; color: inherit; padding: 0.4rem 0.5rem; min-width: 0; }
+  .qy-query__open strong { font-size: 0.83rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qy-query__open span { font-size: 0.72rem; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .qy-query__remove { border: 0; background: none; color: var(--ink-soft); cursor: pointer; font-size: 1.1rem; padding: 0.3rem 0.5rem; }
+  .qy-query__remove:hover { color: #b91c1c; }
+
+  .qy-main { min-width: 0; display: grid; gap: 0.7rem; }
+  .qy-editor { border: 1px solid var(--rule); border-radius: 0.5rem; overflow: hidden; background: var(--paper-raised); }
+  .qy-editor textarea { display: block; width: 100%; min-height: 190px; resize: vertical; border: 0; padding: 0.75rem; background: transparent; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86rem; line-height: 1.55; }
+  .qy-editor textarea:focus { outline: none; }
+  .qy-toolbar { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-top: 1px solid var(--rule); flex-wrap: wrap; }
+  .qy-hint { font-size: 0.74rem; color: var(--ink-soft); }
+  .qy-limit { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; font-size: 0.78rem; color: var(--ink-soft); }
+
+  .qy-status { margin: 0; font-size: 0.84rem; padding: 0.45rem 0.65rem; border-radius: 0.4rem; border: 1px solid var(--rule); background: var(--paper-raised); color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .qy-status[data-state='good'] { background: #dcfce7; border-color: #86efac; color: #14532d; }
+  .qy-status[data-state='bad'] { background: #fef3c7; border-color: #fcd34d; color: #92400e; white-space: pre-wrap; }
+  .qy-status[data-state='busy'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  .qy-table { overflow: auto; max-height: 62vh; border: 1px solid var(--rule); border-radius: 0.5rem; background: var(--paper-raised); }
+  .qy-grid { border-collapse: collapse; font-size: 0.82rem; width: max-content; min-width: 100%; }
+  .qy-grid th, .qy-grid td { padding: 0.32rem 0.6rem; border-bottom: 1px solid var(--rule); text-align: left; white-space: nowrap; max-width: 30rem; overflow: hidden; text-overflow: ellipsis; }
+  .qy-grid thead th { position: sticky; top: 0; background: var(--paper-raised); border-bottom: 2px solid var(--rule); z-index: 1; }
+  .qy-grid thead th span { display: block; font-weight: 400; font-size: 0.68rem; color: var(--ink-soft); text-transform: none; letter-spacing: 0; }
+  .qy-grid .is-number { text-align: right; font-variant-numeric: tabular-nums; }
+  .qy-grid .is-null { color: var(--ink-soft); font-style: italic; }
+  .qy-rownum { color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; background: var(--paper); position: sticky; left: 0; font-size: 0.74rem; }
+  .qy-grid tbody tr:hover td { background: var(--accent-soft); }
+  .qy-grid tbody tr:hover .qy-rownum { background: var(--accent-soft); }
+
+  @media (max-width: 900px) {
+    .qy { grid-template-columns: minmax(0, 1fr); }
+    .qy-table { max-height: 50vh; }
+  }
+</style>

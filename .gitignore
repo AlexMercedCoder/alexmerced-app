@@ -8,3 +8,6 @@ node_modules/
 .idea/
 .vscode/
 coverage/
+
+# Copied out of node_modules at build time by scripts/copy-duckdb.mjs.
+public/duckdb/
