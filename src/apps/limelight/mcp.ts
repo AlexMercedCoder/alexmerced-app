@@ -1,6 +1,11 @@
-import { errorResult, readNumber, readString, textResult, type McpTool } from '../../lib/webmcp';
+import {
+  errorResult, readEnum, readNumber, readString, requireString, textResult, type McpTool,
+} from '../../lib/webmcp';
 import type { Interest } from './attention';
 import type { Recording } from './capture';
+import {
+  addText, removeText, textsAt, updateText, type TextAlign, type TextBlock,
+} from './text';
 import { zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 import {
   CAMERA_SHAPES, CROP_ASPECTS, cropToAspect, FULL_CROP, isFullCrop, normaliseCrop, OUTPUT_SIZES, PRESETS,
@@ -16,6 +21,7 @@ type State = {
   track: ZoomKeyframe[];
   crop: Crop;
   trim: { start: number; end: number };
+  texts: TextBlock[];
 };
 
 /** Changes an agent is allowed to make. Everything is local and reversible. */
@@ -23,6 +29,7 @@ type Edit = (change: {
   crop?: Crop;
   trim?: { start: number; end: number };
   composition?: Partial<Composition>;
+  texts?: TextBlock[];
 }) => void;
 
 /**
@@ -77,6 +84,11 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
                   height: Math.round(state.recording.height * state.crop.height),
                 },
               },
+          texts: state.texts.map((text) => ({
+            id: text.id,
+            text: text.text,
+            at: [Number(text.start.toFixed(2)), Number(text.end.toFixed(2))],
+          })),
           output: {
             width: state.settings.composition.width,
             height: state.settings.composition.height,
@@ -291,5 +303,112 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
         });
       },
     },
+    {
+      name: 'limelight_add_text',
+      description:
+        'Put a caption on the recording. It is drawn into the finished video, not overlaid in the page, so what the preview shows is what the file will contain. Position is given as fractions of the finished frame.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'What it should say. Line breaks are kept.' },
+          start: { type: 'number', description: 'Seconds into the recording it appears.' },
+          end: { type: 'number', description: 'Seconds into the recording it leaves.' },
+          x: { type: 'number', description: 'Middle of the caption across the frame, 0 to 1.' },
+          y: { type: 'number', description: 'Middle of the caption down the frame, 0 to 1.' },
+          size: { type: 'number', description: 'Line height as a fraction of the shorter edge, 0.02 to 0.2.' },
+          colour: { type: 'string', description: 'A CSS colour for the words.' },
+          plate: { type: 'number', description: 'How solid the panel behind the words is, 0 to 1. Zero draws none.' },
+          align: { type: 'string', description: 'left, centre or right.' },
+          fade: { type: 'number', description: 'Seconds to appear and to leave.' },
+        },
+        required: ['text'],
+      },
+      execute: (input) => {
+        const state = read();
+        if (!state.recording) return errorResult('Nothing has been recorded or opened yet.');
+
+        const duration = state.recording.duration;
+        const start = Math.max(0, Math.min(duration, readNumber(input, 'start', 0)));
+        const added = addText(state.texts, start, duration);
+        const fresh = added.find((text) => !state.texts.some((existing) => existing.id === text.id));
+        if (!fresh) return errorResult('There was no room for a caption there.');
+
+        const end = 'end' in input
+          ? Math.max(start + 0.4, Math.min(duration, readNumber(input, 'end', fresh.end)))
+          : fresh.end;
+
+        edit({
+          texts: updateText(added, fresh.id, {
+            text: requireString(input, 'text'),
+            end,
+            x: clamp01(readNumber(input, 'x', fresh.x)),
+            y: clamp01(readNumber(input, 'y', fresh.y)),
+            size: Math.max(0.02, Math.min(0.2, readNumber(input, 'size', fresh.size))),
+            colour: readString(input, 'colour', fresh.colour),
+            plate: clamp01(readNumber(input, 'plate', fresh.plate)),
+            align: readEnum(input, 'align', ['left', 'centre', 'right'] as const, fresh.align) as TextAlign,
+            fade: Math.max(0, Math.min(3, readNumber(input, 'fade', fresh.fade))),
+          }),
+        });
+
+        const now = read().texts.find((text) => text.id === fresh.id);
+        return textResult({ added: now, total: read().texts.length });
+      },
+    },
+    {
+      name: 'limelight_remove_text',
+      description:
+        'Remove a caption by its id, or every caption at once. Ids come from limelight_describe_recording.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Which caption to remove.' },
+          all: { type: 'boolean', description: 'Remove every caption instead.' },
+        },
+      },
+      execute: (input) => {
+        const state = read();
+        if (input.all === true || input.all === 'true') {
+          const removed = state.texts.length;
+          edit({ texts: [] });
+          return textResult({ removed, remaining: 0 });
+        }
+
+        const id = requireString(input, 'id');
+        if (!state.texts.some((text) => text.id === id)) {
+          return errorResult(`There is no caption called "${id}".`, {
+            known: state.texts.map((text) => text.id),
+          });
+        }
+        edit({ texts: removeText(state.texts, id) });
+        return textResult({ removed: 1, remaining: read().texts.length });
+      },
+    },
+    {
+      name: 'limelight_text_at',
+      description:
+        'Read which captions are showing at a moment, and how far through their fade each one is. Use it to check a caption lands where it was meant to without rendering the video.',
+      inputSchema: {
+        type: 'object',
+        properties: { at: { type: 'number', description: 'Seconds into the recording.' } },
+        required: ['at'],
+      },
+      execute: (input) => {
+        const state = read();
+        const at = readNumber(input, 'at', 0);
+        return textResult({
+          at,
+          showing: textsAt(state.texts, at).map(({ block, opacity }) => ({
+            id: block.id,
+            text: block.text,
+            opacity: Number(opacity.toFixed(3)),
+          })),
+        });
+      },
+    },
   ];
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }

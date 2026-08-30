@@ -20,6 +20,9 @@ import {
   saveCurrentId, saveProject, saveSettings, storedBytes, type Project as StoredProject,
   type Settings,
 } from './store';
+import {
+  addText, constrainText, MIN_TEXT, removeText, updateText, type TextBlock,
+} from './text';
 import { defaultZoom, zoomAt, type ZoomSettings } from './zoom';
 import {
   addBlock, blocksFromInterest, constrain, mergeBlocks, removeBlock, reviveBlocks,
@@ -53,19 +56,21 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let previewTime = 0;
   let stored: StoredProject | null = null;
   let zooms: ZoomBlock[] = [];
+  let texts: TextBlock[] = [];
   let crop: Crop = { ...FULL_CROP };
   let trim = { start: 0, end: 0 };
   /** Everything an undo has to put back. The recording itself never changes. */
   type EditorState = {
     settings: Settings;
     zooms: ZoomBlock[];
+    texts: TextBlock[];
     crop: Crop;
     trim: { start: number; end: number };
     wallpaper: Uint8Array | null;
     wallpaperMime: string;
   };
   const history = new History<EditorState>({
-    settings, zooms, crop, trim, wallpaper: null, wallpaperMime: 'image/png',
+    settings, zooms, texts, crop, trim, wallpaper: null, wallpaperMime: 'image/png',
   });
   /** Set while a state is being put back, so restoring does not record itself. */
   let restoring = false;
@@ -76,15 +81,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     statusEl.dataset.state = state;
   };
 
+  /**
+   * Records an edit and writes it down.
+   *
+   * Everything editable goes through here. Persisting a subset was the shape of
+   * a real bug: a caption added through WebMCP updated the page and the state
+   * and then quietly failed to survive a reload, because the code that wrote
+   * captions was a different function that path did not call.
+   */
   const remember = (label = '') => {
     record(label);
     saveSettings(settings);
-    // The settings belong to the project too, so reopening it looks the same.
     if (stored) {
       stored.settings = settings;
       stored.start = trim.start;
       stored.end = trim.end;
       stored.crop = crop;
+      stored.zooms = zooms;
+      stored.texts = texts;
+      // Derived from the blocks, and stored alongside them so a reopened
+      // project renders exactly as it did.
+      stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
       queueSave();
     }
   };
@@ -92,7 +109,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // ------------------------------------------------------------------ history
 
   function snapshot(): EditorState {
-    return { settings, zooms, crop, trim, wallpaper: wallpaperBytes, wallpaperMime };
+    return { settings, zooms, texts, crop, trim, wallpaper: wallpaperBytes, wallpaperMime };
   }
 
   /**
@@ -112,6 +129,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     try {
       settings = state.settings;
       zooms = state.zooms;
+      texts = state.texts;
       crop = state.crop;
       trim = { ...state.trim };
       // The picture is held as bytes in the snapshot, so an undo across a
@@ -125,19 +143,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         settings.composition.background = 'gradient';
       }
       if (selected && !zooms.some((zoom) => zoom.id === selected)) selected = null;
+      if (selectedText && !texts.some((text) => text.id === selectedText)) selectedText = null;
 
-      saveSettings(settings);
       if (stored) {
-        stored.settings = settings;
-        stored.start = trim.start;
-        stored.end = trim.end;
-        stored.crop = crop;
-        stored.zooms = zooms;
-        stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
         stored.wallpaper = state.wallpaper;
         stored.wallpaperMime = state.wallpaperMime;
-        queueSave();
       }
+      // record() is inert while restoring, so this writes without recording
+      // the restore as something new to undo.
+      remember();
     } finally {
       restoring = false;
     }
@@ -146,6 +160,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderTrim();
     renderCrop();
     renderZooms();
+    renderTexts();
     renderHistory();
     await drawPreview();
   }
@@ -189,6 +204,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       pointer: recording.pointer,
       clicks: recording.clicks,
       crop,
+      texts,
       wallpaper,
       composition: settings.composition,
       zoom: settings.zoom,
@@ -304,6 +320,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     stored = project;
     settings = project.settings;
     zooms = project.zooms;
+    texts = project.texts;
     crop = project.crop;
     dropWallpaper();
     if (project.wallpaper) await useWallpaper(project.wallpaper, project.wallpaperMime);
@@ -353,7 +370,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remember();
     }
 
-    if (!stored) { crop = { ...FULL_CROP }; dropWallpaper(); }
+    if (!stored) { crop = { ...FULL_CROP }; texts = []; dropWallpaper(); }
 
     trim = range && range.end > range.start
       ? { start: Math.max(0, range.start), end: Math.min(recording.duration, range.end) }
@@ -374,6 +391,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderTrim();
     renderCrop();
     renderZooms();
+    renderTexts();
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
     else sourceNote.hidden = true;
@@ -820,16 +838,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const zoomTrackEl = $<HTMLDivElement>('ll-zoomtrack');
 
-  function persistZooms(label = ''): void {
-    record(label);
-    if (!stored) return;
-    // The blocks are what a person edits, so they are what is kept. The
-    // keyframe track is derived and stored alongside so a reopened project
-    // renders exactly as it did.
-    stored.zooms = zooms;
-    stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
-    queueSave();
-  }
+  function persistZooms(label = ''): void { remember(label); }
 
   function renderZooms(): void {
     if (!recording) return;
@@ -892,6 +901,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const zoom = zooms.find((entry) => entry.id === id);
     if (!zoom) return;
     selected = id;
+    selectedText = null;
+    renderTextSelected();
     dragging = { id, edge, from: zoomTimeAt(event), start: zoom.start, end: zoom.end };
     zoomTrackEl.setPointerCapture(event.pointerId);
     renderSelected();
@@ -955,6 +966,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       return;
     }
     selected = zooms.find((zoom) => zoom.pinned && zoom.start <= previewTime + 0.01 && zoom.end >= previewTime - 0.01)?.id ?? selected;
+    selectedText = null;
+    renderTextSelected();
     renderZooms();
     persistZooms();
     void drawPreview();
@@ -966,6 +979,177 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     selected = null;
     renderZooms();
     persistZooms();
+    void drawPreview();
+  });
+
+  // ------------------------------------------------------------------ text track
+
+  const textTrackEl = $<HTMLDivElement>('ll-texttrack');
+  let selectedText: string | null = null;
+
+  function persistTexts(label = ''): void { remember(label); }
+
+  function renderTexts(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    textTrackEl.innerHTML = '';
+
+    for (const text of texts) {
+      const bar = document.createElement('div');
+      bar.className = 'll-zoom is-pinned';
+      bar.style.left = `${(text.start / duration) * 100}%`;
+      bar.style.width = `${((text.end - text.start) / duration) * 100}%`;
+      bar.dataset.id = text.id;
+      // The words themselves are the label, since that is what tells one
+      // caption from another at a glance.
+      const first = text.text.split('\n')[0];
+      bar.title = `${first}, ${formatClock(text.start)} to ${formatClock(text.end)}`;
+
+      const label = document.createElement('span');
+      label.className = 'll-zoom__label';
+      label.textContent = first || 'Text';
+      bar.append(label);
+
+      for (const edge of ['start', 'end'] as const) {
+        const handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
+        handle.setAttribute('aria-label', `Move the ${edge} of this text`);
+        handle.addEventListener('pointerdown', (event) => {
+          event.stopPropagation();
+          beginTextDrag(event, text.id, edge);
+        });
+        bar.append(handle);
+      }
+
+      bar.addEventListener('pointerdown', (event) => beginTextDrag(event, text.id, 'move'));
+      bar.addEventListener('dblclick', () => {
+        texts = removeText(texts, text.id);
+        if (selectedText === text.id) selectedText = null;
+        renderTexts();
+        persistTexts();
+        void drawPreview();
+      });
+
+      textTrackEl.append(bar);
+    }
+    renderTextSelected();
+  }
+
+  let textDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
+
+  function textTimeAt(event: PointerEvent): number {
+    if (!recording) return 0;
+    const box = textTrackEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
+  }
+
+  function beginTextDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
+    const text = texts.find((entry) => entry.id === id);
+    if (!text) return;
+    selectedText = id;
+    selected = null;
+    renderSelected();
+    textDrag = { id, edge, from: textTimeAt(event), start: text.start, end: text.end };
+    try { textTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
+    renderTexts();
+  }
+
+  textTrackEl.addEventListener('pointermove', (event) => {
+    if (!textDrag || !recording) return;
+    const shift = textTimeAt(event) - textDrag.from;
+
+    texts = texts.map((text) => {
+      if (text.id !== textDrag!.id) return text;
+      if (textDrag!.edge === 'move') {
+        const width = textDrag!.end - textDrag!.start;
+        return { ...text, start: textDrag!.start + shift, end: textDrag!.start + shift + width };
+      }
+      if (textDrag!.edge === 'start') {
+        return { ...text, start: Math.min(textDrag!.start + shift, text.end - MIN_TEXT) };
+      }
+      return { ...text, end: Math.max(textDrag!.end + shift, text.start + MIN_TEXT) };
+    });
+
+    texts = constrainText(texts, textDrag.id, recording.duration);
+    renderTexts();
+  });
+
+  const endTextDrag = () => {
+    if (!textDrag) return;
+    textDrag = null;
+    persistTexts();
+    void drawPreview();
+  };
+  textTrackEl.addEventListener('pointerup', endTextDrag);
+  textTrackEl.addEventListener('pointercancel', endTextDrag);
+
+  function renderTextSelected(): void {
+    const panel = $<HTMLDivElement>('ll-text-selected');
+    const text = texts.find((entry) => entry.id === selectedText);
+    panel.hidden = !text;
+    for (const bar of textTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
+      bar.classList.toggle('is-selected', bar.dataset.id === selectedText);
+    }
+    if (!text) return;
+
+    $<HTMLTextAreaElement>('ll-text-words').value = text.text;
+    $<HTMLSelectElement>('ll-text-align').value = text.align;
+    $<HTMLInputElement>('ll-text-colour').value = text.colour;
+    for (const [id, value] of [
+      ['ll-text-size', text.size], ['ll-text-x', text.x], ['ll-text-y', text.y],
+      ['ll-text-plate', text.plate], ['ll-text-fade', text.fade],
+    ] as [string, number][]) {
+      $<HTMLInputElement>(id).value = String(value);
+    }
+    $<HTMLSpanElement>('ll-text-size-out').textContent = `${Math.round(text.size * 100)}%`;
+    $<HTMLSpanElement>('ll-text-x-out').textContent = `${Math.round(text.x * 100)}%`;
+    $<HTMLSpanElement>('ll-text-y-out').textContent = `${Math.round(text.y * 100)}%`;
+    $<HTMLSpanElement>('ll-text-plate-out').textContent = `${Math.round(text.plate * 100)}%`;
+    $<HTMLSpanElement>('ll-text-fade-out').textContent = `${text.fade.toFixed(2)}s`;
+  }
+
+  /** Applies a change to the selected caption and records it as one step. */
+  function editSelectedText(change: Partial<TextBlock>, label: string): void {
+    if (!selectedText) return;
+    texts = updateText(texts, selectedText, change);
+    renderTexts();
+    persistTexts(`${label}:${selectedText}`);
+    void drawPreview();
+  }
+
+  $<HTMLTextAreaElement>('ll-text-words').addEventListener('input', (event) => {
+    editSelectedText({ text: (event.target as HTMLTextAreaElement).value }, 'text-words');
+  });
+
+  $<HTMLSelectElement>('ll-text-align').addEventListener('change', (event) => {
+    editSelectedText({ align: (event.target as HTMLSelectElement).value as TextBlock['align'] }, 'text-align');
+  });
+
+  $<HTMLInputElement>('ll-text-colour').addEventListener('input', (event) => {
+    editSelectedText({ colour: (event.target as HTMLInputElement).value }, 'text-colour');
+  });
+
+  for (const [id, key] of [
+    ['ll-text-size', 'size'], ['ll-text-x', 'x'], ['ll-text-y', 'y'],
+    ['ll-text-plate', 'plate'], ['ll-text-fade', 'fade'],
+  ] as [string, 'size' | 'x' | 'y' | 'plate' | 'fade'][]) {
+    $<HTMLInputElement>(id).addEventListener('input', (event) => {
+      editSelectedText({ [key]: Number((event.target as HTMLInputElement).value) }, `text-${key}`);
+    });
+  }
+
+  $<HTMLButtonElement>('ll-text-add').addEventListener('click', () => {
+    if (!recording) return;
+    const before = new Set(texts.map((text) => text.id));
+    texts = addText(texts, previewTime, recording.duration);
+    // addText sorts, so the new caption is found by what was not there before
+    // rather than by where it ended up.
+    selectedText = texts.find((text) => !before.has(text.id))?.id ?? selectedText;
+    selected = null;
+    renderSelected();
+    renderTexts();
+    persistTexts();
     void drawPreview();
   });
 
@@ -1402,6 +1586,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         event.preventDefault();
         $<HTMLButtonElement>('ll-zoom-add').click();
         break;
+      case 't': case 'T':
+        event.preventDefault();
+        $<HTMLButtonElement>('ll-text-add').click();
+        break;
       case 'c': case 'C':
         event.preventDefault();
         cropButton.click();
@@ -1415,6 +1603,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         $<HTMLButtonElement>('ll-trim-end').click();
         break;
       case 'Delete': case 'Backspace':
+        // Whichever track was last touched is the one this removes from.
+        if (selectedText) {
+          event.preventDefault();
+          texts = removeText(texts, selectedText);
+          selectedText = null;
+          renderTexts();
+          persistTexts();
+          void drawPreview();
+          return;
+        }
         if (!selected) return;
         event.preventDefault();
         zooms = removeBlock(zooms, selected);
@@ -1578,10 +1776,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       track: trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom),
       crop,
       trim,
+      texts,
     }),
     (change) => {
       if (change.crop) { crop = change.crop; cropAspect = 'free'; }
       if (change.trim) trim = { ...change.trim };
+      if (change.texts) { texts = change.texts; selectedText = null; }
       if (change.composition) {
         settings.composition = { ...settings.composition, ...change.composition };
         // A background chosen by name is no longer a picture, so the stored one
@@ -1591,6 +1791,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remember();
       renderTrim();
       renderCrop();
+      renderTexts();
       renderControls();
       void drawPreview();
     },

@@ -7,6 +7,7 @@ import {
   type CameraShape, type Composition, type Crop,
 } from './layout';
 import { defaultZoom, type ZoomKeyframe, type ZoomSettings } from './zoom';
+import { reviveTexts, type TextBlock } from './text';
 import { reviveBlocks, type ZoomBlock } from './zooms';
 
 /**
@@ -83,6 +84,8 @@ export type Project = {
    * derived from these, so these are what has to be kept.
    */
   zooms: ZoomBlock[];
+  /** Captions laid over the finished frame. */
+  texts: TextBlock[];
   /** The derived camera move, kept so a reopened project renders identically. */
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
@@ -194,6 +197,7 @@ export function reviveProject(value: unknown): Project | null {
     wallpaperMime: typeof project.wallpaperMime === 'string' && project.wallpaperMime
       ? project.wallpaperMime : 'image/png',
     zooms: reviveBlocks(project.zooms),
+    texts: reviveTexts(project.texts),
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
     settings: reviveSettings(project.settings),
     createdAt: typeof project.createdAt === 'string' ? project.createdAt : stamp,
@@ -203,9 +207,9 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop' | 'wallpaper' | 'wallpaperMime'>
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'crop' | 'wallpaper' | 'wallpaperMime'>
     & Partial<Pick<Project,
-      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
+      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -213,6 +217,7 @@ export function createProject(
     id: createId('rec'),
     name,
     zooms: [],
+    texts: [],
     keyframes: null,
     crop: { ...FULL_CROP },
     wallpaper: null,

@@ -10,6 +10,7 @@ import {
   cameraAspect, cameraCrop, cameraRect, contentRect, cornerRadius, coverRect, cropRect, evenSize,
   ripple, roundedPath, type Composition, type Crop,
 } from './layout';
+import { textsAt, wrapText, type TextBlock } from './text';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
 /**
@@ -40,6 +41,8 @@ export type Project = {
   crop?: Crop | null;
   /** A picture to use as the background, when one was chosen. */
   wallpaper?: CanvasImageSource | null;
+  /** Captions laid over the finished frame. */
+  texts?: TextBlock[];
   composition: Composition;
   zoom: ZoomSettings;
   frameRate: number;
@@ -266,6 +269,75 @@ export function drawFrame(
     context.strokeStyle = 'rgba(255, 255, 255, 0.35)';
     context.lineWidth = Math.max(2, Math.min(bubble.width, bubble.height) * 0.015);
     context.stroke(outline);
+    context.restore();
+  }
+
+  // ------------------------------------------------------------- captions
+  // Last, so a caption is never half hidden behind the camera bubble.
+  if (project.texts && project.texts.length > 0) {
+    drawTexts(context, project.texts, time, width, height);
+  }
+}
+
+/** The font stack. Whatever the machine has, so nothing is fetched to draw text. */
+const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+/**
+ * Draws the captions showing at a moment.
+ *
+ * Measuring happens against the same context that draws, which is the only way
+ * the wrapping in the preview and the wrapping in the export can be guaranteed
+ * to agree.
+ */
+export function drawTexts(
+  context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+  texts: TextBlock[],
+  time: number,
+  width: number,
+  height: number,
+): void {
+  const shorter = Math.min(width, height);
+
+  for (const { block, opacity } of textsAt(texts, time)) {
+    const fontSize = Math.max(8, block.size * shorter);
+    const lineHeight = fontSize * 1.25;
+    const padding = fontSize * 0.45;
+
+    context.save();
+    context.globalAlpha = opacity;
+    context.font = `600 ${fontSize}px ${FONT}`;
+    context.textBaseline = 'middle';
+
+    // Captions are given four fifths of the frame to wrap inside, so a long one
+    // does not run to the very edge where it is hard to read.
+    const lines = wrapText(block.text, width * 0.8, (line) => context.measureText(line).width);
+    const widest = lines.reduce((most, line) => Math.max(most, context.measureText(line).width), 0);
+    const boxWidth = widest + padding * 2;
+    const boxHeight = lines.length * lineHeight + padding * 2 - (lineHeight - fontSize);
+
+    // x and y name the middle of the caption, so it stays put as the text grows.
+    const centreX = block.x * width;
+    const centreY = block.y * height;
+    const left = Math.max(0, Math.min(width - boxWidth, centreX - boxWidth / 2));
+    const top = Math.max(0, Math.min(height - boxHeight, centreY - boxHeight / 2));
+
+    if (block.plate > 0) {
+      context.fillStyle = `rgba(0, 0, 0, ${Math.min(1, block.plate) * 0.75})`;
+      context.fill(roundedPath(
+        { x: left, y: top, width: boxWidth, height: boxHeight },
+        Math.min(fontSize * 0.35, boxHeight / 2),
+      ));
+    }
+
+    context.fillStyle = block.colour;
+    context.textAlign = block.align === 'centre' ? 'center' : block.align;
+    const textX = block.align === 'left' ? left + padding
+      : block.align === 'right' ? left + boxWidth - padding
+        : left + boxWidth / 2;
+
+    for (let index = 0; index < lines.length; index += 1) {
+      context.fillText(lines[index], textX, top + padding + fontSize / 2 + index * lineHeight);
+    }
     context.restore();
   }
 }

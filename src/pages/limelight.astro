@@ -92,6 +92,27 @@ const app = getApp('limelight');
         </div>
         <p class="ll-note" id="ll-zoom-hint"></p>
 
+        <div class="ll-zoomrow">
+          <span class="ll-tracklabel">Text</span>
+          <div class="ll-zoomtrack ll-texttrack" id="ll-texttrack" aria-label="Text track"></div>
+        </div>
+
+        <div class="ll-text-selected" id="ll-text-selected" hidden>
+          <label class="field-row ll-text-words">
+            <span>Words</span>
+            <textarea class="field" id="ll-text-words" rows="2"></textarea>
+          </label>
+          <div class="ll-text-fields">
+            <label class="ll-slider"><span>Size</span><input type="range" id="ll-text-size" min="0.02" max="0.2" step="0.005" /><em id="ll-text-size-out"></em></label>
+            <label class="ll-slider"><span>Across</span><input type="range" id="ll-text-x" min="0" max="1" step="0.01" /><em id="ll-text-x-out"></em></label>
+            <label class="ll-slider"><span>Down</span><input type="range" id="ll-text-y" min="0" max="1" step="0.01" /><em id="ll-text-y-out"></em></label>
+            <label class="ll-slider"><span>Plate</span><input type="range" id="ll-text-plate" min="0" max="1" step="0.05" /><em id="ll-text-plate-out"></em></label>
+            <label class="ll-slider"><span>Fade</span><input type="range" id="ll-text-fade" min="0" max="1.5" step="0.05" /><em id="ll-text-fade-out"></em></label>
+            <label class="field-row"><span>Align</span><select class="field" id="ll-text-align"><option value="left">Left</option><option value="centre">Centre</option><option value="right">Right</option></select></label>
+            <label class="field-row"><span>Colour</span><input type="color" class="field ll-text-colour" id="ll-text-colour" /></label>
+          </div>
+        </div>
+
         <div class="ll-zoom-selected" id="ll-zoom-selected" hidden>
           <label class="ll-slider">
             <span>How far this one goes in</span>
@@ -104,6 +125,7 @@ const app = getApp('limelight');
           <span><kbd>Space</kbd> play</span>
           <span><kbd>←</kbd> <kbd>→</kbd> step a frame</span>
           <span><kbd>Z</kbd> add a zoom</span>
+          <span><kbd>T</kbd> add text</span>
           <span><kbd>C</kbd> crop</span>
           <span><kbd>I</kbd> start here</span>
           <span><kbd>O</kbd> end here</span>
@@ -113,6 +135,7 @@ const app = getApp('limelight');
 
         <div class="ll-scrubrow">
           <button class="btn btn--sm btn--primary" id="ll-zoom-add">Add a zoom</button>
+          <button class="btn btn--sm btn--primary" id="ll-text-add">Add text</button>
           <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
           <button class="btn btn--sm btn--ghost" id="ll-zoom-clear">Clear zooms</button>
           <button class="btn btn--sm" id="ll-undo" disabled>Undo</button>
@@ -259,6 +282,11 @@ const app = getApp('limelight');
   .ll-countdown strong { font-size: clamp(5rem, 22vw, 14rem); line-height: 1; font-variant-numeric: tabular-nums; animation: ll-pop 0.9s ease-out; }
   @keyframes ll-pop { from { transform: scale(0.72); opacity: 0.2; } 40% { transform: scale(1.04); opacity: 1; } to { transform: scale(1); opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .ll-countdown strong { animation: none; } }
+  .ll-texttrack .ll-zoom { background: color-mix(in srgb, var(--accent, #5b7cfa) 26%, transparent); }
+  .ll-text-selected { display: grid; gap: 0.6rem; padding: 0.6rem; border: 1px solid var(--rule); border-radius: 0.5rem; }
+  .ll-text-words textarea { font: inherit; resize: vertical; }
+  .ll-text-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.4rem 1rem; }
+  .ll-text-colour { padding: 0; height: 2rem; }
   .ll-keys { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.82rem; color: var(--muted); }
   .ll-keys kbd { font: inherit; font-weight: 600; padding: 0.05rem 0.35rem; border: 1px solid var(--rule); border-radius: 0.3rem; background: var(--surface); color: var(--ink); }
   .ll-preview.is-cropping { cursor: crosshair; }

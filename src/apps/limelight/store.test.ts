@@ -251,3 +251,37 @@ describe('camera settings', () => {
       .toBe(defaultSettings.composition.camera.corner);
   });
 });
+
+describe('captions', () => {
+  it('keeps them with the project', async () => {
+    const project = createProject('With captions', {
+      bytes: new Uint8Array([1]), mime: 'video/webm', cameraBytes: null,
+      duration: 10, width: 1280, height: 720, hasAudio: false, pointer: [], clicks: [],
+      texts: [{
+        id: 'a', text: 'Hello', start: 1, end: 3, x: 0.5, y: 0.8,
+        size: 0.06, colour: '#fff', plate: 0.5, align: 'centre', fade: 0.2,
+      }],
+    });
+    await saveProject(project);
+
+    const back = await loadProject(project.id);
+    expect(back?.texts).toHaveLength(1);
+    expect(back?.texts[0].text).toBe('Hello');
+    expect(back?.texts[0].align).toBe('centre');
+  });
+
+  it('has none by default', () => {
+    const project = createProject('Plain', {
+      bytes: new Uint8Array([1]), mime: 'video/webm', cameraBytes: null,
+      duration: 1, width: 640, height: 360, hasAudio: false, pointer: [], clicks: [],
+    });
+    expect(project.texts).toEqual([]);
+  });
+
+  it('reads back a project saved before captions existed', () => {
+    const project = reviveProject({
+      id: 'old', name: 'Older', bytes: BYTES, duration: 5, width: 640, height: 360,
+    });
+    expect(project?.texts).toEqual([]);
+  });
+});
