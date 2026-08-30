@@ -1,0 +1,148 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+const app = getApp('limelight');
+---
+<Base title="Limelight, record your screen and make it look deliberate" description={app.description} app="limelight" chrome="app" keywords={app.keywords}>
+  <div class="app-frame" id="limelight-root">
+    <AppBar app="limelight">
+      <button class="btn btn--sm" id="ll-open">Open a video</button>
+      <button class="btn btn--sm" id="ll-save-raw">Save the raw file</button>
+      <button class="btn btn--sm btn--primary" id="ll-export">Export</button>
+      <input type="file" id="ll-file" accept="video/*" hidden />
+    </AppBar>
+
+    <div class="shell shell--wide ll">
+      <section class="card ll-capture">
+        <div class="ll-capture__row">
+          <button class="btn btn--primary ll-recordbtn" id="ll-record">Record</button>
+          <span class="ll-clock" id="ll-clock"></span>
+        </div>
+        <div class="ll-capture__options">
+          <label class="ll-radio"><input type="radio" name="ll-source" id="ll-source-screen" checked /><span>Any window or screen</span></label>
+          <label class="ll-radio"><input type="radio" name="ll-source" id="ll-source-tab" /><span>This tab</span></label>
+          <label class="ll-check"><input type="checkbox" id="ll-mic" /><span>Microphone</span></label>
+          <label class="ll-check"><input type="checkbox" id="ll-system-audio" /><span>System audio</span></label>
+          <label class="ll-check"><input type="checkbox" id="ll-camera" /><span>Camera</span></label>
+        </div>
+        <p class="ll-note">
+          Recording this tab is the only case where a browser knows where your pointer is, so it is the
+          only case where the zoom can follow your cursor exactly. Recording anything else still works:
+          the zoom follows where the picture changes instead, which needs no cursor at all.
+        </p>
+      </section>
+
+      <p class="ll-status" id="ll-status" data-state="idle">Nothing recorded yet.</p>
+      <div class="ll-bar" id="ll-bar" hidden><div class="ll-bar__fill" id="ll-bar-fill"></div></div>
+      <p class="ll-source-note" id="ll-source-note" hidden></p>
+
+      <div class="ll-stage" id="ll-stage" hidden>
+        <canvas id="ll-preview" class="ll-preview"></canvas>
+        <div class="ll-scrubrow">
+          <input type="range" id="ll-scrub" class="ll-scrub" min="0" max="10" step="0.04" value="0" aria-label="Preview position" />
+          <span class="ll-time" id="ll-time">0:00</span>
+          <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
+          <button class="btn btn--sm btn--danger" id="ll-discard">Discard</button>
+        </div>
+      </div>
+
+      <div class="ll-editor" id="ll-editor" hidden>
+        <section class="card ll-card">
+          <h2 class="ll-subhead">Background</h2>
+          <div class="ll-presets" id="ll-presets"></div>
+          <label class="field-row"><span>Output size</span><select class="field" id="ll-size"></select></label>
+          <label class="ll-slider"><span>Padding</span><input type="range" id="ll-padding" min="0" max="0.2" step="0.005" /><em id="ll-padding-out"></em></label>
+          <label class="ll-slider"><span>Corners</span><input type="range" id="ll-radius" min="0" max="0.1" step="0.002" /><em id="ll-radius-out"></em></label>
+          <label class="ll-slider"><span>Shadow</span><input type="range" id="ll-shadow" min="0" max="1" step="0.05" /><em id="ll-shadow-out"></em></label>
+        </section>
+
+        <section class="card ll-card">
+          <h2 class="ll-subhead">Zoom</h2>
+          <label class="ll-check"><input type="checkbox" id="ll-zoom-on" /><span>Zoom in on what is happening</span></label>
+          <label class="ll-slider"><span>How far</span><input type="range" id="ll-zoom-scale" min="1" max="3" step="0.05" /><em id="ll-zoom-scale-out"></em></label>
+          <label class="ll-slider"><span>How long it stays</span><input type="range" id="ll-zoom-hold" min="0.4" max="4" step="0.1" /><em id="ll-zoom-hold-out"></em></label>
+          <label class="ll-slider"><span>How fast it moves</span><input type="range" id="ll-zoom-move" min="0.15" max="1.5" step="0.05" /><em id="ll-zoom-move-out"></em></label>
+          <label class="ll-check"><input type="checkbox" id="ll-clicks" /><span>Show a ripple where you clicked</span></label>
+          <label class="ll-check"><input type="checkbox" id="ll-cursor" /><span>Draw a smoothed cursor</span></label>
+          <p class="ll-note">The cursor and the ripples need a pointer track, so they only appear when you recorded this tab.</p>
+        </section>
+
+        <section class="card ll-card">
+          <h2 class="ll-subhead">Camera and output</h2>
+          <label class="ll-check"><input type="checkbox" id="ll-camera-on" /><span>Show the camera bubble</span></label>
+          <div id="ll-camera-fields" hidden>
+            <label class="field-row"><span>Corner</span>
+              <select class="field" id="ll-camera-corner">
+                <option value="bottomRight">Bottom right</option>
+                <option value="bottomLeft">Bottom left</option>
+                <option value="topRight">Top right</option>
+                <option value="topLeft">Top left</option>
+              </select>
+            </label>
+            <label class="ll-slider"><span>Size</span><input type="range" id="ll-camera-size" min="0.1" max="0.4" step="0.01" /><em id="ll-camera-size-out"></em></label>
+            <label class="ll-check"><input type="checkbox" id="ll-camera-round" /><span>Round</span></label>
+          </div>
+
+          <label class="field-row"><span>Frames a second</span>
+            <select class="field" id="ll-fps">
+              <option value="24">24</option>
+              <option value="30">30</option>
+              <option value="60">60</option>
+            </select>
+          </label>
+          <p class="ll-note">Roughly <span id="ll-bitrate-out"></span>. Every frame is drawn and encoded one at a time, so a long recording takes a while and comes out exactly as the preview shows it.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountLimelight } from '../apps/limelight/ui';
+  const root = document.getElementById('limelight-root');
+  if (root) void mountLimelight(root as HTMLElement);
+</script>
+
+<style is:global>
+  .ll { display: grid; gap: 1rem; padding: 1.25rem 0 3rem; }
+  .ll-subhead { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.7rem; }
+  .ll-note { font-size: 0.79rem; color: var(--ink-soft); margin: 0.6rem 0 0; line-height: 1.55; }
+
+  .ll-capture { padding: 1rem; display: grid; gap: 0.7rem; }
+  .ll-capture__row { display: flex; align-items: center; gap: 0.8rem; }
+  .ll-recordbtn { min-width: 8rem; }
+  .ll-recordbtn.is-recording { background: #b91c1c; border-color: #b91c1c; animation: ll-pulse 1.4s ease-in-out infinite; }
+  @keyframes ll-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
+  .ll-clock { font-variant-numeric: tabular-nums; font-size: 1rem; color: var(--ink-soft); }
+  .ll-capture__options { display: flex; flex-wrap: wrap; gap: 0.5rem 1.1rem; }
+  .ll-radio, .ll-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+
+  .ll-status { margin: 0; font-size: 0.85rem; padding: 0.5rem 0.7rem; border-radius: 0.4rem; border: 1px solid var(--rule); background: var(--paper-raised); color: var(--ink-soft); }
+  .ll-status[data-state='good'] { background: #dcfce7; border-color: #86efac; color: #14532d; }
+  .ll-status[data-state='bad'] { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+  .ll-status[data-state='busy'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .ll-source-note { margin: 0; font-size: 0.82rem; color: var(--ink-soft); padding: 0.45rem 0.7rem; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 0.3rem 0.3rem 0; }
+
+  .ll-bar { height: 6px; border-radius: 999px; background: var(--rule); overflow: hidden; }
+  .ll-bar__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.15s linear; }
+
+  .ll-stage { display: grid; gap: 0.6rem; }
+  .ll-preview { display: block; width: 100%; max-height: 62vh; object-fit: contain; border: 1px solid var(--rule); border-radius: 0.6rem; background: repeating-conic-gradient(#e8e8e8 0% 25%, #fbfbfb 0% 50%) 50% / 20px 20px; }
+  .ll-scrubrow { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .ll-scrub { flex: 1 1 240px; min-width: 0; }
+  .ll-time { font-variant-numeric: tabular-nums; font-size: 0.82rem; color: var(--ink-soft); min-width: 3rem; }
+
+  .ll-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-items: start; }
+  .ll-card { padding: 1rem; min-width: 0; display: grid; gap: 0.55rem; align-content: start; }
+  .ll-presets { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.3rem; }
+  .ll-preset { width: 42px; height: 30px; border-radius: 0.35rem; border: 2px solid transparent; box-shadow: 0 0 0 1px var(--rule); cursor: pointer; padding: 0; }
+  .ll-preset[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .ll-slider { display: grid; grid-template-columns: 8rem minmax(0, 1fr) 3.2rem; align-items: center; gap: 0.5rem; font-size: 0.83rem; }
+  .ll-slider em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--ink-soft); font-size: 0.78rem; text-align: right; }
+
+  @media (max-width: 620px) {
+    .ll-slider { grid-template-columns: minmax(0, 1fr) 3.2rem; }
+    .ll-slider > span { grid-column: 1 / -1; }
+  }
+</style>

@@ -43,6 +43,8 @@ Live at **https://alexmerced.app**
 | **Tally** | Invoices with a live PDF preview, per-line tax, and money held in whole cents so the arithmetic is exact |
 | **Cadence** | Record from the microphone and edit: trim, cut, fade, normalise, resample, join with a crossfade |
 | **Foolscap** | Photograph a document and get a straight PDF: edge detection, perspective correction, local thresholding |
+| **Cutaway** | Trim, resize and convert video: WebM, animated GIF, or every frame as a PNG |
+| **Limelight** | Record the screen and polish it: background, rounded corners, and a zoom that follows what is happening |
 
 **Working things out**
 
@@ -95,6 +97,10 @@ normally be reached for, the thing is implemented here and covered by tests:
   one.
 - **Perspective correction by homography**, shared by the document scanner and
   the QR reader (`src/lib/homography.ts`).
+- **A WebM muxer** (`src/lib/webm.ts`). WebCodecs encodes frames and hands them
+  back bare; the browser offers no way to write a container around them.
+- **A GIF encoder** (`src/lib/gif.ts`) with median-cut quantisation,
+  Floyd-Steinberg dithering, and LZW.
 - **An EXIF reader** (`src/apps/loupe/exif.ts`), a **ZIP writer** with CRC-32
   (`src/lib/zip.ts`), and a **seeded PRNG** (`src/lib/random.ts`).
 
@@ -171,6 +177,20 @@ One thing worth knowing if you adapt this: cache lookups pass
 module scripts are fetched in `cors` mode while `cache.addAll` stores them from
 a `no-cors` request. Without `ignoreVary` the scripts never match the cache and
 the site loads offline with no JavaScript at all.
+
+### What a browser is not allowed to know
+
+Limelight zooms in on whatever is happening. Where it gets that from depends on
+what is being recorded, and the app says which it is using rather than implying
+one and doing the other:
+
+- **Recording this tab**, pointer events are available, so the zoom follows the
+  cursor exactly and clicks leave a ripple.
+- **Recording anything else**, no browser is told where the pointer is. The
+  operating system draws the cursor into the captured frames and never reports
+  the position. So the zoom follows where the picture changed between frames
+  instead, which needs no cursor at all and works on a recording that was
+  merely dropped in.
 
 ## Known limits, stated plainly
 

@@ -349,6 +349,26 @@ export const apps: AppEntry[] = [
     keywords: ['chart maker', 'csv to chart', 'graph generator', 'svg chart', 'online chart tool'],
   },
   {
+    slug: 'limelight',
+    category: 'make',
+    name: 'Limelight',
+    tagline: 'Record your screen and make it look deliberate',
+    description:
+      'Capture a window, then let it be polished: inset on a coloured field with rounded corners and a shadow, and zoomed in on whatever is actually happening. A browser is never told where your pointer is over another window, so the zoom follows where the picture changed instead, and the app says which of the two it is using.',
+    action: 'Open Limelight',
+    theme: 'limelight',
+    accent: '#b0842a',
+    accentSoft: '#f7eed8',
+    storage: 'localStorage',
+    features: [
+      'Screen, window, or this tab, with the microphone, system audio, and camera',
+      'Automatic zoom, from your pointer when it can be known and from motion when it cannot',
+      'Backgrounds, padding, rounded corners, a shadow, and a camera bubble',
+      'Rendered a frame at a time, so what comes out is exactly what the preview showed',
+    ],
+    keywords: ['screen recorder', 'screen recording', 'record screen browser', 'auto zoom screen recording', 'screen studio alternative'],
+  },
+  {
     slug: 'cutaway',
     category: 'make',
     name: 'Cutaway',

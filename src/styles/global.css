@@ -59,6 +59,7 @@
 [data-theme='foolscap']  { --accent: #3f6b53; --accent-soft: #dfeee6; }
 [data-theme='quarry']    { --accent: #4c5b7a; --accent-soft: #e3e7ef; }
 [data-theme='cutaway']   { --accent: #a8562f; --accent-soft: #f6e4da; }
+[data-theme='limelight'] { --accent: #b0842a; --accent-soft: #f7eed8; }
 
 *, *::before, *::after { box-sizing: border-box; }
 
