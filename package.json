@@ -1,0 +1,22 @@
+{
+  "name": "alexmerced-app",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && node scripts/build-sw.mjs",
+    "preview": "astro preview",
+    "check": "astro check",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.7.0",
+    "astro": "^5.16.2"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.2",
+    "vitest": "^3.2.4"
+  }
+}

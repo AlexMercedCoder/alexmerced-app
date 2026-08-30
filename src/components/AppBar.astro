@@ -1,0 +1,53 @@
+---
+import { getApp } from '../data/apps';
+
+export interface Props {
+  app: string;
+  /** Extra controls that belong to this app, rendered before the shared ones. */
+}
+
+const { app } = Astro.props;
+const entry = getApp(app);
+---
+
+<div class="app-bar">
+  <div class="shell shell--wide app-bar__inner">
+    <div class="app-bar__title">
+      <strong>{entry.name}</strong>
+      <span>{entry.tagline}</span>
+    </div>
+
+    <slot />
+
+    <div class="app-bar__data">
+      <button class="btn btn--sm" data-action="export" title="Download everything this app has stored as a JSON file">Export</button>
+      <button class="btn btn--sm" data-action="import" title="Load a previously exported JSON file">Import</button>
+      <button class="btn btn--sm btn--danger" data-action="clear-all" title="Delete everything this app has stored on this device">Clear</button>
+    </div>
+  </div>
+</div>
+
+<dialog class="sheet" data-role="import-dialog" aria-labelledby="import-dialog-title">
+  <form method="dialog">
+    <div class="sheet__head">
+      <h2 id="import-dialog-title">Import this file</h2>
+      <p>Merge keeps what is already here and adds the file on top. Replace throws away what is here first.</p>
+    </div>
+    <div class="sheet__foot">
+      <button class="btn" value="cancel" type="submit">Cancel</button>
+      <button class="btn" value="replace" type="submit">Replace everything</button>
+      <button class="btn btn--primary" value="merge" type="submit">Merge</button>
+    </div>
+  </form>
+</dialog>
+
+<style>
+  .app-bar__inner { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .app-bar__title { display: flex; align-items: baseline; gap: 0.6rem; margin-right: auto; min-width: 0; }
+  .app-bar__title strong { font-size: 1.02rem; letter-spacing: -0.02em; }
+  .app-bar__title span { font-size: 0.82rem; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app-bar__data { display: flex; gap: 0.4rem; }
+  @media (max-width: 700px) {
+    .app-bar__title span { display: none; }
+  }
+</style>

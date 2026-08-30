@@ -1,0 +1,210 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+
+const app = getApp('jotterbug');
+
+const jsonLd = [{
+  '@type': 'SoftwareApplication',
+  '@id': 'https://alexmerced.app/jotterbug#app',
+  name: 'Jotterbug',
+  applicationCategory: 'ProductivityApplication',
+  operatingSystem: 'Any browser',
+  url: 'https://alexmerced.app/jotterbug',
+  description: app.description,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  author: { '@id': 'https://alexmerced.app/#alexmerced' },
+  featureList: app.features,
+}];
+---
+
+<Base
+  title="Jotterbug, quick notes that stay on your machine"
+  description={app.description}
+  app="jotterbug"
+  chrome="app"
+  jsonLd={jsonLd}
+  keywords={app.keywords}
+>
+  <div class="app-frame" id="jotterbug-root">
+    <AppBar app="jotterbug">
+      <label class="jb-search-wrap">
+        <span class="sr-only">Search notes</span>
+        <input id="jb-search" class="field field--sm jb-search" type="search" placeholder="Search notes (press /)" autocomplete="off" />
+      </label>
+      <button class="btn btn--sm" id="jb-layout">List view</button>
+      <button class="btn btn--sm btn--danger" id="jb-empty-trash" hidden>Empty trash</button>
+    </AppBar>
+
+    <div class="shell shell--wide jb">
+      <div class="jb-tabs" id="jb-shelves" role="group" aria-label="Which notes to show"></div>
+
+      <form class="jb-composer" id="jb-composer">
+        <input id="jb-new-title" class="jb-composer__title" placeholder="Title" autocomplete="off" aria-label="New note title" />
+        <textarea id="jb-new-body" class="jb-composer__body" rows="1" placeholder="Take a note…" aria-label="New note"></textarea>
+        <div class="jb-composer__row">
+          <button type="button" class="btn btn--sm" id="jb-new-checklist">Start a checklist</button>
+          <button type="submit" class="btn btn--sm btn--primary">Add note</button>
+        </div>
+      </form>
+
+      <div class="jb-filters">
+        <div class="jb-filter-row" id="jb-labels" hidden></div>
+        <div class="jb-filter-row" id="jb-colors"></div>
+      </div>
+
+      <div id="jb-board" class="jb-board" data-layout="grid"></div>
+
+      <div class="empty" id="jb-empty" hidden>
+        <strong id="jb-empty-title"></strong>
+        <p id="jb-empty-body"></p>
+      </div>
+    </div>
+
+    <dialog class="jb-editor" id="jb-editor" aria-label="Edit note">
+      <div class="jb-editor__inner">
+        <input id="jb-editor-title" class="jb-editor__title" placeholder="Title" aria-label="Note title" />
+        <textarea id="jb-editor-body" class="jb-editor__body" rows="8" placeholder="Write something…" aria-label="Note body"></textarea>
+        <div id="jb-editor-list" class="jb-editor__list" hidden></div>
+        <button type="button" class="jb-editor__additem" data-add-item>+ Add a row</button>
+
+        <div class="jb-editor__labels" id="jb-editor-labels"></div>
+        <input id="jb-editor-label-input" class="jb-editor__labelinput" placeholder="Add a label, then press Enter" aria-label="Add a label" />
+
+        <div class="jb-editor__colors" id="jb-editor-colors" role="group" aria-label="Note colour"></div>
+
+        <footer class="jb-editor__foot">
+          <span class="jb-editor__meta" id="jb-editor-meta"></span>
+          <div class="jb-editor__actions">
+            <button type="button" class="btn btn--sm" id="jb-editor-mode"></button>
+            <button type="button" class="btn btn--sm" data-editor-action="copy">Duplicate</button>
+            <button type="button" class="btn btn--sm" data-editor-action="archive">Archive</button>
+            <button type="button" class="btn btn--sm btn--danger" data-editor-action="trash">Trash</button>
+            <button type="button" class="btn btn--sm btn--primary" onclick="this.closest('dialog').close()">Done</button>
+          </div>
+        </footer>
+      </div>
+    </dialog>
+  </div>
+</Base>
+
+<script>
+  import { mountJotterbug } from '../apps/jotterbug/ui';
+  const root = document.getElementById('jotterbug-root');
+  if (root) void mountJotterbug(root as HTMLElement);
+</script>
+
+<style is:global>
+  .jb { padding: 1.25rem 0 3rem; display: grid; gap: 1rem; }
+  .jb-search { min-width: 12rem; }
+  .jb-search-wrap { display: block; }
+
+  .jb-tabs { display: flex; gap: 0.35rem; }
+  .jb-tab {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font: 600 0.85rem var(--sans); padding: 0.45rem 0.8rem; cursor: pointer;
+    background: transparent; border: 1px solid transparent; border-radius: 999px; color: var(--text-soft);
+  }
+  .jb-tab:hover { background: var(--paper-sunk); }
+  .jb-tab.is-active { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+  .jb-tab span { font: 600 0.72rem var(--mono); opacity: .7; }
+
+  .jb-composer {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 0.85rem 1rem; box-shadow: var(--shadow-1); max-width: 40rem; width: 100%; margin-inline: auto;
+    display: grid; gap: 0.4rem;
+  }
+  .jb-composer__title { border: 0; background: none; font: 700 1rem var(--sans); padding: 0; }
+  .jb-composer__title:focus, .jb-composer__body:focus { outline: none; }
+  .jb-composer__body { border: 0; background: none; resize: none; font: 0.95rem var(--sans); padding: 0; min-height: 1.6rem; }
+  .jb-composer__row { display: flex; gap: 0.4rem; justify-content: flex-end; }
+
+  .jb-filters { display: grid; gap: 0.4rem; }
+  .jb-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+  .jb-filter-label { font: 600 0.68rem var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); margin-right: 0.3rem; }
+  .jb-swatch {
+    width: 1.4rem; height: 1.4rem; border-radius: 50%; cursor: pointer;
+    border: 1px solid rgba(0,0,0,.14); padding: 0;
+  }
+  .jb-swatch.is-active { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .jb-section { font: 600 0.7rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0.75rem 0 0.5rem; }
+
+  .jb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.85rem; align-items: start; }
+  .jb-board[data-layout='list'] .jb-grid { grid-template-columns: 1fr; }
+  .jb-board[data-layout='list'] .jb-note { max-width: 44rem; margin-inline: auto; width: 100%; }
+
+  .jb-note {
+    position: relative; background: var(--note-bg, #fff); color: var(--note-ink, var(--text));
+    border: 1px solid rgba(0,0,0,.12); border-radius: var(--radius);
+    padding: 0.85rem 0.9rem 2.4rem; display: grid; gap: 0.4rem;
+    box-shadow: var(--shadow-1); transition: box-shadow .14s ease, transform .14s ease;
+  }
+  .jb-note:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
+  .jb-note[data-pinned='true'] { border-color: color-mix(in srgb, var(--accent) 45%, rgba(0,0,0,.12)); }
+  .jb-note__open { position: absolute; inset: 0; background: none; border: 0; cursor: pointer; border-radius: var(--radius); }
+  .jb-note__title { font-size: 1rem; font-weight: 700; position: relative; pointer-events: none; }
+  .jb-note__body { margin: 0; font-size: 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; position: relative; pointer-events: none; max-height: 16rem; overflow: hidden; }
+  .jb-note__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; position: relative; font-size: 0.9rem; }
+  .jb-note__list li { display: flex; gap: 0.45rem; align-items: flex-start; }
+  .jb-note__list li.is-done span { text-decoration: line-through; opacity: .55; }
+  .jb-note__count { font: 0.72rem var(--mono); opacity: .65; position: relative; pointer-events: none; }
+  .jb-note__labels { display: flex; flex-wrap: wrap; gap: 0.3rem; position: relative; pointer-events: none; }
+  .jb-note__label { font: 600 0.68rem var(--sans); padding: 0.15rem 0.45rem; border-radius: 999px; background: rgba(0,0,0,.08); }
+  .jb-note__actions {
+    position: absolute; left: 0.55rem; right: 0.55rem; bottom: 0.45rem;
+    display: flex; gap: 0.1rem; opacity: 0; transition: opacity .14s ease;
+  }
+  .jb-note:hover .jb-note__actions, .jb-note:focus-within .jb-note__actions { opacity: 1; }
+  .jb-note__action {
+    position: relative; background: none; border: 0; cursor: pointer; font-size: 0.9rem;
+    padding: 0.25rem 0.35rem; border-radius: 5px; color: inherit; opacity: .7;
+  }
+  .jb-note__action:hover { background: rgba(0,0,0,.1); opacity: 1; }
+
+  .jb-check {
+    flex: none; width: 1.05rem; height: 1.05rem; margin-top: 0.15rem;
+    border: 1.5px solid currentColor; border-radius: 4px; background: none; cursor: pointer;
+    font-size: 0.72rem; line-height: 1; display: grid; place-items: center; color: inherit; opacity: .75;
+    position: relative;
+  }
+  .jb-check[aria-checked='true'] { background: currentColor; }
+  .jb-check[aria-checked='true']::after { content: '✓'; color: var(--note-bg, #fff); font-size: 0.7rem; position: absolute; }
+
+  .jb-progress { height: 3px; background: rgba(0,0,0,.12); border-radius: 2px; overflow: hidden; position: relative; }
+  .jb-progress span { display: block; height: 100%; background: currentColor; opacity: .55; }
+
+  /* editor */
+  .jb-editor {
+    border: 0; padding: 0; border-radius: var(--radius); width: min(38rem, calc(100vw - 2rem));
+    background: var(--note-bg, #fff); color: var(--note-ink, var(--text)); box-shadow: var(--shadow-2);
+  }
+  .jb-editor::backdrop { background: rgba(20, 22, 28, .5); }
+  .jb-editor__inner { padding: 1.1rem 1.25rem 1rem; display: grid; gap: 0.6rem; }
+  .jb-editor__title { border: 0; background: none; font: 700 1.15rem var(--sans); padding: 0; color: inherit; }
+  .jb-editor__body { border: 0; background: none; resize: vertical; font: 0.95rem/1.6 var(--sans); padding: 0; color: inherit; }
+  .jb-editor__title:focus, .jb-editor__body:focus, .jb-editor__labelinput:focus { outline: none; }
+  .jb-editor__list { display: grid; gap: 0.3rem; }
+  .jb-editor-item { display: flex; align-items: center; gap: 0.5rem; }
+  .jb-editor-item__text { flex: 1; border: 0; border-bottom: 1px solid rgba(0,0,0,.12); background: none; padding: 0.2rem 0; color: inherit; }
+  .jb-editor-item__text:focus { outline: none; border-bottom-color: currentColor; }
+  .jb-editor-item__text.is-done { text-decoration: line-through; opacity: .55; }
+  .jb-editor-item__remove { background: none; border: 0; cursor: pointer; color: inherit; opacity: .5; font-size: 1rem; }
+  .jb-editor-item__remove:hover { opacity: 1; }
+  .jb-editor__additem { background: none; border: 0; cursor: pointer; color: inherit; opacity: .6; font: 600 0.82rem var(--sans); text-align: left; padding: 0; }
+  .jb-editor__additem:hover { opacity: 1; }
+  .jb-editor__labels { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .jb-editor-label { display: inline-flex; align-items: center; gap: 0.25rem; font: 600 0.72rem var(--sans); padding: 0.2rem 0.35rem 0.2rem 0.55rem; border-radius: 999px; background: rgba(0,0,0,.09); }
+  .jb-editor-label button { background: none; border: 0; cursor: pointer; color: inherit; font-size: 0.85rem; line-height: 1; opacity: .6; }
+  .jb-editor-label button:hover { opacity: 1; }
+  .jb-editor__labelinput { border: 0; border-bottom: 1px solid rgba(0,0,0,.14); background: none; font-size: 0.85rem; padding: 0.25rem 0; color: inherit; }
+  .jb-editor__colors { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .jb-editor__foot { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between; border-top: 1px solid rgba(0,0,0,.1); padding-top: 0.7rem; }
+  .jb-editor__meta { font: 0.72rem var(--mono); opacity: .6; }
+  .jb-editor__actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+
+  @media (max-width: 640px) {
+    .jb-search { min-width: 8rem; }
+  }
+</style>

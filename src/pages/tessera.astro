@@ -1,0 +1,221 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+
+const app = getApp('tessera');
+
+const jsonLd = [{
+  '@type': 'SoftwareApplication',
+  '@id': 'https://alexmerced.app/tessera#app',
+  name: 'Tessera',
+  applicationCategory: 'UtilitiesApplication',
+  operatingSystem: 'Any browser',
+  url: 'https://alexmerced.app/tessera',
+  description: app.description,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  author: { '@id': 'https://alexmerced.app/#alexmerced' },
+  featureList: app.features,
+}];
+---
+
+<Base
+  title="Tessera, a QR code generator that runs in your browser"
+  description={app.description}
+  app="tessera"
+  chrome="app"
+  jsonLd={jsonLd}
+  keywords={app.keywords}
+>
+  <div class="app-frame" id="tessera-root">
+    <AppBar app="tessera">
+      <button class="btn btn--sm btn--primary" id="ts-save">Save to library</button>
+    </AppBar>
+
+    <div class="shell shell--wide ts">
+      <section class="ts-build" aria-label="Build a code">
+        <div class="ts-kinds" id="ts-kinds" role="group" aria-label="What the code should do"></div>
+        <p class="ts-kind-blurb" id="ts-kind-blurb"></p>
+        <form class="ts-form" id="ts-form" autocomplete="off"></form>
+
+        <details class="ts-style">
+          <summary>Appearance and encoding</summary>
+          <div class="ts-style__grid">
+            <label class="ts-field">
+              <span class="ts-field__label">Error correction</span>
+              <select class="field" id="ts-ec">
+                <option value="L">L, lowest</option>
+                <option value="M">M</option>
+                <option value="Q">Q</option>
+                <option value="H">H, highest</option>
+              </select>
+              <span class="ts-field__help" id="ts-ec-help"></span>
+            </label>
+
+            <label class="ts-field">
+              <span class="ts-field__label">Module size</span>
+              <input class="ts-range" id="ts-scale" type="range" min="2" max="40" step="1" />
+              <span class="ts-field__help" id="ts-scale-out"></span>
+            </label>
+
+            <label class="ts-field">
+              <span class="ts-field__label">Quiet zone</span>
+              <input class="ts-range" id="ts-quiet" type="range" min="0" max="16" step="1" />
+              <span class="ts-field__help" id="ts-quiet-out"></span>
+            </label>
+
+            <label class="ts-field">
+              <span class="ts-field__label">Minimum version</span>
+              <input class="ts-range" id="ts-version" type="range" min="1" max="40" step="1" />
+              <span class="ts-field__help" id="ts-version-out"></span>
+            </label>
+
+            <div class="ts-colors">
+              <label class="ts-field ts-field--color">
+                <span class="ts-field__label">Modules</span>
+                <input type="color" id="ts-dark" />
+              </label>
+              <label class="ts-field ts-field--color">
+                <span class="ts-field__label">Background</span>
+                <input type="color" id="ts-light" />
+              </label>
+              <button type="button" class="btn btn--sm" id="ts-swap">Swap</button>
+            </div>
+
+            <label class="ts-field ts-field--check">
+              <input type="checkbox" id="ts-transparent" />
+              <span>Transparent background</span>
+            </label>
+
+            <button type="button" class="btn btn--sm" id="ts-reset-style">Reset appearance</button>
+          </div>
+          <p class="ts-note">
+            Dark modules on a light background scan most reliably. Inverting the two, or using
+            colours with little contrast between them, will defeat some scanners. Keep the quiet
+            zone at four unless you have tested the result with the scanner it is meant for.
+          </p>
+        </details>
+      </section>
+
+      <aside class="ts-output" aria-label="The code">
+        <div class="ts-preview" id="ts-preview" data-state="empty">
+          <canvas id="ts-canvas" aria-label="The generated QR code"></canvas>
+          <p class="ts-problem" id="ts-problem" hidden></p>
+        </div>
+
+        <div class="ts-download">
+          <button class="btn btn--primary" id="ts-png">Download PNG</button>
+          <button class="btn" id="ts-svg">Download SVG</button>
+          <button class="btn" id="ts-copy">Copy text</button>
+        </div>
+
+        <dl class="ts-facts" id="ts-facts"></dl>
+
+        <details class="ts-raw">
+          <summary>What the code actually contains</summary>
+          <pre id="ts-payload"></pre>
+        </details>
+      </aside>
+    </div>
+
+    <section class="shell shell--wide ts-library-wrap" aria-label="Saved codes">
+      <h2 class="ts-subhead">Your library</h2>
+      <div class="ts-library" id="ts-library"></div>
+      <div class="empty" id="ts-library-empty">
+        <strong>Nothing saved yet</strong>
+        <p>Saving a code keeps its settings on this device so you can come back and download it again, or edit it into a new one. Use Export in the bar above to move the whole library to another browser.</p>
+      </div>
+    </section>
+  </div>
+</Base>
+
+<script>
+  import { mountTessera } from '../apps/tessera/ui';
+  const root = document.getElementById('tessera-root');
+  if (root) void mountTessera(root as HTMLElement);
+</script>
+
+<style is:global>
+  .ts { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 2rem; padding: 1.5rem 0 2rem; align-items: start; }
+
+  .ts-kinds { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.6rem; }
+  .ts-kind {
+    font: 600 0.82rem var(--sans); padding: 0.45rem 0.8rem; cursor: pointer;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 999px; color: var(--text-soft);
+  }
+  .ts-kind:hover { border-color: var(--accent); color: var(--accent); }
+  .ts-kind.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .ts-kind-blurb { font-size: 0.86rem; color: var(--text-soft); margin: 0 0 1.1rem; }
+
+  .ts-form { display: grid; gap: 0.85rem; }
+  .ts-field { display: grid; gap: 0.3rem; }
+  .ts-field__label { font: 600 0.78rem var(--sans); color: var(--text-soft); }
+  .ts-field__help { font-size: 0.76rem; color: var(--text-faint); }
+  .ts-field--check { grid-auto-flow: column; justify-content: start; align-items: center; gap: 0.5rem; }
+  .ts-field--check span { font-size: 0.86rem; }
+  .ts-field--color { grid-auto-flow: row; }
+  .ts-field--color input[type='color'] { width: 100%; height: 2.3rem; padding: 0.15rem; border: 1px solid var(--rule-strong); border-radius: var(--radius-sm); background: var(--paper-raised); cursor: pointer; }
+
+  .ts-range { width: 100%; accent-color: var(--accent); }
+
+  .ts-style { margin-top: 1.25rem; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper-raised); }
+  .ts-style summary { cursor: pointer; padding: 0.75rem 0.9rem; font-weight: 650; font-size: 0.9rem; }
+  .ts-style__grid { padding: 0 0.9rem 0.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.9rem; align-items: end; }
+  .ts-colors { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; align-items: end; }
+  .ts-note { padding: 0 0.9rem 0.9rem; margin: 0; font-size: 0.78rem; color: var(--text-faint); }
+
+  .ts-output { position: sticky; top: calc(var(--header-h) + 1rem); display: grid; gap: 0.85rem; }
+  .ts-preview {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 1rem; display: grid; place-items: center; min-height: 15rem;
+    background-image: linear-gradient(45deg, var(--paper-sunk) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--paper-sunk) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--paper-sunk) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--paper-sunk) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  }
+  .ts-preview canvas { max-width: 100%; height: auto; image-rendering: pixelated; }
+  .ts-preview[data-state='empty'] canvas, .ts-preview[data-state='error'] canvas { display: none; }
+  .ts-problem { margin: 0; font-size: 0.86rem; color: var(--text-soft); text-align: center; max-width: 18rem; }
+  .ts-preview[data-state='error'] .ts-problem { color: var(--danger); }
+
+  .ts-download { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .ts-download .btn { flex: 1; }
+
+  .ts-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin: 0; }
+  .ts-fact { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.4rem 0.55rem; }
+  .ts-fact dt { font: 600 0.66rem var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); }
+  .ts-fact dd { margin: 0.1rem 0 0; font: 600 0.88rem var(--sans); }
+
+  .ts-raw { font-size: 0.82rem; }
+  .ts-raw summary { cursor: pointer; color: var(--text-soft); }
+  .ts-raw pre {
+    margin: 0.5rem 0 0; padding: 0.6rem; background: var(--paper-raised); border: 1px solid var(--rule);
+    border-radius: var(--radius-sm); font: 0.76rem var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 12rem; overflow-y: auto;
+  }
+
+  .ts-library-wrap { padding-bottom: 3rem; }
+  .ts-subhead { font: 600 0.72rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 0.75rem; }
+  .ts-library { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 0.7rem; }
+  .ts-saved {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem; align-items: center;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.6rem 0.7rem;
+  }
+  .ts-saved__thumb { width: 3.5rem; height: 3.5rem; border-radius: 4px; image-rendering: pixelated; background: #fff; }
+  .ts-saved__body { display: grid; gap: 0.1rem; min-width: 0; }
+  .ts-saved__body strong { font-size: 0.92rem; }
+  .ts-saved__body span { font-size: 0.75rem; color: var(--text-faint); }
+  .ts-saved__snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+  .ts-saved__actions { display: grid; gap: 0.25rem; }
+
+  @media (max-width: 940px) {
+    .ts { grid-template-columns: 1fr; }
+    .ts-output { position: static; }
+    .ts-facts { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .ts-facts { grid-template-columns: 1fr 1fr; }
+  }
+</style>

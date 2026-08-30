@@ -1,0 +1,205 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+
+const app = getApp('reckoner');
+
+const jsonLd = [{
+  '@type': 'SoftwareApplication',
+  '@id': 'https://alexmerced.app/reckoner#app',
+  name: 'Reckoner',
+  applicationCategory: 'UtilitiesApplication',
+  operatingSystem: 'Any browser',
+  url: 'https://alexmerced.app/reckoner',
+  description: app.description,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  author: { '@id': 'https://alexmerced.app/#alexmerced' },
+  featureList: app.features,
+}];
+---
+
+<Base
+  title="Reckoner, a calculator that shows its working"
+  description={app.description}
+  app="reckoner"
+  chrome="app"
+  jsonLd={jsonLd}
+  keywords={app.keywords}
+>
+  <div class="app-frame" id="reckoner-root" data-keypad="on">
+    <AppBar app="reckoner">
+      <button class="btn btn--sm" id="rk-angle" aria-pressed="false" title="Switch between degrees and radians">Radians</button>
+      <button class="btn btn--sm" id="rk-keypad-toggle" aria-pressed="true">Hide keypad</button>
+    </AppBar>
+
+    <div class="shell shell--wide rk">
+      <section class="rk-main" aria-label="Calculator">
+        <div class="rk-display">
+          <label class="sr-only" for="rk-input">Expression</label>
+          <input
+            id="rk-input"
+            class="rk-input"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="2(3 + 4)^2"
+            aria-describedby="rk-hint"
+          />
+          <output class="rk-preview" id="rk-preview" data-state="idle" aria-live="polite"></output>
+          <p class="rk-hint" id="rk-hint"></p>
+        </div>
+
+        <div class="rk-functions" id="rk-functions" aria-label="Function shortcuts" role="group"></div>
+        <div class="rk-keypad" id="rk-keypad" role="group" aria-label="Keypad"></div>
+
+        <div class="rk-memory-wrap">
+          <h2 class="rk-subhead">Memory</h2>
+          <div class="rk-memory" id="rk-memory"></div>
+          <p class="rk-note">
+            An empty slot stores the latest result when you click it. A full slot inserts its name into
+            the expression, so you can write <code>m1 * 2</code>. <code>ans</code> always means the last
+            result on the tape.
+          </p>
+        </div>
+      </section>
+
+      <aside class="rk-tape-panel" aria-label="Tape">
+        <header class="rk-tape-head">
+          <h2 class="rk-subhead">Tape</h2>
+          <span class="rk-tape-count" id="rk-tape-count"></span>
+          <div class="rk-tape-actions">
+            <button class="btn btn--sm btn--ghost" id="rk-copy" title="Copy the latest result">Copy result</button>
+            <button class="btn btn--sm btn--ghost" id="rk-copy-tape" title="Copy the whole tape as plain text">Copy tape</button>
+            <button class="btn btn--sm btn--ghost" id="rk-clear-tape">Clear</button>
+          </div>
+        </header>
+        <ul class="rk-tape" id="rk-tape"></ul>
+        <div class="empty" id="rk-tape-empty">
+          <strong>Nothing on the tape yet</strong>
+          <p>Every expression you enter lands here. Click a line to reuse the expression, or click its result to drop the number into what you are typing.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</Base>
+
+<script>
+  import { mountReckoner } from '../apps/reckoner/ui';
+  const root = document.getElementById('reckoner-root');
+  if (root) mountReckoner(root as HTMLElement);
+</script>
+
+<style is:global>
+  .rk { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 1.75rem; padding: 1.5rem 0 3rem; align-items: start; }
+
+  .rk-main { display: grid; gap: 1.1rem; }
+
+  .rk-display {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 1.1rem 1.15rem 0.9rem; box-shadow: var(--shadow-1);
+  }
+  .rk-input {
+    width: 100%; border: 0; background: transparent; padding: 0;
+    font: 500 clamp(1.5rem, 4vw, 2.2rem)/1.25 var(--mono);
+    letter-spacing: -0.01em;
+  }
+  .rk-input:focus { outline: none; }
+  .rk-input.is-shaking { animation: rk-shake .34s ease; }
+  @keyframes rk-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+  .rk-preview {
+    display: block; min-height: 2rem;
+    font: 600 clamp(1.2rem, 3vw, 1.7rem)/1.3 var(--mono);
+    color: var(--accent);
+    text-align: right;
+  }
+  .rk-preview[data-state='pending'] { color: var(--text-faint); }
+  .rk-hint { margin: 0.15rem 0 0; font-size: 0.8rem; color: var(--text-faint); min-height: 1.2rem; }
+
+  .rk-functions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .rk-fn {
+    font: 600 0.8rem var(--mono); padding: 0.4rem 0.6rem; cursor: pointer;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  }
+  .rk-fn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .rk-keypad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+  #reckoner-root[data-keypad='off'] .rk-keypad { display: none; }
+  .rk-key {
+    font: 600 1.1rem var(--sans); padding: 0.95rem 0.5rem; cursor: pointer;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius);
+    box-shadow: var(--shadow-1);
+  }
+  .rk-key:hover { border-color: var(--rule-strong); background: var(--paper-sunk); }
+  .rk-key:active { transform: translateY(1px); }
+  .rk-key--op { color: var(--accent); }
+  .rk-key--muted { color: var(--danger); }
+  .rk-key--accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .rk-subhead { font: 600 0.72rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0; }
+
+  .rk-memory-wrap { display: grid; gap: 0.6rem; }
+  .rk-memory { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.5rem; }
+  .rk-mem {
+    display: flex; align-items: center; gap: 0.4rem;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm);
+    padding: 0.4rem 0.5rem;
+  }
+  .rk-mem--set { border-color: var(--accent); background: var(--accent-soft); }
+  .rk-mem__name { font: 700 0.7rem var(--mono); color: var(--text-faint); }
+  .rk-mem__value {
+    flex: 1; min-width: 0; text-align: left; background: none; border: 0; cursor: pointer;
+    font: 600 0.85rem var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rk-mem:not(.rk-mem--set) .rk-mem__value { color: var(--text-faint); font-weight: 400; }
+  .rk-mem__store, .rk-mem__clear {
+    background: none; border: 0; cursor: pointer; font: 600 0.72rem var(--mono); color: var(--text-faint);
+    padding: 0.15rem 0.3rem; border-radius: 4px;
+  }
+  .rk-mem__store:hover, .rk-mem__clear:hover { background: rgba(0,0,0,.07); color: var(--text); }
+  .rk-note { margin: 0; font-size: 0.8rem; color: var(--text-faint); }
+  .rk-note code { font: 0.9em var(--mono); background: var(--paper-sunk); padding: 0.1em 0.3em; border-radius: 3px; }
+
+  .rk-tape-panel {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius);
+    position: sticky; top: calc(var(--header-h) + 1rem); max-height: calc(100vh - var(--header-h) - 3rem);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .rk-tape-head { padding: 0.85rem 0.9rem; border-bottom: 1px solid var(--rule); display: grid; gap: 0.5rem; }
+  .rk-tape-count { font-size: 0.78rem; color: var(--text-faint); }
+  .rk-tape-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+  .rk-tape { list-style: none; margin: 0; padding: 0.35rem; overflow-y: auto; display: grid; gap: 0.15rem; }
+  .rk-tape__row {
+    display: grid; grid-template-columns: 1fr auto auto; grid-template-areas: 'expr meta remove' 'result result result';
+    gap: 0.1rem 0.5rem; padding: 0.45rem 0.5rem; border-radius: var(--radius-sm);
+  }
+  .rk-tape__row:hover { background: var(--paper-sunk); }
+  .rk-tape__expr {
+    grid-area: expr; text-align: left; background: none; border: 0; cursor: pointer; padding: 0;
+    font: 400 0.82rem var(--mono); color: var(--text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .rk-tape__expr:hover { color: var(--text); text-decoration: underline; }
+  .rk-tape__result {
+    grid-area: result; text-align: left; background: none; border: 0; cursor: pointer; padding: 0;
+    font: 600 1rem var(--mono); color: var(--accent);
+  }
+  .rk-tape__result:hover { text-decoration: underline; }
+  .rk-tape__meta { grid-area: meta; font: 0.7rem var(--mono); color: var(--text-faint); align-self: center; }
+  .rk-tape__remove {
+    grid-area: remove; background: none; border: 0; cursor: pointer; color: var(--text-faint);
+    font-size: 1rem; line-height: 1; padding: 0 0.15rem; opacity: 0;
+  }
+  .rk-tape__row:hover .rk-tape__remove { opacity: 1; }
+  .rk-tape__remove:hover { color: var(--danger); }
+
+  @media (max-width: 940px) {
+    .rk { grid-template-columns: 1fr; }
+    .rk-tape-panel { position: static; max-height: 26rem; }
+  }
+</style>

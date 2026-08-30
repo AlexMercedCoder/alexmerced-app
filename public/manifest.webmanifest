@@ -1,0 +1,30 @@
+{
+  "name": "alexmerced.app",
+  "short_name": "am.app",
+  "description": "Small browser tools that keep your data on your own machine: nested notes, a kanban board, quick notes, a QR generator, and a calculator.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f7f7f9",
+  "theme_color": "#14161c",
+  "categories": ["productivity", "utilities"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Warren", "short_name": "Warren", "description": "Nested pages", "url": "/warren", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Laneway", "short_name": "Laneway", "description": "Kanban board", "url": "/laneway", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Jotterbug", "short_name": "Jotterbug", "description": "Quick notes", "url": "/jotterbug", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Tessera", "short_name": "Tessera", "description": "QR codes", "url": "/tessera", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Reckoner", "short_name": "Reckoner", "description": "Calculator", "url": "/reckoner", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

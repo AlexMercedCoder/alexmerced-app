@@ -1,0 +1,176 @@
+---
+import Base from '../layouts/Base.astro';
+import { apps } from '../data/apps';
+
+const jsonLd = [
+  {
+    '@type': 'CollectionPage',
+    '@id': 'https://alexmerced.app/#page',
+    name: 'alexmerced.app',
+    url: 'https://alexmerced.app/',
+    description: 'Small browser tools that keep your data on your own machine.',
+    isPartOf: { '@id': 'https://alexmerced.app/#website' },
+    mainEntity: {
+      '@type': 'ItemList',
+      numberOfItems: apps.length,
+      itemListElement: apps.map((app, index) => ({
+        '@type': 'ListItem',
+        position: index + 1,
+        item: {
+          '@type': 'SoftwareApplication',
+          name: app.name,
+          url: `https://alexmerced.app/${app.slug}`,
+          description: app.tagline,
+          applicationCategory: 'UtilitiesApplication',
+          operatingSystem: 'Any browser',
+          offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+        },
+      })),
+    },
+  },
+];
+---
+
+<Base
+  title="alexmerced.app"
+  description="A shelf of small browser tools by Alex Merced: nested notes, a kanban board, quick notes, a QR generator, and a calculator. Every one runs entirely on your own machine, stores its data locally, and exports to a file whenever you want."
+  jsonLd={jsonLd}
+  keywords={['browser tools', 'local first apps', 'offline web apps', 'no account required', 'privacy friendly tools']}
+>
+  <section class="hero">
+    <div class="shell shell--wide">
+      <p class="eyebrow">alexmerced.app</p>
+      <h1>Small tools that keep<br />your data on your machine.</h1>
+      <p class="hero__lede">
+        A shelf of things I wanted and could not find in a shape I liked. Each one runs entirely in
+        your browser. Nothing is uploaded, nothing needs an account, and every app writes its whole
+        dataset to a file whenever you ask.
+      </p>
+
+      <ul class="promises">
+        <li><strong>No account</strong><span>Open the page and start. There is nothing to sign up for.</span></li>
+        <li><strong>No server</strong><span>Your work is stored in this browser, in IndexedDB and localStorage.</span></li>
+        <li><strong>No lock-in</strong><span>Export writes a plain JSON file. Import reads it back, anywhere.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="shell shell--wide shelf" aria-label="The apps">
+    <ul class="shelf__grid">
+      {apps.map((app) => (
+        <li class="card" style={`--card-accent:${app.accent};--card-soft:${app.accentSoft}`}>
+          <a class="card__link" href={`/${app.slug}`} aria-label={`${app.action}, ${app.tagline}`}></a>
+          <div class="card__head">
+            <span class="card__mark" aria-hidden="true">{app.name.slice(0, 1)}</span>
+            <div>
+              <h2 class="card__name">{app.name}</h2>
+              <p class="card__tagline">{app.tagline}</p>
+            </div>
+          </div>
+          <p class="card__body">{app.description}</p>
+          <ul class="card__features">
+            {app.features.map((feature) => <li>{feature}</li>)}
+          </ul>
+          <p class="card__foot">
+            <span class="card__action">{app.action} →</span>
+            <span class="card__storage">{app.storage}</span>
+          </p>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="shell shell--wide explain">
+    <div class="explain__grid">
+      <div>
+        <h2>How the storage works</h2>
+        <p>
+          Records go into <strong>IndexedDB</strong>, the browser's own database. Interface
+          preferences, the sort of thing that would be annoying rather than painful to lose, go into
+          <strong>localStorage</strong>. Both are tied to this browser on this device, so what you
+          see in one browser will not appear in another.
+        </p>
+        <p>
+          That is the trade. There is no sync because there is no server, and there is no server
+          because that is the point. What there is instead is a export button in every app.
+        </p>
+      </div>
+      <div>
+        <h2>Moving your data</h2>
+        <p>
+          Every app writes the same kind of file: plain JSON, readable in any text editor, with a
+          small header saying which app made it and when. Import reads that file back, and asks
+          whether to merge it with what is already there or replace everything.
+        </p>
+        <p>
+          Use it to move between browsers, to keep a backup before you experiment, or to keep your
+          own copy of everything you have written here. The files are yours and they are not
+          going anywhere.
+        </p>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero { padding: 3.5rem 0 2.5rem; }
+  .hero h1 { margin-bottom: 1.2rem; }
+  .hero__lede { font-size: 1.1rem; color: var(--text-soft); max-width: 40rem; }
+
+  .promises { list-style: none; margin: 2rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+  .promises li { display: grid; gap: 0.2rem; border-left: 2px solid var(--rule); padding-left: 0.9rem; }
+  .promises strong { font-size: 0.95rem; }
+  .promises span { font-size: 0.87rem; color: var(--text-soft); }
+
+  .shelf { padding: 1.5rem 0 2rem; }
+  .shelf__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1.1rem; }
+
+  .card {
+    position: relative; display: grid; gap: 0.75rem; align-content: start;
+    background: var(--paper-raised); border: 1px solid var(--rule);
+    border-top: 3px solid var(--card-accent); border-radius: var(--radius);
+    padding: 1.25rem 1.25rem 1.1rem; box-shadow: var(--shadow-1);
+    transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-2); }
+  .card:focus-within { outline: 2px solid var(--card-accent); outline-offset: 2px; }
+  .card__link { position: absolute; inset: 0; border-radius: var(--radius); }
+  .card__link:focus-visible { outline: none; }
+
+  .card__head { display: flex; align-items: center; gap: 0.75rem; }
+  .card__mark {
+    flex: none; width: 2.4rem; height: 2.4rem; border-radius: 8px;
+    background: var(--card-soft); color: var(--card-accent);
+    display: grid; place-items: center; font: 700 1.15rem var(--sans);
+  }
+  .card__name { font-size: 1.2rem; }
+  .card__tagline { margin: 0.1rem 0 0; font-size: 0.85rem; color: var(--card-accent); font-weight: 600; }
+
+  .card__body { margin: 0; font-size: 0.88rem; color: var(--text-soft); line-height: 1.6; }
+
+  .card__features { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.28rem; }
+  .card__features li {
+    font-size: 0.82rem; color: var(--text-soft); padding-left: 1.1rem; position: relative;
+  }
+  .card__features li::before {
+    content: ''; position: absolute; left: 0.2rem; top: 0.55rem;
+    width: 0.35rem; height: 0.35rem; border-radius: 50%; background: var(--card-accent); opacity: .6;
+  }
+
+  .card__foot {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+    margin: 0.4rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--rule);
+  }
+  .card__action { font: 700 0.88rem var(--sans); color: var(--card-accent); }
+  .card__storage { font: 0.68rem var(--mono); color: var(--text-faint); text-align: right; }
+
+  .explain { padding: 2rem 0 3rem; }
+  .explain__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; }
+  .explain h2 { font-size: 1.15rem; margin-bottom: 0.6rem; }
+  .explain p { font-size: 0.9rem; color: var(--text-soft); }
+  .explain p:last-child { margin-bottom: 0; }
+
+  @media (max-width: 760px) {
+    .explain__grid { grid-template-columns: 1fr; gap: 1.75rem; }
+  }
+</style>

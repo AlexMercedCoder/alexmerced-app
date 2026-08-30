@@ -1,0 +1,265 @@
+/* ------------------------------------------------------------------
+   alexmerced.app
+
+   One shell, five apps, five accents. The shell stays neutral so each
+   app can own its colour. Every app page sets --accent and --accent-soft
+   on :root via a data-theme attribute, and the shell picks them up.
+------------------------------------------------------------------ */
+:root {
+  --ink-900: #14161c;
+  --ink-800: #1e2129;
+  --ink-700: #2b2f3a;
+  --ink-600: #454b5c;
+
+  --paper: #f7f7f9;
+  --paper-raised: #ffffff;
+  --paper-sunk: #eeeff3;
+  --rule: #dcdee5;
+  --rule-strong: #c3c7d2;
+
+  --text: #14161c;
+  --text-soft: #565c6d;
+  --text-faint: #838a9c;
+
+  --accent: #5b6bd6;
+  --accent-soft: #e6e9fa;
+  --danger: #c8433c;
+  --warn: #c07a12;
+  --good: #14855f;
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+  --serif: ui-serif, Georgia, "Times New Roman", serif;
+
+  --shell: min(1200px, calc(100% - 3rem));
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-1: 0 1px 2px rgba(20, 22, 28, .06), 0 2px 8px rgba(20, 22, 28, .05);
+  --shadow-2: 0 4px 12px rgba(20, 22, 28, .09), 0 12px 32px rgba(20, 22, 28, .08);
+  --header-h: 3.75rem;
+}
+
+/* Per-app accents. Set data-theme on <html> and the shell follows. */
+[data-theme='warren']    { --accent: #b4552d; --accent-soft: #f4e6dc; }
+[data-theme='laneway']   { --accent: #2f6f9f; --accent-soft: #e2edf5; }
+[data-theme='jotterbug'] { --accent: #0f9b7e; --accent-soft: #dcf1eb; }
+[data-theme='tessera']   { --accent: #6b4bc4; --accent-soft: #e8e3f7; }
+[data-theme='reckoner']  { --accent: #c07a12; --accent-soft: #f7ecd8; }
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Components set their own display, which would otherwise defeat [hidden]. */
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+img, svg { max-width: 100%; }
+button, input, textarea, select { font: inherit; color: inherit; }
+
+h1, h2, h3, h4 { margin: 0; line-height: 1.15; letter-spacing: -0.022em; font-weight: 700; }
+h1 { font-size: clamp(2.1rem, 4.4vw, 3.2rem); }
+h2 { font-size: clamp(1.45rem, 2.6vw, 2rem); }
+h3 { font-size: 1.15rem; }
+p { margin: 0 0 1em; }
+
+.shell { width: var(--shell); margin-inline: auto; }
+.shell--wide { width: min(1500px, calc(100% - 3rem)); }
+
+.eyebrow {
+  font: 600 0.7rem/1 var(--mono);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.85rem;
+}
+
+.skip-link {
+  position: absolute; left: -9999px; top: 0; z-index: 100;
+  background: var(--ink-900); color: #fff; padding: 0.7rem 1.1rem;
+}
+.skip-link:focus { left: 0; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* ------------------------------------------------------------- controls */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+  font: 600 0.88rem/1 var(--sans);
+  padding: 0.62rem 0.95rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--rule-strong);
+  background: var(--paper-raised);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background .12s ease, border-color .12s ease, transform .06s ease;
+}
+.btn:hover { background: var(--paper-sunk); border-color: var(--text-faint); }
+.btn:active { transform: translateY(1px); }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn--primary:hover { background: var(--accent); filter: brightness(1.08); border-color: var(--accent); }
+.btn--ghost { background: transparent; border-color: transparent; }
+.btn--ghost:hover { background: var(--paper-sunk); border-color: transparent; }
+.btn--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--rule)); }
+.btn--danger:hover { background: color-mix(in srgb, var(--danger) 8%, var(--paper-raised)); }
+.btn--sm { padding: 0.4rem 0.65rem; font-size: 0.8rem; }
+.btn--icon { padding: 0.45rem; width: 2.15rem; height: 2.15rem; }
+
+.field {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper-raised);
+  font-size: 0.92rem;
+}
+.field:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.field--sm { padding: 0.4rem 0.55rem; font-size: 0.85rem; }
+
+label.stack { display: grid; gap: 0.35rem; }
+label.stack > span { font: 600 0.75rem var(--sans); color: var(--text-soft); letter-spacing: .01em; }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font: 600 0.75rem/1 var(--sans);
+  padding: 0.32rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: var(--paper-raised);
+  cursor: pointer;
+}
+.chip[aria-pressed='true'], .chip.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ------------------------------------------------------------- app chrome */
+.site-header {
+  position: sticky; top: 0; z-index: 50;
+  height: var(--header-h);
+  display: flex; align-items: center;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: saturate(150%) blur(10px);
+  border-bottom: 1px solid var(--rule);
+}
+.site-header__inner { display: flex; align-items: center; gap: 1rem; width: 100%; }
+.brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; margin-right: auto; font-weight: 700; letter-spacing: -0.02em; }
+.brand__dot { width: 1.6rem; height: 1.6rem; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: #fff; font: 700 0.85rem var(--mono); }
+.brand__name { font-size: 1rem; }
+.brand__app { color: var(--text-faint); font-weight: 600; }
+
+.header-nav { display: flex; align-items: center; gap: 0.35rem; }
+.header-nav a {
+  text-decoration: none; font-size: 0.87rem; font-weight: 600; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm);
+  color: var(--text-soft);
+}
+.header-nav a:hover { background: var(--paper-sunk); color: var(--text); }
+.header-nav a[aria-current='page'] { color: var(--accent); background: var(--accent-soft); }
+
+.install-btn { flex: none; }
+
+.offline-badge {
+  flex: none;
+  font: 600 0.7rem/1 var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+}
+
+.site-footer {
+  border-top: 1px solid var(--rule);
+  padding: 2.5rem 0;
+  margin-top: 3rem;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+.site-footer a { color: var(--text-soft); }
+.site-footer__row { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; align-items: baseline; }
+.site-footer__links { display: flex; flex-wrap: wrap; gap: 1rem; }
+
+/* ------------------------------------------------------------- app frame */
+.app-frame { min-height: calc(100vh - var(--header-h)); display: flex; flex-direction: column; }
+.app-bar {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper-raised);
+}
+.app-bar__title { display: flex; align-items: baseline; gap: 0.6rem; margin-right: auto; }
+.app-bar__title strong { font-size: 1.05rem; letter-spacing: -0.02em; }
+.app-bar__title span { font-size: 0.83rem; color: var(--text-faint); }
+.app-bar__spacer { flex: 1; }
+
+/* ------------------------------------------------------------- toasts */
+.toast-stack {
+  position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%);
+  display: grid; gap: 0.5rem; z-index: 200; width: min(30rem, calc(100% - 2rem));
+}
+.toast {
+  display: flex; align-items: center; gap: 0.85rem;
+  background: var(--ink-900); color: #fff;
+  padding: 0.75rem 0.9rem; border-radius: var(--radius);
+  box-shadow: var(--shadow-2); font-size: 0.88rem;
+  animation: toast-in .18s ease;
+}
+.toast--error { background: var(--danger); }
+.toast--good { background: var(--good); }
+.toast__action {
+  margin-left: auto; background: rgba(255,255,255,.16); border: 0; color: #fff;
+  font: 600 0.82rem var(--sans); padding: 0.35rem 0.65rem; border-radius: var(--radius-sm); cursor: pointer;
+}
+.toast__action:hover { background: rgba(255,255,255,.28); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ------------------------------------------------------------- dialogs */
+dialog.sheet {
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  padding: 0; max-width: min(34rem, calc(100vw - 2rem)); width: 100%;
+  box-shadow: var(--shadow-2); color: var(--text); background: var(--paper-raised);
+}
+dialog.sheet::backdrop { background: rgba(20, 22, 28, .45); }
+.sheet__head { padding: 1.1rem 1.25rem 0.5rem; }
+.sheet__head h2 { font-size: 1.15rem; }
+.sheet__head p { margin: 0.35rem 0 0; color: var(--text-soft); font-size: 0.89rem; }
+.sheet__body { padding: 0.75rem 1.25rem; display: grid; gap: 0.9rem; }
+.sheet__foot { padding: 0.9rem 1.25rem 1.1rem; display: flex; gap: 0.55rem; justify-content: flex-end; }
+
+/* ------------------------------------------------------------- empty states */
+.empty {
+  display: grid; gap: 0.5rem; justify-items: center; text-align: center;
+  padding: 3.5rem 1.5rem; color: var(--text-soft);
+}
+.empty strong { font-size: 1.05rem; color: var(--text); }
+.empty p { margin: 0; max-width: 28rem; font-size: 0.92rem; }
+
+@media (max-width: 760px) {
+  :root { --shell: calc(100% - 1.75rem); }
+  .shell--wide { width: calc(100% - 1.75rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

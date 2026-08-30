@@ -1,0 +1,5 @@
+# alexmerced.app
+User-agent: *
+Allow: /
+
+Sitemap: https://alexmerced.app/sitemap-index.xml

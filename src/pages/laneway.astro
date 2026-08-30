@@ -1,0 +1,252 @@
+---
+import Base from '../layouts/Base.astro';
+import AppBar from '../components/AppBar.astro';
+import { getApp } from '../data/apps';
+
+const app = getApp('laneway');
+
+const jsonLd = [{
+  '@type': 'SoftwareApplication',
+  '@id': 'https://alexmerced.app/laneway#app',
+  name: 'Laneway',
+  applicationCategory: 'ProductivityApplication',
+  operatingSystem: 'Any browser',
+  url: 'https://alexmerced.app/laneway',
+  description: app.description,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  author: { '@id': 'https://alexmerced.app/#alexmerced' },
+  featureList: app.features,
+}];
+---
+
+<Base
+  title="Laneway, a kanban board sized for one person"
+  description={app.description}
+  app="laneway"
+  chrome="app"
+  jsonLd={jsonLd}
+  keywords={app.keywords}
+>
+  <div class="app-frame" id="laneway-root" data-compact="false">
+    <AppBar app="laneway">
+      <label class="sr-only" for="lw-board-picker">Board</label>
+      <select id="lw-board-picker" class="field field--sm lw-picker"></select>
+      <button class="btn btn--sm" id="lw-new-board">New board</button>
+      <button class="btn btn--sm" id="lw-rename-board">Rename</button>
+      <button class="btn btn--sm btn--danger" id="lw-delete-board">Delete board</button>
+    </AppBar>
+
+    <div class="lw-toolbar">
+      <div class="shell shell--wide lw-toolbar__inner">
+        <label class="sr-only" for="lw-search">Search cards</label>
+        <input id="lw-search" class="field field--sm lw-search" type="search" placeholder="Search cards" autocomplete="off" />
+
+        <label class="sr-only" for="lw-due-filter">Due</label>
+        <select id="lw-due-filter" class="field field--sm">
+          <option value="any">Any due date</option>
+          <option value="overdue">Overdue</option>
+          <option value="week">Due within three days</option>
+          <option value="none">No due date</option>
+        </select>
+
+        <div class="lw-label-filters" id="lw-label-filters" role="group" aria-label="Filter by label"></div>
+
+        <span class="lw-stats" id="lw-stats"></span>
+        <button class="btn btn--sm" id="lw-compact" title="Tighter cards, more on screen">Compact</button>
+        <button class="btn btn--sm" id="lw-archive-toggle" aria-pressed="false">Archive</button>
+      </div>
+    </div>
+
+    <section class="lw-archive" id="lw-archive" hidden aria-label="Archived cards">
+      <div class="shell shell--wide">
+        <h2 class="lw-archive__title">Archived on this board</h2>
+        <div class="lw-archive__list" id="lw-archive-list"></div>
+      </div>
+    </section>
+
+    <div class="lw-board" id="lw-lanes" aria-label="Board"></div>
+
+    <p class="lw-help">
+      Click a card to open it. Click once to select, then hold <kbd>Shift</kbd> and press the arrow
+      keys to move it between columns and positions. Press <kbd>E</kbd> to archive the selected card.
+      Cards can also be dragged.
+    </p>
+
+    <dialog class="sheet lw-editor" id="lw-editor" aria-label="Edit card">
+      <div class="lw-editor__body">
+        <label class="stack">
+          <span>Title</span>
+          <textarea id="lw-editor-title" class="field lw-editor__title" rows="2"></textarea>
+        </label>
+
+        <div class="lw-editor__row">
+          <label class="stack">
+            <span>Column</span>
+            <select id="lw-editor-column" class="field field--sm"></select>
+          </label>
+          <label class="stack">
+            <span>Due date</span>
+            <input id="lw-editor-due" class="field field--sm" type="date" />
+          </label>
+        </div>
+
+        <div class="stack">
+          <span class="lw-editor__legend">Labels</span>
+          <div class="lw-label-filters" id="lw-editor-labels" role="group" aria-label="Card labels"></div>
+        </div>
+
+        <label class="stack">
+          <span>Notes</span>
+          <textarea id="lw-editor-notes" class="field" rows="5" placeholder="Anything you need to remember about this card"></textarea>
+        </label>
+
+        <div class="stack">
+          <span class="lw-editor__legend">Checklist</span>
+          <div class="lw-editor__progress" id="lw-editor-progress" hidden></div>
+          <div id="lw-editor-checklist" class="lw-editor__checklist"></div>
+          <button type="button" class="lw-editor__addcheck" data-add-check>+ Add a step</button>
+        </div>
+      </div>
+
+      <div class="sheet__foot">
+        <button type="button" class="btn btn--sm btn--danger" data-editor-action="delete">Delete</button>
+        <button type="button" class="btn btn--sm" data-editor-action="archive">Archive</button>
+        <button type="button" class="btn btn--sm btn--primary" onclick="this.closest('dialog').close()">Done</button>
+      </div>
+    </dialog>
+  </div>
+</Base>
+
+<script>
+  import { mountLaneway } from '../apps/laneway/ui';
+  const root = document.getElementById('laneway-root');
+  if (root) void mountLaneway(root as HTMLElement);
+</script>
+
+<style is:global>
+  .lw-picker { max-width: 12rem; }
+
+  .lw-toolbar { border-bottom: 1px solid var(--rule); background: var(--paper-raised); padding: 0.6rem 0; }
+  .lw-toolbar__inner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .lw-search { max-width: 14rem; }
+  .lw-stats { margin-left: auto; font: 0.78rem var(--mono); color: var(--text-faint); }
+
+  .lw-label-filters { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .lw-label-chip {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font: 600 0.75rem var(--sans); padding: 0.3rem 0.6rem; cursor: pointer;
+    border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-raised); color: var(--text-soft);
+  }
+  .lw-label-chip::before {
+    content: ''; width: 0.55rem; height: 0.55rem; border-radius: 50%;
+    background: var(--label-color, var(--text-faint));
+  }
+  .lw-label-chip:hover { border-color: var(--label-color, var(--rule-strong)); }
+  .lw-label-chip.is-active { background: var(--label-color, var(--accent)); border-color: var(--label-color, var(--accent)); color: #fff; }
+  .lw-label-chip.is-active::before { background: rgba(255,255,255,.85); }
+  .lw-label-chip--manage::before { display: none; }
+
+  .lw-board {
+    display: flex; gap: 0.85rem; align-items: flex-start;
+    padding: 1rem calc((100vw - min(1500px, 100vw - 1.75rem)) / 2) 1rem;
+    overflow-x: auto; flex: 1; min-height: 0;
+  }
+  .lw-lane {
+    flex: 0 0 17.5rem; max-width: 17.5rem; background: var(--paper-sunk);
+    border: 1px solid var(--rule); border-radius: var(--radius);
+    display: flex; flex-direction: column; max-height: calc(100vh - 14rem);
+  }
+  .lw-lane[data-over='true'] { border-color: var(--warn); box-shadow: inset 0 2px 0 var(--warn); }
+  .lw-lane--new { background: transparent; border-style: dashed; padding: 0.5rem; }
+
+  .lw-lane__head { display: flex; align-items: center; gap: 0.4rem; padding: 0.6rem 0.65rem 0.5rem; }
+  .lw-lane__name {
+    background: none; border: 0; cursor: pointer; padding: 0; text-align: left;
+    font: 700 0.88rem var(--sans); letter-spacing: -0.01em; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .lw-lane__name:hover { text-decoration: underline; }
+  .lw-lane__count { font: 600 0.72rem var(--mono); color: var(--text-faint); }
+  .lw-lane[data-over='true'] .lw-lane__count { color: var(--warn); }
+  .lw-lane__menu { background: none; border: 0; cursor: pointer; color: var(--text-faint); font-size: 1rem; line-height: 1; padding: 0 0.2rem; }
+  .lw-lane__menu:hover { color: var(--text); }
+
+  .lw-lane__cards { padding: 0 0.45rem 0.45rem; display: grid; gap: 0.4rem; overflow-y: auto; min-height: 2.5rem; align-content: start; }
+  .lw-lane__cards[data-dropping='true'] { background: var(--accent-soft); border-radius: var(--radius-sm); }
+  .lw-lane__blank { margin: 0; padding: 0.75rem 0.35rem; font-size: 0.78rem; color: var(--text-faint); text-align: center; }
+
+  .lw-card {
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm);
+    padding: 0.55rem 0.6rem; cursor: pointer; display: grid; gap: 0.35rem;
+    box-shadow: var(--shadow-1); transition: border-color .12s ease, transform .12s ease;
+  }
+  .lw-card:hover { border-color: var(--rule-strong); transform: translateY(-1px); }
+  .lw-card[data-selected='true'] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .lw-card[data-dragging='true'] { opacity: .45; }
+  #laneway-root[data-compact='true'] .lw-card { padding: 0.35rem 0.5rem; }
+  #laneway-root[data-compact='true'] .lw-card__title { font-size: 0.82rem; }
+
+  .lw-card__labels { display: flex; gap: 0.2rem; }
+  .lw-card__label { width: 1.6rem; height: 0.28rem; border-radius: 2px; }
+  .lw-card__title { margin: 0; font-size: 0.88rem; line-height: 1.4; overflow-wrap: anywhere; }
+  .lw-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font: 0.72rem var(--mono); color: var(--text-faint); }
+  .lw-card__checklist[data-complete='true'] { color: var(--good); }
+  .lw-card__hasnotes { font-size: 0.85rem; }
+
+  .lw-due { padding: 0.1rem 0.35rem; border-radius: 4px; background: var(--paper-sunk); }
+  .lw-due[data-state='overdue'] { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); font-weight: 600; }
+  .lw-due[data-state='today'] { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); font-weight: 600; }
+  .lw-due[data-state='soon'] { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
+
+  .lw-lane__add { padding: 0 0.45rem 0.5rem; }
+  .lw-lane__input {
+    width: 100%; border: 1px solid transparent; background: transparent; border-radius: var(--radius-sm);
+    padding: 0.4rem 0.5rem; font-size: 0.84rem;
+  }
+  .lw-lane__input::placeholder { color: var(--text-faint); }
+  .lw-lane__input:hover { background: var(--paper-raised); }
+  .lw-lane__input:focus { background: var(--paper-raised); border-color: var(--accent); outline: none; }
+
+  .lw-help {
+    margin: 0; padding: 0 calc((100vw - min(1500px, 100vw - 1.75rem)) / 2) 1.5rem;
+    font-size: 0.8rem; color: var(--text-faint); max-width: 60rem;
+  }
+  .lw-help kbd {
+    font: 0.85em var(--mono); background: var(--paper-sunk); border: 1px solid var(--rule);
+    border-radius: 4px; padding: 0.05em 0.3em;
+  }
+
+  .lw-archive { border-bottom: 1px solid var(--rule); background: var(--paper-sunk); padding: 1rem 0; }
+  .lw-archive__title { font: 600 0.72rem var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 0.6rem; }
+  .lw-archive__list { display: grid; gap: 0.35rem; max-height: 14rem; overflow-y: auto; }
+  .lw-archive__row {
+    display: grid; grid-template-columns: 1fr auto auto auto; gap: 0.6rem; align-items: center;
+    background: var(--paper-raised); border: 1px solid var(--rule); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+  }
+  .lw-archive__when { font: 0.72rem var(--mono); color: var(--text-faint); }
+  .lw-archive__blank { margin: 0; font-size: 0.85rem; color: var(--text-faint); }
+
+  .lw-editor { max-width: min(38rem, calc(100vw - 2rem)); }
+  .lw-editor__body { padding: 1.1rem 1.25rem 0.5rem; display: grid; gap: 0.85rem; }
+  .lw-editor__title { font-weight: 600; resize: vertical; }
+  .lw-editor__row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .lw-editor__legend { font: 600 0.75rem var(--sans); color: var(--text-soft); }
+  .lw-editor__checklist { display: grid; gap: 0.3rem; }
+  .lw-check-row { display: flex; align-items: center; gap: 0.5rem; }
+  .lw-check-row__text { flex: 1; border: 0; border-bottom: 1px solid var(--rule); background: none; padding: 0.25rem 0; font-size: 0.88rem; }
+  .lw-check-row__text:focus { outline: none; border-bottom-color: var(--accent); }
+  .lw-check-row__text.is-done { text-decoration: line-through; color: var(--text-faint); }
+  .lw-check-row__remove { background: none; border: 0; cursor: pointer; color: var(--text-faint); font-size: 1rem; }
+  .lw-check-row__remove:hover { color: var(--danger); }
+  .lw-editor__addcheck { background: none; border: 0; cursor: pointer; color: var(--accent); font: 600 0.82rem var(--sans); text-align: left; padding: 0; }
+  .lw-editor__progress { display: flex; align-items: center; gap: 0.5rem; font: 0.75rem var(--mono); color: var(--text-faint); }
+  .lw-progress { flex: 1; height: 4px; background: var(--paper-sunk); border-radius: 2px; overflow: hidden; }
+  .lw-progress span { display: block; height: 100%; background: var(--good); }
+
+  @media (max-width: 640px) {
+    .lw-lane { flex-basis: 15rem; }
+    .lw-editor__row { grid-template-columns: 1fr; }
+    .lw-stats { margin-left: 0; width: 100%; }
+  }
+</style>
