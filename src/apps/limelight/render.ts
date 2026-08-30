@@ -7,8 +7,8 @@ import {
   type ClickSample, type Interest, type PointerSample,
 } from './attention';
 import {
-  cameraCrop, cameraRect, contentRect, cornerRadius, cropRect, evenSize, ripple, roundedPath,
-  type Composition, type Crop,
+  cameraAspect, cameraCrop, cameraRect, contentRect, cornerRadius, coverRect, cropRect, evenSize,
+  ripple, roundedPath, type Composition, type Crop,
 } from './layout';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
@@ -38,6 +38,8 @@ export type Project = {
   clicks: ClickSample[];
   /** The part of the source to keep. Everything outside it is never drawn. */
   crop?: Crop | null;
+  /** A picture to use as the background, when one was chosen. */
+  wallpaper?: CanvasImageSource | null;
   composition: Composition;
   zoom: ZoomSettings;
   frameRate: number;
@@ -146,7 +148,11 @@ export function drawFrame(
   } else if (composition.background === 'solid') {
     context.fillStyle = composition.colours[0];
     context.fillRect(0, 0, width, height);
-  } else if (composition.background === 'gradient') {
+  } else if (composition.background === 'image' && project.wallpaper) {
+    const source = wallpaperSize(project.wallpaper);
+    const fit = coverRect(width, height, source.width, source.height);
+    context.drawImage(project.wallpaper, fit.x, fit.y, fit.width, fit.height);
+  } else if (composition.background === 'gradient' || composition.background === 'image') {
     const gradient = context.createLinearGradient(0, 0, width, height);
     gradient.addColorStop(0, composition.colours[0]);
     gradient.addColorStop(1, composition.colours[1]);
@@ -236,16 +242,19 @@ export function drawFrame(
   // ------------------------------------------------------------- camera
   const bubble = cameraRect(composition);
   if (bubble && project.camera && project.camera.videoWidth > 0) {
-    const crop = cameraCrop(project.camera.videoWidth, project.camera.videoHeight);
+    const shape = composition.camera.shape;
+    const crop = cameraCrop(project.camera.videoWidth, project.camera.videoHeight, cameraAspect(shape));
+    // A circle is a rounded rectangle whose radius is half its shorter edge, so
+    // one path covers every shape and the clip and the ring cannot disagree.
+    const outline = roundedPath(
+      bubble,
+      shape === 'circle' ? Math.min(bubble.width, bubble.height) / 2
+        : shape === 'square' ? 0
+          : Math.min(bubble.width, bubble.height) * 0.08,
+    );
+
     context.save();
-    if (composition.camera.round) {
-      context.beginPath();
-      context.arc(bubble.x + bubble.width / 2, bubble.y + bubble.height / 2, bubble.width / 2, 0, Math.PI * 2);
-      context.closePath();
-      context.clip();
-    } else {
-      context.clip(roundedPath(bubble, bubble.width * 0.08));
-    }
+    context.clip(outline);
     context.drawImage(
       project.camera,
       crop.x, crop.y, crop.width, crop.height,
@@ -255,14 +264,8 @@ export function drawFrame(
 
     context.save();
     context.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-    context.lineWidth = Math.max(2, bubble.width * 0.015);
-    if (composition.camera.round) {
-      context.beginPath();
-      context.arc(bubble.x + bubble.width / 2, bubble.y + bubble.height / 2, bubble.width / 2, 0, Math.PI * 2);
-      context.stroke();
-    } else {
-      context.stroke(roundedPath(bubble, bubble.width * 0.08));
-    }
+    context.lineWidth = Math.max(2, Math.min(bubble.width, bubble.height) * 0.015);
+    context.stroke(outline);
     context.restore();
   }
 }
@@ -578,5 +581,14 @@ export async function render(
   return {
     blob: new Blob([file as unknown as BlobPart], { type: 'video/webm' }),
     frames: total, hasAudio: audio !== null, extension: 'webm', note,
+  };
+}
+
+/** An image source's own dimensions, whichever kind of source it is. */
+function wallpaperSize(source: CanvasImageSource): { width: number; height: number } {
+  const candidate = source as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number };
+  return {
+    width: candidate.naturalWidth || (typeof candidate.width === 'number' ? candidate.width : 0) || 1,
+    height: candidate.naturalHeight || (typeof candidate.height === 'number' ? candidate.height : 0) || 1,
   };
 }

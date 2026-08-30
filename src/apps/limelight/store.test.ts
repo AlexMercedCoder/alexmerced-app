@@ -177,3 +177,77 @@ describe('zoom blocks survive storage', () => {
     expect((await loadProject(project.id))!.zooms).toEqual([]);
   });
 });
+
+describe('camera shape migration', () => {
+  it('reads a project saved when the bubble was a round flag', () => {
+    const settings = reviveSettings({ composition: { camera: { round: true, enabled: true } } });
+    expect(settings.composition.camera.shape).toBe('circle');
+  });
+
+  it('reads the square case of that flag as a rounded rectangle', () => {
+    const settings = reviveSettings({ composition: { camera: { round: false } } });
+    expect(settings.composition.camera.shape).toBe('rounded');
+  });
+
+  it('prefers a real shape when one was stored', () => {
+    const settings = reviveSettings({ composition: { camera: { round: true, shape: 'wide' } } });
+    expect(settings.composition.camera.shape).toBe('wide');
+  });
+
+  it('ignores a shape it does not recognise', () => {
+    const settings = reviveSettings({ composition: { camera: { shape: 'hexagon' } } });
+    expect(settings.composition.camera.shape).toBe('circle');
+  });
+});
+
+describe('wallpaper', () => {
+  it('keeps a background picture with the project', async () => {
+    const picture = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+    const project = createProject('With a picture', {
+      bytes: new Uint8Array([1, 2, 3]), mime: 'video/webm', cameraBytes: null,
+      duration: 4, width: 1280, height: 720, hasAudio: false, pointer: [], clicks: [],
+      wallpaper: picture, wallpaperMime: 'image/jpeg',
+    });
+    await saveProject(project);
+
+    const back = await loadProject(project.id);
+    expect(back?.wallpaper).toEqual(picture);
+    expect(back?.wallpaperMime).toBe('image/jpeg');
+  });
+
+  it('has no picture by default', () => {
+    const project = createProject('Plain', {
+      bytes: new Uint8Array([1]), mime: 'video/webm', cameraBytes: null,
+      duration: 1, width: 640, height: 360, hasAudio: false, pointer: [], clicks: [],
+    });
+    expect(project.wallpaper).toBeNull();
+  });
+
+  it('counts a picture towards what is stored here', async () => {
+    await clearAll();
+    await saveProject(createProject('Weighed', {
+      bytes: new Uint8Array(100), mime: 'video/webm', cameraBytes: null,
+      duration: 1, width: 640, height: 360, hasAudio: false, pointer: [], clicks: [],
+      wallpaper: new Uint8Array(40), wallpaperMime: 'image/png',
+    }));
+    expect(await storedBytes()).toBe(140);
+  });
+});
+
+describe('camera settings', () => {
+  it('drops a setting that no longer exists rather than carrying it forever', () => {
+    const settings = reviveSettings({ composition: { camera: { round: true, wobble: 3 } } });
+    expect(Object.keys(settings.composition.camera).sort())
+      .toEqual(['corner', 'enabled', 'margin', 'shape', 'size']);
+  });
+
+  it('keeps a size within what the layout can place', () => {
+    expect(reviveSettings({ composition: { camera: { size: 9 } } }).composition.camera.size).toBe(0.5);
+    expect(reviveSettings({ composition: { camera: { size: -1 } } }).composition.camera.size).toBe(0.05);
+  });
+
+  it('ignores a corner it does not know', () => {
+    expect(reviveSettings({ composition: { camera: { corner: 'middle' } } }).composition.camera.corner)
+      .toBe(defaultSettings.composition.camera.corner);
+  });
+});

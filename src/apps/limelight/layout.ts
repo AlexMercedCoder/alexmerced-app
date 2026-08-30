@@ -24,9 +24,38 @@ export const FULL_CROP: Crop = { x: 0, y: 0, width: 1, height: 1 };
 /** The smallest crop that is still worth having, as a fraction of the source. */
 export const MIN_CROP = 0.05;
 
-export type BackgroundKind = 'none' | 'solid' | 'gradient' | 'blur';
+export type BackgroundKind = 'none' | 'solid' | 'gradient' | 'blur' | 'image';
+
+/**
+ * Fits a picture across the whole frame without squashing it, cropping
+ * whichever way it has to. The same rule as a desktop wallpaper.
+ */
+export function coverRect(
+  frameWidth: number, frameHeight: number, sourceWidth: number, sourceHeight: number,
+): Rect {
+  if (sourceWidth <= 0 || sourceHeight <= 0) return { x: 0, y: 0, width: frameWidth, height: frameHeight };
+  const scale = Math.max(frameWidth / sourceWidth, frameHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  return { x: (frameWidth - width) / 2, y: (frameHeight - height) / 2, width, height };
+}
 
 export type CameraCorner = 'bottomRight' | 'bottomLeft' | 'topRight' | 'topLeft';
+
+/** What shape the camera bubble is cut to. */
+export type CameraShape = 'circle' | 'rounded' | 'square' | 'wide' | 'tall';
+
+export const CAMERA_SHAPES: { id: CameraShape; label: string; aspect: number }[] = [
+  { id: 'circle', label: 'Circle', aspect: 1 },
+  { id: 'rounded', label: 'Rounded', aspect: 1 },
+  { id: 'square', label: 'Square', aspect: 1 },
+  { id: 'wide', label: 'Widescreen', aspect: 16 / 9 },
+  { id: 'tall', label: 'Portrait', aspect: 3 / 4 },
+];
+
+export function cameraAspect(shape: CameraShape): number {
+  return CAMERA_SHAPES.find((entry) => entry.id === shape)?.aspect ?? 1;
+}
 
 export type Composition = {
   /** Output size. */
@@ -45,7 +74,7 @@ export type Composition = {
     corner: CameraCorner;
     /** Diameter as a fraction of the shorter output edge. */
     size: number;
-    round: boolean;
+    shape: CameraShape;
     /** Inset from the edges, as a fraction of the shorter output edge. */
     margin: number;
   };
@@ -59,7 +88,7 @@ export const defaultComposition: Composition = {
   padding: 0.05,
   radius: 0.02,
   shadow: 0.6,
-  camera: { enabled: false, corner: 'bottomRight', size: 0.22, round: true, margin: 0.03 },
+  camera: { enabled: false, corner: 'bottomRight', size: 0.22, shape: 'circle', margin: 0.03 },
 };
 
 export const PRESETS: { id: string; label: string; colours: [string, string]; background: BackgroundKind }[] = [
@@ -68,6 +97,13 @@ export const PRESETS: { id: string; label: string; colours: [string, string]; ba
   { id: 'ink', label: 'Ink', colours: ['#101014', '#101014'], background: 'solid' },
   { id: 'moss', label: 'Moss', colours: ['#243b2f', '#4a7a5c'], background: 'gradient' },
   { id: 'rust', label: 'Rust', colours: ['#3b1f18', '#a8562f'], background: 'gradient' },
+  { id: 'dusk', label: 'Dusk', colours: ['#2b1b4d', '#c05c7e'], background: 'gradient' },
+  { id: 'tide', label: 'Tide', colours: ['#0b3c5d', '#37a2b8'], background: 'gradient' },
+  { id: 'ember', label: 'Ember', colours: ['#2d0b12', '#d4643c'], background: 'gradient' },
+  { id: 'sand', label: 'Sand', colours: ['#e9d8a6', '#bb9457'], background: 'gradient' },
+  { id: 'graphite', label: 'Graphite', colours: ['#2b2b31', '#55555f'], background: 'gradient' },
+  { id: 'mint', label: 'Mint', colours: ['#0f3d3e', '#7ec4a7'], background: 'gradient' },
+  { id: 'blur', label: 'The recording, blurred', colours: ['#000000', '#000000'], background: 'blur' },
   { id: 'none', label: 'No background', colours: ['#000000', '#000000'], background: 'none' },
 ];
 
@@ -189,32 +225,44 @@ export function cameraRect(composition: Composition): Rect | null {
   if (!camera.enabled) return null;
 
   const shorter = Math.min(composition.width, composition.height);
-  const size = Math.max(16, Math.min(0.5, camera.size) * shorter);
   const margin = Math.max(0, Math.min(0.2, camera.margin)) * shorter;
+
+  // The size setting is the bubble's longer edge, so making it wider does not
+  // also make it taller and shove it off the frame.
+  const longest = Math.max(16, Math.min(0.5, camera.size) * shorter);
+  const aspect = cameraAspect(camera.shape);
+  const width = aspect >= 1 ? longest : longest * aspect;
+  const height = aspect >= 1 ? longest / aspect : longest;
 
   const left = camera.corner === 'topLeft' || camera.corner === 'bottomLeft';
   const top = camera.corner === 'topLeft' || camera.corner === 'topRight';
 
   return {
-    x: left ? margin : composition.width - size - margin,
-    y: top ? margin : composition.height - size - margin,
-    width: size,
-    height: size,
+    x: left ? margin : composition.width - width - margin,
+    y: top ? margin : composition.height - height - margin,
+    width,
+    height,
   };
 }
 
 /**
- * The square to take out of a camera frame so a wide picture fills a circle
- * without being squashed. Centred horizontally, and a little above centre
- * vertically, because that is where a face sits in a webcam frame.
+ * The part of a camera frame to take so the bubble fills without squashing.
+ *
+ * Centred horizontally, and a little above centre vertically, because that is
+ * where a face sits in a webcam frame and the chin is what you can afford to
+ * lose.
  */
-export function cameraCrop(sourceWidth: number, sourceHeight: number): Rect {
-  const side = Math.min(sourceWidth, sourceHeight);
+export function cameraCrop(sourceWidth: number, sourceHeight: number, aspect = 1): Rect {
+  const wanted = aspect > 0 ? aspect : 1;
+  let width = sourceWidth;
+  let height = width / wanted;
+  if (height > sourceHeight) { height = sourceHeight; width = height * wanted; }
+
   return {
-    x: (sourceWidth - side) / 2,
-    y: Math.max(0, (sourceHeight - side) / 2 - side * 0.06),
-    width: side,
-    height: side,
+    x: (sourceWidth - width) / 2,
+    y: Math.max(0, Math.min(sourceHeight - height, (sourceHeight - height) / 2 - height * 0.06)),
+    width,
+    height,
   };
 }
 

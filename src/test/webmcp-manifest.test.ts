@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GET } from './.well-known/webmcp.json';
+import { GET } from '../pages/.well-known/webmcp.json';
 
 describe('WebMCP discovery manifest', () => {
   it('publishes the site catalog without pretending callbacks are remotely callable', async () => {

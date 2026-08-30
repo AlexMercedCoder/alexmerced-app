@@ -57,7 +57,21 @@ export type CaptureOptions = {
   microphone: boolean;
   systemAudio: boolean;
   camera: boolean;
+  /**
+   * Ask the platform to blur behind the camera. Chrome hands this to the
+   * operating system, which is the only place it can be done properly. When a
+   * device cannot, the picture is simply not blurred and the app says so.
+   */
+  cameraBlur?: boolean;
   onTick: (seconds: number) => void;
+  /**
+   * Called once everything is acquired and before the first frame is kept.
+   *
+   * The countdown belongs here rather than before the share dialog: counting
+   * down and then asking what to share would waste the count, and counting
+   * down after recording has begun would put the numbers in the video.
+   */
+  onReady?: () => Promise<void> | void;
 };
 
 /**
@@ -79,11 +93,17 @@ export class Session {
   private width = 0;
   private height = 0;
   private audio = false;
+  private blurred = false;
 
   constructor(private readonly options: CaptureOptions) {}
 
   get running(): boolean {
     return this.recorder !== null;
+  }
+
+  /** Whether the platform actually blurred behind the camera when asked. */
+  get cameraBlurred(): boolean {
+    return this.blurred;
   }
 
   async start(): Promise<void> {
@@ -138,6 +158,7 @@ export class Session {
           video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
         });
         this.streams.push(camera);
+        if (this.options.cameraBlur) this.blurred = await applyBackgroundBlur(camera);
         this.cameraRecorder = new MediaRecorder(camera, mime ? { mimeType: mime } : undefined);
         this.cameraRecorder.ondataavailable = (event) => { if (event.data.size) this.cameraChunks.push(event.data); };
       } catch {
@@ -152,6 +173,10 @@ export class Session {
       window.addEventListener('pointermove', this.onPointerMove, { passive: true, capture: true });
       window.addEventListener('pointerdown', this.onPointerDown, { passive: true, capture: true });
     }
+
+    // Nothing has been kept yet, so a countdown here costs the recording nothing.
+    await this.options.onReady?.();
+    if (!this.recorder) return;
 
     this.startedAt = performance.now();
     this.recorder.start(1000);
@@ -228,5 +253,29 @@ export class Session {
     this.streams = [];
     this.recorder = null;
     this.cameraRecorder = null;
+  }
+}
+
+/**
+ * Asks the platform to blur behind the camera.
+ *
+ * Doing this properly means separating a person from what is behind them, which
+ * is a segmentation model, not something to reimplement in a canvas. Chrome
+ * exposes the operating system's own version as a track constraint on hardware
+ * that supports it. Anywhere else the ask is refused, and reporting that is
+ * better than shipping a blur that smears the person along with the room.
+ */
+export async function applyBackgroundBlur(stream: MediaStream): Promise<boolean> {
+  const [track] = stream.getVideoTracks();
+  if (!track) return false;
+
+  const supported = navigator.mediaDevices.getSupportedConstraints() as Record<string, unknown>;
+  if (!supported.backgroundBlur) return false;
+
+  try {
+    await track.applyConstraints({ advanced: [{ backgroundBlur: true }] } as MediaTrackConstraints);
+    return (track.getSettings() as { backgroundBlur?: boolean }).backgroundBlur === true;
+  } catch {
+    return false;
   }
 }

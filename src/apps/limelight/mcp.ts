@@ -2,7 +2,10 @@ import { errorResult, readNumber, readString, textResult, type McpTool } from '.
 import type { Interest } from './attention';
 import type { Recording } from './capture';
 import { zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
-import { CROP_ASPECTS, cropToAspect, FULL_CROP, isFullCrop, normaliseCrop, type Composition, type Crop } from './layout';
+import {
+  CAMERA_SHAPES, CROP_ASPECTS, cropToAspect, FULL_CROP, isFullCrop, normaliseCrop, OUTPUT_SIZES, PRESETS,
+  type CameraCorner, type CameraShape, type Composition, type Crop,
+} from './layout';
 
 type State = {
   recording: Recording | null;
@@ -16,7 +19,11 @@ type State = {
 };
 
 /** Changes an agent is allowed to make. Everything is local and reversible. */
-type Edit = (change: { crop?: Crop; trim?: { start: number; end: number } }) => void;
+type Edit = (change: {
+  crop?: Crop;
+  trim?: { start: number; end: number };
+  composition?: Partial<Composition>;
+}) => void;
 
 /**
  * Limelight's tools. Recording needs a person to choose what to share, so
@@ -177,6 +184,110 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
             width: Math.round(state.recording.width * after.crop.width),
             height: Math.round(state.recording.height * after.crop.height),
           },
+        });
+      },
+    },
+    {
+      name: 'limelight_set_look',
+      description:
+        'Set how the finished video is composed: the background, the output size, the inset and corners, and the camera bubble. Every field is optional and only what is given is changed.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          background: {
+            type: 'string',
+            description: `A background preset, one of: ${PRESETS.map((entry) => entry.id).join(', ')}.`,
+          },
+          size: {
+            type: 'string',
+            description: `An output size, one of: ${OUTPUT_SIZES.map((entry) => entry.id).join(', ')}.`,
+          },
+          padding: { type: 'number', description: 'Inset around the recording, 0 to 0.2 of the shorter edge.' },
+          radius: { type: 'number', description: 'Corner rounding, 0 to 0.1 of the shorter recording edge.' },
+          shadow: { type: 'number', description: 'Shadow strength, 0 to 1.' },
+          camera: { type: 'boolean', description: 'Whether to show the camera bubble.' },
+          cameraShape: {
+            type: 'string',
+            description: `The bubble's shape, one of: ${CAMERA_SHAPES.map((entry) => entry.id).join(', ')}.`,
+          },
+          cameraCorner: {
+            type: 'string',
+            description: 'Where the bubble sits: bottomRight, bottomLeft, topRight or topLeft.',
+          },
+        },
+      },
+      execute: (input) => {
+        const state = read();
+        const current = state.settings.composition;
+        const change: Partial<Composition> = {};
+        const unknown: string[] = [];
+
+        const background = readString(input, 'background').trim();
+        if (background) {
+          const preset = PRESETS.find((entry) => entry.id === background);
+          if (preset) {
+            change.background = preset.background;
+            change.colours = [...preset.colours];
+          } else unknown.push(`background "${background}"`);
+        }
+
+        const size = readString(input, 'size').trim();
+        if (size) {
+          const found = OUTPUT_SIZES.find((entry) => entry.id === size);
+          if (found) { change.width = found.width; change.height = found.height; }
+          else unknown.push(`size "${size}"`);
+        }
+
+        const clampInto = (key: 'padding' | 'radius' | 'shadow', high: number) => {
+          if (!(key in input)) return;
+          change[key] = Math.max(0, Math.min(high, readNumber(input, key, current[key])));
+        };
+        clampInto('padding', 0.2);
+        clampInto('radius', 0.1);
+        clampInto('shadow', 1);
+
+        const camera = { ...current.camera };
+        let touchedCamera = false;
+        if ('camera' in input) {
+          camera.enabled = input.camera === true || input.camera === 'true';
+          touchedCamera = true;
+        }
+        const shape = readString(input, 'cameraShape').trim();
+        if (shape) {
+          if (CAMERA_SHAPES.some((entry) => entry.id === shape)) {
+            camera.shape = shape as CameraShape;
+            touchedCamera = true;
+          } else unknown.push(`camera shape "${shape}"`);
+        }
+        const corner = readString(input, 'cameraCorner').trim();
+        if (corner) {
+          if (['bottomRight', 'bottomLeft', 'topRight', 'topLeft'].includes(corner)) {
+            camera.corner = corner as CameraCorner;
+            touchedCamera = true;
+          } else unknown.push(`camera corner "${corner}"`);
+        }
+        if (touchedCamera) change.camera = camera;
+
+        if (unknown.length > 0) {
+          return errorResult(`This does not recognise ${unknown.join(' or ')}.`, {
+            backgrounds: PRESETS.map((entry) => entry.id),
+            sizes: OUTPUT_SIZES.map((entry) => entry.id),
+            cameraShapes: CAMERA_SHAPES.map((entry) => entry.id),
+            cameraCorners: ['bottomRight', 'bottomLeft', 'topRight', 'topLeft'],
+          });
+        }
+        if (Object.keys(change).length === 0) return errorResult('Nothing to change.');
+
+        edit({ composition: change });
+        const after = read().settings.composition;
+        return textResult({
+          background: after.background,
+          colours: after.colours,
+          output: { width: after.width, height: after.height },
+          padding: after.padding,
+          radius: after.radius,
+          shadow: after.shadow,
+          camera: after.camera,
         });
       },
     },

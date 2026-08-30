@@ -25,6 +25,17 @@ const app = getApp('limelight');
           <label class="ll-check"><input type="checkbox" id="ll-mic" /><span>Microphone</span></label>
           <label class="ll-check"><input type="checkbox" id="ll-system-audio" /><span>System audio</span></label>
           <label class="ll-check"><input type="checkbox" id="ll-camera" /><span>Camera</span></label>
+          <label class="ll-check"><input type="checkbox" id="ll-camera-blur" /><span>Blur behind me</span></label>
+          <label class="field-row ll-countdown-pick">
+            <span>Countdown</span>
+            <select class="field" id="ll-countdown">
+              <option value="0">None</option>
+              <option value="3">3</option>
+              <option value="5">5</option>
+              <option value="10">10</option>
+            </select>
+          </label>
+          <label class="ll-check"><input type="checkbox" id="ll-countdown-sound" /><span>Count out loud</span></label>
         </div>
         <p class="ll-note">
           Recording this tab is the only case where a browser knows where your pointer is, so it is the
@@ -89,6 +100,16 @@ const app = getApp('limelight');
           </label>
         </div>
 
+        <p class="ll-keys">
+          <span><kbd>Space</kbd> play</span>
+          <span><kbd>←</kbd> <kbd>→</kbd> step a frame</span>
+          <span><kbd>Z</kbd> add a zoom</span>
+          <span><kbd>C</kbd> crop</span>
+          <span><kbd>I</kbd> start here</span>
+          <span><kbd>O</kbd> end here</span>
+          <span><kbd>Delete</kbd> remove the selected zoom</span>
+        </p>
+
         <div class="ll-scrubrow">
           <button class="btn btn--sm btn--primary" id="ll-zoom-add">Add a zoom</button>
           <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
@@ -105,6 +126,12 @@ const app = getApp('limelight');
           <label class="ll-slider"><span>Padding</span><input type="range" id="ll-padding" min="0" max="0.2" step="0.005" /><em id="ll-padding-out"></em></label>
           <label class="ll-slider"><span>Corners</span><input type="range" id="ll-radius" min="0" max="0.1" step="0.002" /><em id="ll-radius-out"></em></label>
           <label class="ll-slider"><span>Shadow</span><input type="range" id="ll-shadow" min="0" max="1" step="0.05" /><em id="ll-shadow-out"></em></label>
+          <div class="ll-scrubrow">
+            <button class="btn btn--sm" id="ll-wallpaper-pick">Use a picture</button>
+            <button class="btn btn--sm btn--ghost" id="ll-wallpaper-clear" hidden>Remove it</button>
+            <input type="file" id="ll-wallpaper-file" accept="image/*" hidden />
+          </div>
+          <p class="ll-note" id="ll-wallpaper-note" hidden></p>
         </section>
 
         <section class="card ll-card">
@@ -131,7 +158,7 @@ const app = getApp('limelight');
               </select>
             </label>
             <label class="ll-slider"><span>Size</span><input type="range" id="ll-camera-size" min="0.1" max="0.4" step="0.01" /><em id="ll-camera-size-out"></em></label>
-            <label class="ll-check"><input type="checkbox" id="ll-camera-round" /><span>Round</span></label>
+            <label class="field-row"><span>Shape</span><select class="field" id="ll-camera-shape"></select></label>
           </div>
 
           <label class="ll-check"><input type="checkbox" id="ll-audio" /><span>Keep the sound that was recorded</span></label>
@@ -220,6 +247,17 @@ const app = getApp('limelight');
   .ll-bar__fill { height: 100%; width: 0; background: var(--accent); transition: width 0.15s linear; }
 
   .ll-stage { display: grid; gap: 0.6rem; }
+  .ll-countdown-pick { gap: 0.4rem; }
+  .ll-countdown {
+    position: fixed; inset: 0; z-index: 60; display: grid; place-content: center; justify-items: center;
+    gap: 0.4rem; background: rgba(8, 8, 10, 0.82); color: #fff; text-align: center;
+  }
+  .ll-countdown span { font-size: 1rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+  .ll-countdown strong { font-size: clamp(5rem, 22vw, 14rem); line-height: 1; font-variant-numeric: tabular-nums; animation: ll-pop 0.9s ease-out; }
+  @keyframes ll-pop { from { transform: scale(0.72); opacity: 0.2; } 40% { transform: scale(1.04); opacity: 1; } to { transform: scale(1); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .ll-countdown strong { animation: none; } }
+  .ll-keys { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.82rem; color: var(--muted); }
+  .ll-keys kbd { font: inherit; font-weight: 600; padding: 0.05rem 0.35rem; border: 1px solid var(--rule); border-radius: 0.3rem; background: var(--surface); color: var(--ink); }
   .ll-preview.is-cropping { cursor: crosshair; }
   .ll-croprow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
   .ll-cropaspects { display: flex; flex-wrap: wrap; gap: 0.3rem; }

@@ -2,7 +2,10 @@ import { createId } from '../../lib/id';
 import { Collection, openDatabase } from '../../lib/idb';
 import { readPref, writePref } from '../../lib/prefs';
 import type { ClickSample, PointerSample } from './attention';
-import { defaultComposition, FULL_CROP, reviveCrop, type Composition, type Crop } from './layout';
+import {
+  CAMERA_SHAPES, defaultComposition, FULL_CROP, reviveCrop,
+  type CameraShape, type Composition, type Crop,
+} from './layout';
 import { defaultZoom, type ZoomKeyframe, type ZoomSettings } from './zoom';
 import { reviveBlocks, type ZoomBlock } from './zooms';
 
@@ -31,6 +34,10 @@ export type Settings = {
   showCursor: boolean;
   keepAudio: boolean;
   countdown: number;
+  /** A blip on each number, so you do not have to be watching the screen. */
+  countdownSound: boolean;
+  /** Ask the platform to blur behind the camera, where it can. */
+  cameraBlur: boolean;
   format: 'webm' | 'mp4' | 'gif';
   quality: 'low' | 'medium' | 'high';
 };
@@ -43,6 +50,8 @@ export const defaultSettings: Settings = {
   showCursor: true,
   keepAudio: true,
   countdown: 3,
+  countdownSound: true,
+  cameraBlur: false,
   format: 'webm',
   quality: 'high',
 };
@@ -66,6 +75,9 @@ export type Project = {
   end: number;
   /** The part of the picture to keep, as fractions of the source. */
   crop: Crop;
+  /** A background picture, when one was chosen. */
+  wallpaper: Uint8Array | null;
+  wallpaperMime: string;
   /**
    * The zoom blocks, which are what a person edits. The keyframe track is
    * derived from these, so these are what has to be kept.
@@ -81,24 +93,61 @@ export type Project = {
 export function reviveSettings(value: unknown): Settings {
   if (typeof value !== 'object' || value === null) return { ...defaultSettings };
   const stored = value as Partial<Settings>;
-  const flag = (key: 'showClicks' | 'showCursor' | 'keepAudio') =>
+  const flag = (key: 'showClicks' | 'showCursor' | 'keepAudio' | 'countdownSound' | 'cameraBlur') =>
     typeof stored[key] === 'boolean' ? (stored[key] as boolean) : defaultSettings[key];
 
   return {
     composition: {
       ...defaultComposition,
       ...(stored.composition ?? {}),
-      camera: { ...defaultComposition.camera, ...(stored.composition?.camera ?? {}) },
+      // Built field by field rather than spread, so a setting that no longer
+      // exists does not ride along forever in everybody's stored projects.
+      camera: cameraSettings(stored.composition?.camera),
     },
     zoom: { ...defaultZoom, ...(stored.zoom ?? {}) },
     frameRate: typeof stored.frameRate === 'number' && stored.frameRate > 0 ? stored.frameRate : 30,
     showClicks: flag('showClicks'),
     showCursor: flag('showCursor'),
     keepAudio: flag('keepAudio'),
+    countdownSound: flag('countdownSound'),
+    cameraBlur: flag('cameraBlur'),
     countdown: typeof stored.countdown === 'number' ? Math.max(0, Math.min(10, Math.round(stored.countdown))) : 3,
     format: stored.format === 'mp4' || stored.format === 'gif' ? stored.format : 'webm',
     quality: stored.quality === 'low' || stored.quality === 'medium' ? stored.quality : 'high',
   };
+}
+
+/**
+ * The bubble's shape, reading a setting from before there was a choice.
+ *
+ * It used to be a single "round" flag, so an existing project says true or
+ * false and means circle or rounded rectangle. Dropping that would quietly
+ * reshape somebody's saved recording.
+ */
+function cameraSettings(value: unknown): Composition['camera'] {
+  const fallback = defaultComposition.camera;
+  const stored = (typeof value === 'object' && value !== null ? value : {}) as Partial<Composition['camera']>;
+  const number = (input: unknown, low: number, high: number, spare: number) =>
+    typeof input === 'number' && Number.isFinite(input) ? Math.max(low, Math.min(high, input)) : spare;
+
+  return {
+    enabled: typeof stored.enabled === 'boolean' ? stored.enabled : fallback.enabled,
+    corner: ['bottomRight', 'bottomLeft', 'topRight', 'topLeft'].includes(stored.corner as string)
+      ? (stored.corner as Composition['camera']['corner']) : fallback.corner,
+    size: number(stored.size, 0.05, 0.5, fallback.size),
+    shape: cameraShape(value),
+    margin: number(stored.margin, 0, 0.2, fallback.margin),
+  };
+}
+
+function cameraShape(camera: unknown): CameraShape {
+  if (typeof camera !== 'object' || camera === null) return defaultComposition.camera.shape;
+  const stored = camera as { shape?: unknown; round?: unknown };
+  if (typeof stored.shape === 'string' && CAMERA_SHAPES.some((entry) => entry.id === stored.shape)) {
+    return stored.shape as CameraShape;
+  }
+  if (typeof stored.round === 'boolean') return stored.round ? 'circle' : 'rounded';
+  return defaultComposition.camera.shape;
 }
 
 export function reviveProject(value: unknown): Project | null {
@@ -141,6 +190,9 @@ export function reviveProject(value: unknown): Project | null {
     start: Math.max(0, typeof project.start === 'number' ? project.start : 0),
     end: typeof project.end === 'number' && project.end > 0 ? project.end : duration,
     crop: reviveCrop(project.crop),
+    wallpaper: asBytes(project.wallpaper),
+    wallpaperMime: typeof project.wallpaperMime === 'string' && project.wallpaperMime
+      ? project.wallpaperMime : 'image/png',
     zooms: reviveBlocks(project.zooms),
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
     settings: reviveSettings(project.settings),
@@ -151,8 +203,9 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop'>
-    & Partial<Pick<Project, 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop'>>,
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop' | 'wallpaper' | 'wallpaperMime'>
+    & Partial<Pick<Project,
+      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -162,6 +215,8 @@ export function createProject(
     zooms: [],
     keyframes: null,
     crop: { ...FULL_CROP },
+    wallpaper: null,
+    wallpaperMime: 'image/png',
     start: 0,
     end: detail.duration,
     settings: { ...defaultSettings },
@@ -210,7 +265,8 @@ export async function clearAll(): Promise<void> { await (await connect()).clear(
 
 export async function storedBytes(): Promise<number> {
   return (await loadProjects()).reduce(
-    (sum, project) => sum + project.bytes.length + (project.cameraBytes?.length ?? 0),
+    (sum, project) => sum + project.bytes.length + (project.cameraBytes?.length ?? 0)
+      + (project.wallpaper?.length ?? 0),
     0,
   );
 }

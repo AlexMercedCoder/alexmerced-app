@@ -5,10 +5,11 @@ import { registerTools } from '../../lib/webmcp';
 import type { Interest } from './attention';
 import { canCapture, CaptureError, Session, type Recording, type Source } from './capture';
 import {
-  cameraRect, CROP_ASPECTS, cropToAspect, defaultComposition, FULL_CROP, isFullCrop, MIN_CROP,
-  normaliseCrop, OUTPUT_SIZES, PRESETS, QUALITY,
-  type CameraCorner, type Composition, type Crop,
+  CAMERA_SHAPES, cameraRect, CROP_ASPECTS, cropToAspect, defaultComposition, FULL_CROP, isFullCrop,
+  MIN_CROP, normaliseCrop, OUTPUT_SIZES, PRESETS, QUALITY,
+  type CameraCorner, type CameraShape, type Composition, type Crop,
 } from './layout';
+import { countdown } from './countdown';
 import { limelightTools } from './mcp';
 import {
   capabilities, drawFrame, findInterest, render, RenderError, type OutputFormat, type Project,
@@ -93,6 +94,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       pointer: recording.pointer,
       clicks: recording.clicks,
       crop,
+      wallpaper,
       composition: settings.composition,
       zoom: settings.zoom,
       frameRate: settings.frameRate,
@@ -151,13 +153,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       microphone: $<HTMLInputElement>('ll-mic').checked,
       systemAudio: $<HTMLInputElement>('ll-system-audio').checked,
       camera: $<HTMLInputElement>('ll-camera').checked,
+      cameraBlur: settings.cameraBlur,
       onTick: (seconds) => { clockEl.textContent = formatClock(seconds); },
+      onReady: () => countdown({ seconds: settings.countdown, sound: settings.countdownSound }),
     });
 
     try {
+      recordButton.textContent = 'Starting';
       await session.start();
       recordButton.textContent = 'Stop';
       recordButton.classList.add('is-recording');
+      if (settings.cameraBlur && $<HTMLInputElement>('ll-camera').checked && !session.cameraBlurred) {
+        toast('This device will not blur behind the camera, so it is being recorded as it is.');
+      }
       setStatus(
         source === 'tab'
           ? 'Recording this tab. Pointer movement and clicks are being tracked, so the zoom will follow them exactly.'
@@ -166,6 +174,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       );
     } catch (error) {
       session = null;
+      recordButton.textContent = 'Record';
+      recordButton.classList.remove('is-recording');
       setStatus(error instanceof CaptureError ? error.message : 'The recording could not start.', 'bad');
     }
   });
@@ -200,6 +210,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     settings = project.settings;
     zooms = project.zooms;
     crop = project.crop;
+    dropWallpaper();
+    if (project.wallpaper) await useWallpaper(project.wallpaper, project.wallpaperMime);
     saveCurrentId(project.id);
 
     await renderProjects();
@@ -246,7 +258,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remember();
     }
 
-    if (!stored) crop = { ...FULL_CROP };
+    if (!stored) { crop = { ...FULL_CROP }; dropWallpaper(); }
 
     trim = range && range.end > range.start
       ? { start: Math.max(0, range.start), end: Math.min(recording.duration, range.end) }
@@ -969,7 +981,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     ['ll-clicks', (value) => { settings.showClicks = value; }, () => settings.showClicks],
     ['ll-cursor', (value) => { settings.showCursor = value; }, () => settings.showCursor],
     ['ll-camera-on', (value) => { settings.composition.camera.enabled = value; }, () => settings.composition.camera.enabled],
-    ['ll-camera-round', (value) => { settings.composition.camera.round = value; }, () => settings.composition.camera.round],
     ['ll-audio', (value) => { settings.keepAudio = value; }, () => settings.keepAudio],
   ];
   for (const [id, apply] of toggles) {
@@ -980,6 +991,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       void drawPreview();
     });
   }
+
+  const shapeEl = $<HTMLSelectElement>('ll-camera-shape');
+  for (const shape of CAMERA_SHAPES) {
+    const option = document.createElement('option');
+    option.value = shape.id;
+    option.textContent = shape.label;
+    shapeEl.append(option);
+  }
+  shapeEl.addEventListener('change', () => {
+    settings.composition.camera.shape = shapeEl.value as CameraShape;
+    remember();
+    void drawPreview();
+  });
 
   const cornerEl = $<HTMLSelectElement>('ll-camera-corner');
   cornerEl.addEventListener('change', () => {
@@ -1047,6 +1071,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     for (const [id, , read] of sliders) $<HTMLInputElement>(id).value = String(read());
     for (const [id, , read] of toggles) $<HTMLInputElement>(id).checked = read();
     cornerEl.value = settings.composition.camera.corner;
+    shapeEl.value = settings.composition.camera.shape;
+    countdownEl.value = String(settings.countdown);
+    $<HTMLInputElement>('ll-countdown-sound').checked = settings.countdownSound;
+    $<HTMLInputElement>('ll-camera-blur').checked = settings.cameraBlur;
+    renderWallpaper();
     fpsEl.value = String(settings.frameRate);
     formatEl.value = settings.format;
     qualityEl.value = settings.quality;
@@ -1073,6 +1102,246 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   $<HTMLButtonElement>('ll-reanalyse').addEventListener('click', () => { void analyse().then(drawPreview); });
+
+  // ------------------------------------------------------------------ wallpaper
+
+  /** The chosen background picture, decoded once and kept ready to draw. */
+  let wallpaper: ImageBitmap | HTMLImageElement | null = null;
+  let wallpaperUrl: string | null = null;
+
+  const wallpaperNote = $<HTMLParagraphElement>('ll-wallpaper-note');
+  const wallpaperFile = $<HTMLInputElement>('ll-wallpaper-file');
+  const wallpaperClear = $<HTMLButtonElement>('ll-wallpaper-clear');
+
+  function renderWallpaper(): void {
+    const has = wallpaper !== null;
+    wallpaperClear.hidden = !has;
+    wallpaperNote.hidden = !has;
+    if (has && wallpaper) {
+      wallpaperNote.textContent =
+        `Using a picture ${wallpaper.width} by ${wallpaper.height}, cropped to fill the frame.`;
+    }
+  }
+
+  /**
+   * Decodes stored bytes into something drawable.
+   *
+   * createImageBitmap rather than an Image element, because an element decodes
+   * on the main thread and a browser is free to defer that indefinitely while
+   * the page is not being displayed. A background that only appeared once you
+   * looked at the tab would be a very confusing bug to have.
+   */
+  async function useWallpaper(bytes: Uint8Array, mime: string): Promise<void> {
+    dropWallpaper();
+    const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
+
+    if (typeof createImageBitmap === 'function') {
+      try {
+        wallpaper = await createImageBitmap(blob);
+        renderWallpaper();
+        return;
+      } catch {
+        // Fall through to the element, which reads a few formats bitmaps do not.
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        image.addEventListener('load', () => resolve(), { once: true });
+        image.addEventListener('error', () => reject(new Error('unreadable')), { once: true });
+        image.src = url;
+      });
+    } catch {
+      URL.revokeObjectURL(url);
+      toast('That picture could not be read.');
+      return;
+    }
+    wallpaper = image;
+    wallpaperUrl = url;
+    urls.push(url);
+    renderWallpaper();
+  }
+
+  function dropWallpaper(): void {
+    if (wallpaperUrl) {
+      URL.revokeObjectURL(wallpaperUrl);
+      urls = urls.filter((entry) => entry !== wallpaperUrl);
+    }
+    if (wallpaper instanceof ImageBitmap) wallpaper.close();
+    wallpaper = null;
+    wallpaperUrl = null;
+  }
+
+  $<HTMLButtonElement>('ll-wallpaper-pick').addEventListener('click', () => wallpaperFile.click());
+
+  wallpaperFile.addEventListener('change', async () => {
+    const file = wallpaperFile.files?.[0];
+    wallpaperFile.value = '';
+    if (!file) return;
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await useWallpaper(bytes, file.type || 'image/png');
+    if (!wallpaper) return;
+
+    settings.composition.background = 'image';
+    if (stored) {
+      // The picture travels with the project, because a background that
+      // disappeared on reopening would be worse than not offering one.
+      stored.wallpaper = bytes;
+      stored.wallpaperMime = file.type || 'image/png';
+    }
+    remember();
+    markPresets();
+    renderWallpaper();
+    void drawPreview();
+    void renderProjects();
+  });
+
+  wallpaperClear.addEventListener('click', () => {
+    dropWallpaper();
+    if (settings.composition.background === 'image') settings.composition.background = 'gradient';
+    if (stored) stored.wallpaper = null;
+    remember();
+    markPresets();
+    renderWallpaper();
+    void drawPreview();
+    void renderProjects();
+  });
+
+  // ------------------------------------------------------------------ countdown
+
+  const countdownEl = $<HTMLSelectElement>('ll-countdown');
+  countdownEl.addEventListener('change', () => {
+    settings.countdown = Number(countdownEl.value);
+    remember();
+  });
+
+  for (const [id, apply] of [
+    ['ll-countdown-sound', (value: boolean) => { settings.countdownSound = value; }],
+    ['ll-camera-blur', (value: boolean) => { settings.cameraBlur = value; }],
+  ] as [string, (value: boolean) => void][]) {
+    const input = $<HTMLInputElement>(id);
+    input.addEventListener('change', () => { apply(input.checked); remember(); });
+  }
+
+  // ------------------------------------------------------------------ shortcuts
+
+  /**
+   * The keys an editor is expected to have.
+   *
+   * Nothing fires while a field has focus, because a person typing a project
+   * name should get the letter rather than a zoom. Space is the exception worth
+   * naming: it would otherwise scroll the page.
+   */
+  root.addEventListener('keydown', (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    const typing = target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || target instanceof HTMLSelectElement
+      || target?.isContentEditable === true;
+    // A range is a control, not a field, so the arrow keys still belong to it.
+    if (typing && !(target instanceof HTMLInputElement && target.type === 'range')) return;
+    if (!recording || stageEl.hidden) return;
+
+    const step = event.shiftKey ? 1 : 1 / Math.max(1, settings.frameRate);
+    const seek = (to: number) => {
+      previewTime = Math.max(0, Math.min(recording!.duration, to));
+      scrubber.value = String(previewTime);
+      $<HTMLSpanElement>('ll-time').textContent = formatClock(previewTime);
+      void drawPreview();
+    };
+
+    switch (event.key) {
+      case ' ':
+        event.preventDefault();
+        togglePlay();
+        break;
+      case 'ArrowLeft':
+        if (typing) return;
+        event.preventDefault();
+        seek(previewTime - step);
+        break;
+      case 'ArrowRight':
+        if (typing) return;
+        event.preventDefault();
+        seek(previewTime + step);
+        break;
+      case 'Home':
+        event.preventDefault();
+        seek(trim.start);
+        break;
+      case 'End':
+        event.preventDefault();
+        seek(trim.end);
+        break;
+      case 'z': case 'Z':
+        event.preventDefault();
+        $<HTMLButtonElement>('ll-zoom-add').click();
+        break;
+      case 'c': case 'C':
+        event.preventDefault();
+        cropButton.click();
+        break;
+      case 'i': case 'I':
+        event.preventDefault();
+        $<HTMLButtonElement>('ll-trim-start').click();
+        break;
+      case 'o': case 'O':
+        event.preventDefault();
+        $<HTMLButtonElement>('ll-trim-end').click();
+        break;
+      case 'Delete': case 'Backspace':
+        if (!selected) return;
+        event.preventDefault();
+        zooms = removeBlock(zooms, selected);
+        selected = null;
+        renderZooms();
+        persistZooms();
+        void drawPreview();
+        break;
+      case 'Escape':
+        if (cropping) { event.preventDefault(); cropButton.click(); }
+        break;
+      default:
+    }
+  });
+
+  /**
+   * Plays the preview by walking the scrubber forward in real time.
+   *
+   * Every frame is composed from a seek, so this cannot run at the recording's
+   * own frame rate on a long clip. It runs as fast as the composing allows and
+   * uses the wall clock for position, which keeps the timing honest even when
+   * the picture cannot keep up.
+   */
+  let playing = 0;
+  function togglePlay(): void {
+    if (playing) {
+      cancelAnimationFrame(playing);
+      playing = 0;
+      return;
+    }
+    if (!recording) return;
+    if (previewTime >= trim.end - 1e-3) previewTime = trim.start;
+
+    let last = performance.now();
+    const tick = async () => {
+      const now = performance.now();
+      const elapsed = (now - last) / 1000;
+      last = now;
+      previewTime = Math.min(trim.end, previewTime + elapsed);
+      scrubber.value = String(previewTime);
+      $<HTMLSpanElement>('ll-time').textContent = formatClock(previewTime);
+      await drawPreview();
+      if (!playing) return;
+      if (previewTime >= trim.end - 1e-3) { playing = 0; return; }
+      playing = requestAnimationFrame(() => { void tick(); });
+    };
+    playing = requestAnimationFrame(() => { void tick(); });
+  }
 
   // ------------------------------------------------------------------ export
 
@@ -1192,9 +1461,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     (change) => {
       if (change.crop) { crop = change.crop; cropAspect = 'free'; }
       if (change.trim) trim = { ...change.trim };
+      if (change.composition) {
+        settings.composition = { ...settings.composition, ...change.composition };
+        // A background chosen by name is no longer a picture, so the stored one
+        // would otherwise sit there unused and unmentioned.
+        if (change.composition.background && change.composition.background !== 'image') dropWallpaper();
+      }
       remember();
       renderTrim();
       renderCrop();
+      renderControls();
       void drawPreview();
     },
   ));

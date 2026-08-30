@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cameraCrop, cameraRect, contentRect, cornerRadius, cropRect, cropToAspect, defaultComposition,
-  evenSize, isFullCrop, MIN_CROP, normaliseCrop, reviveCrop, ripple,
+  cameraAspect, cameraCrop, cameraRect, contentRect, cornerRadius, coverRect, cropRect, cropToAspect,
+  defaultComposition, evenSize, isFullCrop, MIN_CROP, normaliseCrop, reviveCrop, ripple,
   type Composition,
 } from './layout';
 
-const make = (overrides: Partial<Composition> = {}): Composition => ({
+type Overrides = Partial<Omit<Composition, 'camera'>> & { camera?: Partial<Composition['camera']> };
+
+const make = (overrides: Overrides = {}): Composition => ({
   ...defaultComposition,
   ...overrides,
   camera: { ...defaultComposition.camera, ...(overrides.camera ?? {}) },
@@ -92,7 +94,7 @@ describe('cameraRect', () => {
     for (const [corner, expected] of Object.entries(corners)) {
       const rect = cameraRect(make({
         ...base,
-        camera: { enabled: true, corner: corner as never, size: 0.2, round: true, margin: 0.05 },
+        camera: { enabled: true, corner: corner as never, size: 0.2, margin: 0.05 },
       }))!;
       expect(rect.x, corner).toBeCloseTo(expected.x);
       expect(rect.y, corner).toBeCloseTo(expected.y);
@@ -103,7 +105,7 @@ describe('cameraRect', () => {
   it('measures against the shorter edge, so a vertical output does not get a giant bubble', () => {
     const rect = cameraRect(make({
       width: 1080, height: 1920,
-      camera: { enabled: true, corner: 'bottomRight', size: 0.25, round: true, margin: 0.03 },
+      camera: { enabled: true, corner: 'bottomRight', size: 0.25, margin: 0.03 },
     }))!;
     expect(rect.width).toBeCloseTo(0.25 * 1080);
   });
@@ -111,7 +113,7 @@ describe('cameraRect', () => {
   it('stays inside the frame even when asked for a huge bubble', () => {
     const composition = make({
       width: 1000, height: 1000,
-      camera: { enabled: true, corner: 'bottomRight', size: 9, round: true, margin: 0 },
+      camera: { enabled: true, corner: 'bottomRight', size: 9, margin: 0 },
     });
     const rect = cameraRect(composition)!;
     expect(rect.x).toBeGreaterThanOrEqual(0);
@@ -285,5 +287,106 @@ describe('cropToAspect', () => {
     const crop = { x: 0.1, y: 0.1, width: 0.5, height: 0.5 };
     expect(cropToAspect(crop, 0, 1920, 1080)).toEqual(crop);
     expect(cropToAspect(crop, Number.NaN, 1920, 1080)).toEqual(crop);
+  });
+});
+
+describe('cameraRect shapes', () => {
+  const withShape = (shape: Composition['camera']['shape']) =>
+    cameraRect(make({ camera: { ...defaultComposition.camera, enabled: true, shape, size: 0.2 } }))!;
+
+  it('makes a circle square', () => {
+    const rect = withShape('circle');
+    expect(rect.width).toBeCloseTo(rect.height, 6);
+  });
+
+  it('makes a widescreen bubble sixteen by nine', () => {
+    const rect = withShape('wide');
+    expect(rect.width / rect.height).toBeCloseTo(16 / 9, 6);
+  });
+
+  it('makes a portrait bubble taller than it is wide', () => {
+    const rect = withShape('tall');
+    expect(rect.width / rect.height).toBeCloseTo(3 / 4, 6);
+  });
+
+  it('keeps the size setting as the longer edge, so a wide bubble is no taller', () => {
+    expect(withShape('wide').width).toBeCloseTo(withShape('circle').width, 6);
+    expect(withShape('wide').height).toBeLessThan(withShape('circle').height);
+  });
+
+  it('keeps every shape inside the frame with its margin', () => {
+    const composition = make({});
+    for (const shape of ['circle', 'rounded', 'square', 'wide', 'tall'] as const) {
+      const rect = cameraRect(make({ camera: { ...defaultComposition.camera, enabled: true, shape } }))!;
+      expect(rect.x).toBeGreaterThanOrEqual(0);
+      expect(rect.y).toBeGreaterThanOrEqual(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(composition.width);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(composition.height);
+    }
+  });
+});
+
+describe('cameraCrop', () => {
+  it('takes a square out of a widescreen camera by default', () => {
+    const crop = cameraCrop(1280, 720);
+    expect(crop.width).toBe(720);
+    expect(crop.height).toBe(720);
+  });
+
+  it('takes the whole width when the bubble is the camera\'s own shape', () => {
+    const crop = cameraCrop(1280, 720, 16 / 9);
+    expect(crop.width).toBeCloseTo(1280, 6);
+    expect(crop.height).toBeCloseTo(720, 6);
+  });
+
+  it('never asks for more than the frame has', () => {
+    for (const aspect of [0.5, 1, 16 / 9, 3]) {
+      const crop = cameraCrop(1280, 720, aspect);
+      expect(crop.x).toBeGreaterThanOrEqual(0);
+      expect(crop.y).toBeGreaterThanOrEqual(0);
+      expect(crop.x + crop.width).toBeLessThanOrEqual(1280 + 1e-9);
+      expect(crop.y + crop.height).toBeLessThanOrEqual(720 + 1e-9);
+    }
+  });
+
+  it('sits a little above centre, where a face is', () => {
+    const crop = cameraCrop(720, 1280, 1);
+    expect(crop.y).toBeLessThan((1280 - 720) / 2);
+  });
+});
+
+describe('cameraAspect', () => {
+  it('knows each shape', () => {
+    expect(cameraAspect('circle')).toBe(1);
+    expect(cameraAspect('wide')).toBeCloseTo(16 / 9, 6);
+    expect(cameraAspect('tall')).toBeCloseTo(3 / 4, 6);
+  });
+});
+
+describe('coverRect', () => {
+  it('fills a wide frame with a tall picture by overflowing the top and bottom', () => {
+    const rect = coverRect(1920, 1080, 1000, 1000);
+    expect(rect.width).toBeCloseTo(1920, 6);
+    expect(rect.height).toBeCloseTo(1920, 6);
+    expect(rect.y).toBeCloseTo((1080 - 1920) / 2, 6);
+  });
+
+  it('never leaves a gap, whatever shape the picture is', () => {
+    for (const [w, h] of [[100, 4000], [4000, 100], [1920, 1080], [1, 1]]) {
+      const rect = coverRect(1280, 720, w, h);
+      expect(rect.x).toBeLessThanOrEqual(1e-9);
+      expect(rect.y).toBeLessThanOrEqual(1e-9);
+      expect(rect.x + rect.width).toBeGreaterThanOrEqual(1280 - 1e-9);
+      expect(rect.y + rect.height).toBeGreaterThanOrEqual(720 - 1e-9);
+    }
+  });
+
+  it('keeps the picture\'s shape', () => {
+    const rect = coverRect(1280, 720, 800, 600);
+    expect(rect.width / rect.height).toBeCloseTo(800 / 600, 6);
+  });
+
+  it('falls back to filling the frame when the picture has no size', () => {
+    expect(coverRect(1280, 720, 0, 0)).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
   });
 });
