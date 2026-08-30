@@ -10,6 +10,7 @@ import {
   type CameraCorner, type CameraShape, type Composition, type Crop,
 } from './layout';
 import { countdown } from './countdown';
+import { History } from './history';
 import { limelightTools } from './mcp';
 import {
   capabilities, drawFrame, findInterest, render, RenderError, type OutputFormat, type Project,
@@ -54,6 +55,20 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let zooms: ZoomBlock[] = [];
   let crop: Crop = { ...FULL_CROP };
   let trim = { start: 0, end: 0 };
+  /** Everything an undo has to put back. The recording itself never changes. */
+  type EditorState = {
+    settings: Settings;
+    zooms: ZoomBlock[];
+    crop: Crop;
+    trim: { start: number; end: number };
+    wallpaper: Uint8Array | null;
+    wallpaperMime: string;
+  };
+  const history = new History<EditorState>({
+    settings, zooms, crop, trim, wallpaper: null, wallpaperMime: 'image/png',
+  });
+  /** Set while a state is being put back, so restoring does not record itself. */
+  let restoring = false;
   let saveTimer = 0;
 
   const setStatus = (message: string, state: 'idle' | 'busy' | 'good' | 'bad') => {
@@ -61,7 +76,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     statusEl.dataset.state = state;
   };
 
-  const remember = () => {
+  const remember = (label = '') => {
+    record(label);
     saveSettings(settings);
     // The settings belong to the project too, so reopening it looks the same.
     if (stored) {
@@ -72,6 +88,85 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       queueSave();
     }
   };
+
+  // ------------------------------------------------------------------ history
+
+  function snapshot(): EditorState {
+    return { settings, zooms, crop, trim, wallpaper: wallpaperBytes, wallpaperMime };
+  }
+
+  /**
+   * Records the state after an edit.
+   *
+   * A label folds a run of edits into one step, which is what stops a slider
+   * drag becoming four hundred things to undo.
+   */
+  function record(label = ''): void {
+    if (restoring || !recording) return;
+    history.push(snapshot(), label);
+    renderHistory();
+  }
+
+  async function restore(state: EditorState): Promise<void> {
+    restoring = true;
+    try {
+      settings = state.settings;
+      zooms = state.zooms;
+      crop = state.crop;
+      trim = { ...state.trim };
+      // The picture is held as bytes in the snapshot, so an undo across a
+      // change of background has to decode it again rather than assume the
+      // one already loaded is the right one.
+      if (state.wallpaper !== wallpaperBytes) {
+        if (state.wallpaper) await useWallpaper(state.wallpaper, state.wallpaperMime);
+        else dropWallpaper();
+      }
+      if (settings.composition.background === 'image' && !wallpaper) {
+        settings.composition.background = 'gradient';
+      }
+      if (selected && !zooms.some((zoom) => zoom.id === selected)) selected = null;
+
+      saveSettings(settings);
+      if (stored) {
+        stored.settings = settings;
+        stored.start = trim.start;
+        stored.end = trim.end;
+        stored.crop = crop;
+        stored.zooms = zooms;
+        stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
+        stored.wallpaper = state.wallpaper;
+        stored.wallpaperMime = state.wallpaperMime;
+        queueSave();
+      }
+    } finally {
+      restoring = false;
+    }
+
+    renderControls();
+    renderTrim();
+    renderCrop();
+    renderZooms();
+    renderHistory();
+    await drawPreview();
+  }
+
+  function renderHistory(): void {
+    $<HTMLButtonElement>('ll-undo').disabled = !history.canUndo;
+    $<HTMLButtonElement>('ll-redo').disabled = !history.canRedo;
+  }
+
+  async function stepBack(): Promise<void> {
+    const state = history.undo();
+    if (state) await restore(state);
+  }
+
+  async function stepForward(): Promise<void> {
+    const state = history.redo();
+    if (state) await restore(state);
+  }
+
+  $<HTMLButtonElement>('ll-undo').addEventListener('click', () => { void stepBack(); });
+  $<HTMLButtonElement>('ll-redo').addEventListener('click', () => { void stepForward(); });
 
   /** Writing tens of megabytes on every slider nudge would make this stutter. */
   function queueSave(): void {
@@ -282,6 +377,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
     else sourceNote.hidden = true;
+
+    // The history starts here, after any analysis. Finding the action is what
+    // the app does on your behalf, not something you did, so undo should not
+    // walk back into a recording that has never been zoomed.
+    history.reset(snapshot());
+    renderHistory();
     await drawPreview();
   }
 
@@ -719,7 +820,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const zoomTrackEl = $<HTMLDivElement>('ll-zoomtrack');
 
-  function persistZooms(): void {
+  function persistZooms(label = ''): void {
+    record(label);
     if (!stored) return;
     // The blocks are what a person edits, so they are what is kept. The
     // keyframe track is derived and stored alongside so a reopened project
@@ -840,7 +942,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     zooms = zooms.map((zoom) => (zoom.id === selected ? { ...zoom, scale, pinned: true } : zoom));
     zooms = constrain(zooms, selected, recording.duration);
     renderZooms();
-    persistZooms();
+    persistZooms(`zoom-scale:${selected}`);
     void drawPreview();
   });
 
@@ -970,7 +1072,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const input = $<HTMLInputElement>(id);
     input.addEventListener('input', () => {
       apply(Number(input.value));
-      remember();
+      remember(`slider:${id}`);
       renderReadouts();
       void drawPreview();
     });
@@ -1108,6 +1210,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** The chosen background picture, decoded once and kept ready to draw. */
   let wallpaper: ImageBitmap | HTMLImageElement | null = null;
   let wallpaperUrl: string | null = null;
+  /** Kept alongside the decoded picture so an undo can put the right one back. */
+  let wallpaperBytes: Uint8Array | null = null;
+  let wallpaperMime = 'image/png';
 
   const wallpaperNote = $<HTMLParagraphElement>('ll-wallpaper-note');
   const wallpaperFile = $<HTMLInputElement>('ll-wallpaper-file');
@@ -1134,6 +1239,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   async function useWallpaper(bytes: Uint8Array, mime: string): Promise<void> {
     dropWallpaper();
     const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
+    wallpaperBytes = bytes;
+    wallpaperMime = mime;
 
     if (typeof createImageBitmap === 'function') {
       try {
@@ -1155,6 +1262,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       });
     } catch {
       URL.revokeObjectURL(url);
+      wallpaperBytes = null;
       toast('That picture could not be read.');
       return;
     }
@@ -1172,6 +1280,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (wallpaper instanceof ImageBitmap) wallpaper.close();
     wallpaper = null;
     wallpaperUrl = null;
+    wallpaperBytes = null;
   }
 
   $<HTMLButtonElement>('ll-wallpaper-pick').addEventListener('click', () => wallpaperFile.click());
@@ -1190,7 +1299,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       // The picture travels with the project, because a background that
       // disappeared on reopening would be worse than not offering one.
       stored.wallpaper = bytes;
-      stored.wallpaperMime = file.type || 'image/png';
+      stored.wallpaperMime = wallpaperMime;
     }
     remember();
     markPresets();
@@ -1236,6 +1345,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * naming: it would otherwise scroll the page.
    */
   root.addEventListener('keydown', (event) => {
+    // Undo is the one shortcut that keeps its modifier, and the one that has
+    // to work while a field has focus.
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === 'z' || event.key === 'Z')) {
+      event.preventDefault();
+      void (event.shiftKey ? stepForward() : stepBack());
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === 'y' || event.key === 'Y')) {
+      event.preventDefault();
+      void stepForward();
+      return;
+    }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const target = event.target as HTMLElement | null;
     const typing = target instanceof HTMLInputElement

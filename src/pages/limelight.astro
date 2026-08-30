@@ -108,12 +108,15 @@ const app = getApp('limelight');
           <span><kbd>I</kbd> start here</span>
           <span><kbd>O</kbd> end here</span>
           <span><kbd>Delete</kbd> remove the selected zoom</span>
+          <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
         </p>
 
         <div class="ll-scrubrow">
           <button class="btn btn--sm btn--primary" id="ll-zoom-add">Add a zoom</button>
           <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
           <button class="btn btn--sm btn--ghost" id="ll-zoom-clear">Clear zooms</button>
+          <button class="btn btn--sm" id="ll-undo" disabled>Undo</button>
+          <button class="btn btn--sm" id="ll-redo" disabled>Redo</button>
           <button class="btn btn--sm btn--danger" id="ll-discard">Discard</button>
         </div>
       </div>
