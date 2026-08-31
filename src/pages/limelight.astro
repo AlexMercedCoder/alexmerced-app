@@ -198,6 +198,19 @@ const app = getApp('limelight');
 
       <div class="ll-editor" id="ll-editor" hidden>
         <section class="card ll-card">
+          <h2 class="ll-subhead">Looks</h2>
+          <p class="ll-note">
+            The background, padding, shadow, tilt, entrance and zoom defaults, saved under
+            a name so the next recording can match this one.
+          </p>
+          <div class="ll-looks" id="ll-looks"></div>
+          <div class="ll-scrubrow">
+            <input class="field ll-lookname" id="ll-look-name" type="text" placeholder="Name this look" maxlength="40" />
+            <button class="btn btn--sm" id="ll-look-save">Save</button>
+          </div>
+        </section>
+
+        <section class="card ll-card">
           <h2 class="ll-subhead">Background</h2>
           <div class="ll-presets" id="ll-presets"></div>
           <label class="field-row"><span>Output size</span><select class="field" id="ll-size"></select></label>
@@ -428,6 +441,16 @@ const app = getApp('limelight');
   .ll-card { padding: 1rem; min-width: 0; display: grid; gap: 0.55rem; align-content: start; }
   .ll-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
   .ll-presets { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.3rem; }
+  .ll-looks { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .ll-look { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.3rem 0.3rem 0.7rem;
+    border: 1px solid var(--rule); border-radius: 999px; background: var(--surface); font-size: 0.82rem; }
+  .ll-look__use { border: 0; background: none; color: var(--ink); cursor: pointer; font: inherit; padding: 0; }
+  .ll-look__use:hover { color: var(--accent); }
+  .ll-look__drop { border: 0; background: none; color: var(--ink-faint); cursor: pointer;
+    line-height: 1; padding: 0.1rem 0.3rem; border-radius: 999px; font-size: 0.9rem; }
+  .ll-look__drop:hover { color: var(--surface); background: var(--ink-faint); }
+  .ll-lookname { flex: 1 1 12rem; min-width: 0; }
+  .ll-looks:empty { display: none; }
   .ll-preset { width: 42px; height: 30px; border-radius: 0.35rem; border: 2px solid transparent; box-shadow: 0 0 0 1px var(--rule); cursor: pointer; padding: 0; }
   .ll-preset[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .ll-slider { display: grid; grid-template-columns: 8rem minmax(0, 1fr) 3.2rem; align-items: center; gap: 0.5rem; font-size: 0.83rem; }

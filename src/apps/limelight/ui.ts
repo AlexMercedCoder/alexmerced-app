@@ -20,9 +20,9 @@ import {
   capabilities, drawFrame, findInterest, render, RenderError, type OutputFormat, type Project,
 } from './render';
 import {
-  createProject, deleteProject, loadCurrentId, loadProject, loadProjects, loadSettings,
-  saveCurrentId, saveProject, saveSettings, storedBytes, type Project as StoredProject,
-  type Settings,
+  applyLook, createProject, deleteLook, deleteProject, loadCurrentId, loadLooks, loadProject,
+  loadProjects, loadSettings, lookFrom, saveCurrentId, saveLook, saveProject, saveSettings,
+  storedBytes, type Look, type Project as StoredProject, type Settings,
 } from './store';
 import {
   addText, constrainText, duplicateText, MIN_TEXT, removeText, splitText, updateText,
@@ -2365,6 +2365,84 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     void renderProjects();
   });
 
+  // ------------------------------------------------------------------ looks
+
+  /**
+   * Saved looks: the presentation, without the recording.
+   *
+   * Somebody who makes a second video wants it to match the first, and until
+   * now that meant setting the padding, shadow, tilt and background again by
+   * hand every time. Trim, crop, zooms and captions belong to one recording and
+   * are deliberately not part of this.
+   */
+  const looksEl = $<HTMLDivElement>('ll-looks');
+  const lookNameEl = $<HTMLInputElement>('ll-look-name');
+
+  async function renderLooks(): Promise<void> {
+    const saved = await loadLooks().catch(() => []);
+    looksEl.innerHTML = '';
+    for (const look of saved) {
+      const chip = document.createElement('span');
+      chip.className = 'll-look';
+
+      const use = document.createElement('button');
+      use.type = 'button';
+      use.className = 'll-look__use';
+      use.textContent = look.name;
+      use.title = `Apply ${look.name}`;
+      use.addEventListener('click', () => { void applySavedLook(look); });
+
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.className = 'll-look__drop';
+      drop.textContent = '×';
+      drop.setAttribute('aria-label', `Delete the look ${look.name}`);
+      drop.addEventListener('click', async () => {
+        await deleteLook(look.id).catch(() => {});
+        await renderLooks();
+        toast(`Deleted the look ${look.name}.`);
+      });
+
+      chip.append(use, drop);
+      looksEl.append(chip);
+    }
+  }
+
+  async function applySavedLook(look: Look): Promise<void> {
+    settings = applyLook(settings, look);
+    // The background picture travels with the look, so a look that had one
+    // brings it and a look that had none takes it away. Otherwise applying a
+    // plain look over a recording with a wallpaper would leave the wallpaper
+    // showing and the look would not be what was saved.
+    if (look.wallpaper) await useWallpaper(look.wallpaper, look.wallpaperMime);
+    else dropWallpaper();
+    if (settings.composition.background === 'image' && !wallpaper) {
+      settings.composition.background = 'gradient';
+    }
+    remember(`look:${look.id}`);
+    renderControls();
+    renderZooms();
+    void drawPreview();
+    toast(`Applied ${look.name}.`);
+  }
+
+  $<HTMLButtonElement>('ll-look-save').addEventListener('click', async () => {
+    const name = lookNameEl.value.trim();
+    if (!name) {
+      setStatus('Give the look a name first.', 'bad');
+      lookNameEl.focus();
+      return;
+    }
+    await saveLook(lookFrom(name, settings, wallpaperBytes, wallpaperMime)).catch(() => {});
+    lookNameEl.value = '';
+    await renderLooks();
+    toast(`Saved the look ${name}.`);
+  });
+
+  lookNameEl.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); $<HTMLButtonElement>('ll-look-save').click(); }
+  });
+
   // ------------------------------------------------------------------ countdown
 
   const countdownEl = $<HTMLSelectElement>('ll-countdown');
@@ -2768,6 +2846,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   await describeFormat();
   await renderProjects();
   await renderDevices();
+  await renderLooks();
 
   // Reopen whatever was last worked on, so a reload picks up where it left off.
   const last = loadCurrentId();

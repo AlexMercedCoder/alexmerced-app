@@ -43,7 +43,7 @@ export const APP_ID = 'limelight';
 export const APP_VERSION = 1;
 
 const DB_NAME = 'limelight';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SETTINGS_KEY = 'limelight:settings';
 const CURRENT_KEY = 'limelight:current';
 
@@ -285,12 +285,110 @@ export function createProject(
 // --------------------------------------------------------------------- storage
 
 let projects: Collection<Project> | null = null;
+let looks: Collection<Look> | null = null;
+let database: Promise<IDBDatabase> | null = null;
+
+/**
+ * One connection for both stores.
+ *
+ * Opening the same database twice at different versions is how a blocked
+ * upgrade happens, so the handle is shared and the version bumped once.
+ */
+function db(): Promise<IDBDatabase> {
+  if (!database) {
+    database = openDatabase(DB_NAME, DB_VERSION, [
+      { name: 'projects', keyPath: 'id' },
+      { name: 'looks', keyPath: 'id' },
+    ]);
+  }
+  return database;
+}
 
 async function connect(): Promise<Collection<Project>> {
   if (projects) return projects;
-  const db = await openDatabase(DB_NAME, DB_VERSION, [{ name: 'projects', keyPath: 'id' }]);
-  projects = new Collection<Project>(db, 'projects');
+  projects = new Collection<Project>(await db(), 'projects');
   return projects;
+}
+
+async function connectLooks(): Promise<Collection<Look>> {
+  if (looks) return looks;
+  looks = new Collection<Look>(await db(), 'looks');
+  return looks;
+}
+
+/**
+ * A saved look: everything about how a recording is presented, with nothing
+ * about the recording itself.
+ *
+ * Trim, crop, zooms and captions all belong to one video and are deliberately
+ * left out. What is kept is the part somebody wants their next recording to
+ * match: the background, the padding, the shadow, the tilt, the entrance, and
+ * the defaults new zooms are built from.
+ */
+export type Look = {
+  id: string;
+  name: string;
+  composition: Composition;
+  zoom: ZoomSettings;
+  tilt: Tilt;
+  motion: MotionSettings;
+  /** The background picture, when the look uses one. */
+  wallpaper: Uint8Array | null;
+  wallpaperMime: string;
+  createdAt: string;
+};
+
+export async function loadLooks(): Promise<Look[]> {
+  const collection = await connectLooks();
+  const all = await collection.all();
+  return all.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function saveLook(look: Look): Promise<void> {
+  await (await connectLooks()).put(look);
+}
+
+export async function deleteLook(id: string): Promise<void> {
+  await (await connectLooks()).delete(id);
+}
+
+/** Builds a look from the settings in play, taking only the parts that travel. */
+export function lookFrom(
+  name: string, settings: Settings, wallpaper: Uint8Array | null, wallpaperMime: string,
+  now: Date = new Date(),
+): Look {
+  return {
+    id: createId('look'),
+    name,
+    composition: settings.composition,
+    zoom: settings.zoom,
+    tilt: settings.tilt,
+    motion: settings.motion,
+    wallpaper,
+    wallpaperMime,
+    createdAt: now.toISOString(),
+  };
+}
+
+/**
+ * Lays a look over the current settings.
+ *
+ * Output size, frame rate, format and quality are left alone on purpose: they
+ * are about the file being produced rather than how it looks, and someone
+ * applying a look to a portrait recording does not want it made landscape.
+ */
+export function applyLook(settings: Settings, look: Look): Settings {
+  return {
+    ...settings,
+    composition: {
+      ...look.composition,
+      width: settings.composition.width,
+      height: settings.composition.height,
+    },
+    zoom: look.zoom,
+    tilt: look.tilt,
+    motion: look.motion,
+  };
 }
 
 export function loadSettings(): Settings { return reviveSettings(readPref(SETTINGS_KEY, defaultSettings)); }
