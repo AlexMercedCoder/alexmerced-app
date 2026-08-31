@@ -1153,12 +1153,34 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     });
 
     zooms = constrain(zooms, dragging.id, recording.duration);
-    renderZooms();
+    invalidateTrack();
+    // Only the bar that moved is touched. Rebuilding the whole track meant
+    // discarding and recreating every bar, its label, its two grips and four
+    // listeners at pointer rate, which is a lot of garbage for a drag.
+    positionBars();
   });
+
+  /** Moves the existing bars to match the blocks, without rebuilding them. */
+  function positionBars(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    const byId = new Map(zooms.map((zoom) => [zoom.id, zoom]));
+    for (const bar of zoomTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
+      const zoom = byId.get(bar.dataset.id ?? '');
+      // A constrained drag can squeeze a block out of existence entirely, and
+      // its bar has to go with it rather than sit there pointing at nothing.
+      if (!zoom) { bar.remove(); continue; }
+      bar.style.left = `${(zoom.start / duration) * 100}%`;
+      bar.style.width = `${((zoom.end - zoom.start) / duration) * 100}%`;
+      bar.title = `${zoom.scale.toFixed(1)}x, ${formatClock(zoom.start)} to ${formatClock(zoom.end)}`;
+    }
+  }
 
   const endZoomDrag = () => {
     if (!dragging) return;
     dragging = null;
+    // The full rebuild happens once, now that the constraints have settled.
+    renderZooms();
     persistZooms();
     void drawPreview();
   };
@@ -1378,12 +1400,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     });
 
     texts = constrainText(texts, textDrag.id, recording.duration);
-    renderTexts();
+    // Same reasoning as the zoom track: move the bars, rebuild once at the end.
+    positionTextBars();
   });
+
+  /** Moves the existing text bars to match the blocks, without rebuilding them. */
+  function positionTextBars(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    const byId = new Map(texts.map((text) => [text.id, text]));
+    for (const bar of textTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
+      const text = byId.get(bar.dataset.id ?? '');
+      if (!text) { bar.remove(); continue; }
+      bar.style.left = `${(text.start / duration) * 100}%`;
+      bar.style.width = `${((text.end - text.start) / duration) * 100}%`;
+    }
+  }
 
   const endTextDrag = () => {
     if (!textDrag) return;
     textDrag = null;
+    renderTexts();
     persistTexts();
     void drawPreview();
   };
