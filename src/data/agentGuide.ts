@@ -206,8 +206,13 @@ export const AGENT_TOOLS: AppTools[] = [
     tools: [
       { name: 'limelight_describe_recording', summary: 'What was recorded, how it is framed, and how zoom is deciding.' },
       { name: 'limelight_zoom_plan', summary: 'The camera move the export will make.' },
+      { name: 'limelight_edit_zooms', summary: 'Add, move, aim, rescale or remove a zoom.' },
+      { name: 'limelight_describe_sound', summary: 'Where the recording is loud, quiet, and worth cutting.' },
+      { name: 'limelight_cut', summary: 'Take a stretch out of the middle, or every silence at once.' },
       { name: 'limelight_set_frame', summary: 'Set the crop and the range to export.' },
       { name: 'limelight_set_look', summary: 'Set the background, output size, camera bubble, tilt and arrival.' },
+      { name: 'limelight_looks', summary: 'List the saved looks and apply one.' },
+      { name: 'limelight_preview', summary: 'Move the playhead, or start and stop playback.' },
       { name: 'limelight_add_text', summary: 'Put a caption on the recording.' },
       { name: 'limelight_remove_text', summary: 'Take a caption off again.' },
       { name: 'limelight_text_at', summary: 'Which captions are showing at a moment.' },
@@ -306,6 +311,18 @@ export const RECIPES: Recipe[] = [
       'cadence_describe_audio first. It reports where the sound actually starts and stops.',
       'cadence_edit_audio with removeSilence, then normalise "loudness" for speech or "peak" for music.',
       'cadence_cut_section to take a stumble out of the middle without splitting the file.',
+    ],
+  },
+  {
+    title: 'Tighten a screen recording someone just made',
+    when: 'A screen recording is too long, has dead air in it, or zooms to the wrong place.',
+    steps: [
+      'Open /limelight. Recording itself needs a person, because the browser asks what to share.',
+      'limelight_describe_recording, then limelight_describe_sound. The second is the useful one: silences are where sentences end and where mistakes were left in.',
+      'limelight_cut with action "silences" to take out the dead air in one action, or with a start and end to remove a specific fumble.',
+      'limelight_zoom_plan to read the camera move, then limelight_edit_zooms to aim one. A zoom carries where it looks as well as when, and pointing at the wrong thing is the usual reason a recording looks wrong.',
+      'limelight_set_look, or limelight_looks to apply a saved one so this video matches the last.',
+      'Leave the export to the person: it writes a file and takes real time.',
     ],
   },
   {

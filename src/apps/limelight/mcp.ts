@@ -1,5 +1,6 @@
 import {
-  errorResult, readEnum, readNumber, readString, requireString, textResult, type McpTool,
+  errorResult, readBoolean, readEnum, readNumber, readString, requireString, textResult,
+  type McpTool,
 } from '../../lib/webmcp';
 import type { Interest } from './attention';
 import type { Recording } from './capture';
@@ -10,6 +11,13 @@ import {
   addText, removeText, textsAt, updateText, type TextAlign, type TextBlock,
 } from './text';
 import { zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
+import {
+  addBlock, constrain, MIN_BLOCK, removeBlock, sortBlocks, type ZoomBlock,
+} from './zooms';
+import {
+  defaultSilence, findSilences, keptDuration, mergeSpans, type Span,
+} from './waveform';
+import type { Look } from './store';
 import {
   CAMERA_SHAPES, CROP_ASPECTS, cropToAspect, FULL_CROP, isFullCrop, normaliseCrop, OUTPUT_SIZES, PRESETS,
   type CameraCorner, type CameraShape, type Composition, type Crop,
@@ -28,6 +36,15 @@ type State = {
   crop: Crop;
   trim: { start: number; end: number };
   texts: TextBlock[];
+  /** The zoom blocks themselves, which are what an agent edits. */
+  zooms: ZoomBlock[];
+  /** Stretches removed from the middle. */
+  cuts: Span[];
+  /** Loudness per column of the decoded audio, when the recording has sound. */
+  loudness: Float32Array | null;
+  looks: Look[];
+  previewTime: number;
+  playing: boolean;
 };
 
 /** Changes an agent is allowed to make. Everything is local and reversible. */
@@ -38,6 +55,11 @@ type Edit = (change: {
   texts?: TextBlock[];
   tilt?: Tilt;
   motion?: MotionSettings;
+  zooms?: ZoomBlock[];
+  cuts?: Span[];
+  seek?: number;
+  play?: boolean;
+  applyLook?: string;
 }) => void;
 
 /**
@@ -362,6 +384,266 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
       },
     },
     {
+      name: 'limelight_edit_zooms',
+      description:
+        'Add, move, aim, rescale or remove the zooms on the timeline. Aiming is the point: a zoom carries where it looks as well as when it happens, given as fractions across and down the frame, and a zoom pointed at the wrong thing is the usual reason a recording looks wrong. Zooms may not overlap, so an edit that would collide is trimmed back rather than refused. Everything here is undoable in the editor.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['add', 'update', 'remove', 'clear'], description: 'What to do.' },
+          id: { type: 'string', description: 'Which zoom to update or remove. Read them from limelight_zoom_plan.' },
+          at: { type: 'number', description: 'For add: the moment in seconds to put it at.' },
+          start: { type: 'number', description: 'For update: a new start in seconds.' },
+          end: { type: 'number', description: 'For update: a new end in seconds.' },
+          scale: { type: 'number', description: 'How far in, from 1 to 4.' },
+          x: { type: 'number', description: 'Where to look across the frame, 0 to 1.' },
+          y: { type: 'number', description: 'Where to look down the frame, 0 to 1.' },
+        },
+        required: ['action'],
+      },
+      execute: (input = {}) => {
+        const state = read();
+        if (!state.recording) return errorResult('Nothing has been recorded or opened yet.');
+        const duration = state.recording.duration;
+        const action = readEnum(input, 'action', ['add', 'update', 'remove', 'clear'] as const, 'add');
+
+        if (action === 'clear') {
+          edit({ zooms: [] });
+          return textResult({ zooms: [], note: 'Every zoom removed. Undo in the editor puts them back.' });
+        }
+
+        if (action === 'add') {
+          const at = readNumber(input, 'at', state.previewTime);
+          const focus = {
+            x: readNumber(input, 'x', 0.5),
+            y: readNumber(input, 'y', 0.5),
+          };
+          const before = state.zooms.length;
+          let next = addBlock(state.zooms, Math.max(0, Math.min(duration, at)), duration, state.settings.zoom, focus);
+          if (next.length === before) {
+            return errorResult('There is no room for a zoom there.', {
+              reason: 'That moment is inside an existing zoom, or the gap around it is shorter than the minimum.',
+              minimumSeconds: MIN_BLOCK,
+            });
+          }
+          const added = next.find((zoom) => !state.zooms.some((old) => old.id === zoom.id));
+          if (added && Number.isFinite(readNumber(input, 'scale', Number.NaN))) {
+            next = next.map((zoom) => (zoom.id === added.id
+              ? { ...zoom, scale: Math.max(1, Math.min(4, readNumber(input, 'scale', zoom.scale))) }
+              : zoom));
+            next = constrain(next, added.id, duration);
+          }
+          edit({ zooms: next });
+          return textResult({ added: describeZoom(next.find((zoom) => zoom.id === added?.id)), zooms: next.map(describeZoom) });
+        }
+
+        const id = requireString(input, 'id');
+        const target = state.zooms.find((zoom) => zoom.id === id);
+        if (!target) return errorResult(`There is no zoom with the id ${id}.`, { ids: state.zooms.map((zoom) => zoom.id) });
+
+        if (action === 'remove') {
+          const next = removeBlock(state.zooms, id);
+          edit({ zooms: next });
+          return textResult({ removed: id, zooms: next.map(describeZoom) });
+        }
+
+        const changed: ZoomBlock = {
+          ...target,
+          start: Math.max(0, readNumber(input, 'start', target.start)),
+          end: Math.min(duration, readNumber(input, 'end', target.end)),
+          scale: Math.max(1, Math.min(4, readNumber(input, 'scale', target.scale))),
+          x: Math.max(0, Math.min(1, readNumber(input, 'x', target.x))),
+          y: Math.max(0, Math.min(1, readNumber(input, 'y', target.y))),
+          // Touched by an agent counts as touched by hand, so a re-analysis
+          // leaves it alone rather than overwriting the instruction.
+          pinned: true,
+        };
+        if (changed.end <= changed.start) {
+          return errorResult('A zoom has to end after it starts.', { start: changed.start, end: changed.end });
+        }
+
+        const next = constrain(
+          sortBlocks(state.zooms.map((zoom) => (zoom.id === id ? changed : zoom))), id, duration,
+        );
+        edit({ zooms: next });
+        const after = next.find((zoom) => zoom.id === id);
+        return textResult({
+          updated: describeZoom(after),
+          note: after && (after.start !== changed.start || after.end !== changed.end)
+            ? 'Trimmed back so it does not overlap its neighbour.'
+            : undefined,
+          zooms: next.map(describeZoom),
+        });
+      },
+    },
+    {
+      name: 'limelight_describe_sound',
+      description:
+        'Report where the recording is loud and where it is quiet, and which stretches are silent enough to be worth cutting. This is what makes editing by ear possible without listening: silences are where sentences end and where mistakes were left in.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          threshold: { type: 'number', description: 'Quiet is below this fraction of the loudest moment. Default 0.06.' },
+          minSeconds: { type: 'number', description: 'Ignore quiet shorter than this. Default 0.6.' },
+        },
+      },
+      execute: (input = {}) => {
+        const state = read();
+        if (!state.recording) return errorResult('Nothing has been recorded or opened yet.');
+        if (!state.loudness) {
+          return textResult({
+            sound: false,
+            note: state.recording.hasAudio
+              ? 'This recording has sound but it could not be decoded, so silences cannot be found.'
+              : 'This recording has no sound.',
+          });
+        }
+
+        const options = {
+          threshold: Math.max(0, Math.min(1, readNumber(input, 'threshold', defaultSilence.threshold))),
+          minSeconds: Math.max(0.05, readNumber(input, 'minSeconds', defaultSilence.minSeconds)),
+          padSeconds: defaultSilence.padSeconds,
+        };
+        const silences = findSilences(state.loudness, state.recording.duration, options);
+        const perColumn = state.recording.duration / state.loudness.length;
+
+        return textResult({
+          sound: true,
+          duration: Number(state.recording.duration.toFixed(2)),
+          settingsUsed: options,
+          silences: silences.map((span) => ({
+            start: Number(span.start.toFixed(2)),
+            end: Number(span.end.toFixed(2)),
+            seconds: Number((span.end - span.start).toFixed(2)),
+          })),
+          quietSeconds: Number(silences.reduce((total, span) => total + (span.end - span.start), 0).toFixed(2)),
+          // A coarse shape of the whole recording, so an agent can talk about
+          // it without asking for every column.
+          loudnessOverTime: Array.from({ length: 20 }, (_, index) => {
+            const from = Math.floor((index * state.loudness!.length) / 20);
+            const to = Math.max(from + 1, Math.floor(((index + 1) * state.loudness!.length) / 20));
+            let peak = 0;
+            for (let at = from; at < to; at += 1) peak = Math.max(peak, state.loudness![at]);
+            return { at: Number((from * perColumn).toFixed(2)), level: Number(peak.toFixed(3)) };
+          }),
+        });
+      },
+    },
+    {
+      name: 'limelight_cut',
+      description:
+        'Remove a stretch from the middle of the recording, take out every silence at once, or put every cut back. Cuts are what shorten a recording without re-recording it: trim only sets an outer start and end. The picture and the sound both skip a cut, so what is exported is what is left.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['remove', 'silences', 'clear'], description: 'What to do.' },
+          start: { type: 'number', description: 'For remove: the first second to take out.' },
+          end: { type: 'number', description: 'For remove: the second to stop at.' },
+          threshold: { type: 'number', description: 'For silences: quiet is below this fraction of the loudest moment.' },
+          minSeconds: { type: 'number', description: 'For silences: ignore quiet shorter than this.' },
+        },
+        required: ['action'],
+      },
+      execute: (input = {}) => {
+        const state = read();
+        if (!state.recording) return errorResult('Nothing has been recorded or opened yet.');
+        const action = readEnum(input, 'action', ['remove', 'silences', 'clear'] as const, 'remove');
+        const { start: from, end: to } = state.trim;
+
+        if (action === 'clear') {
+          edit({ cuts: [] });
+          return textResult({ cuts: [], keptSeconds: Number((to - from).toFixed(2)), note: 'Every cut put back.' });
+        }
+
+        let added: Span[];
+        if (action === 'silences') {
+          if (!state.loudness) return errorResult('This recording has no sound to find silences in.');
+          added = findSilences(state.loudness, state.recording.duration, {
+            threshold: Math.max(0, Math.min(1, readNumber(input, 'threshold', defaultSilence.threshold))),
+            minSeconds: Math.max(0.05, readNumber(input, 'minSeconds', defaultSilence.minSeconds)),
+            padSeconds: defaultSilence.padSeconds,
+          })
+            // Only inside the trimmed range: cutting from a part already being
+            // thrown away changes nothing and reads as a bug.
+            .map((span) => ({ start: Math.max(span.start, from), end: Math.min(span.end, to) }))
+            .filter((span) => span.end - span.start > 0.05);
+          if (added.length === 0) return textResult({ cuts: state.cuts, note: 'No silences long enough to be worth cutting.' });
+        } else {
+          const start = readNumber(input, 'start', Number.NaN);
+          const end = readNumber(input, 'end', Number.NaN);
+          if (!Number.isFinite(start) || !Number.isFinite(end)) {
+            return errorResult('A cut needs a start and an end, in seconds.');
+          }
+          if (end <= start) return errorResult('A cut has to end after it starts.', { start, end });
+          added = [{ start: Math.max(0, start), end: Math.min(state.recording.duration, end) }];
+        }
+
+        const cuts = mergeSpans([...state.cuts, ...added]);
+        edit({ cuts });
+        return textResult({
+          cuts: cuts.map((span) => ({
+            start: Number(span.start.toFixed(2)),
+            end: Number(span.end.toFixed(2)),
+            seconds: Number((span.end - span.start).toFixed(2)),
+          })),
+          removedSeconds: Number(((to - from) - keptDuration(cuts, from, to)).toFixed(2)),
+          keptSeconds: Number(keptDuration(cuts, from, to).toFixed(2)),
+        });
+      },
+    },
+    {
+      name: 'limelight_preview',
+      description:
+        'Move the playhead or start and stop playback. Useful for putting the editor on the moment being discussed so a person can look at it. This does not return the picture: an agent cannot see the canvas, only place it.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          at: { type: 'number', description: 'Seconds to move the playhead to.' },
+          play: { type: 'boolean', description: 'True to start playing, false to stop.' },
+        },
+      },
+      execute: (input = {}) => {
+        const state = read();
+        if (!state.recording) return errorResult('Nothing has been recorded or opened yet.');
+        const at = readNumber(input, 'at', Number.NaN);
+        const change: { seek?: number; play?: boolean } = {};
+        if (Number.isFinite(at)) change.seek = Math.max(0, Math.min(state.recording.duration, at));
+        if ('play' in input) change.play = readBoolean(input, 'play', false);
+        if (change.seek === undefined && change.play === undefined) {
+          return textResult({ at: Number(state.previewTime.toFixed(2)), playing: state.playing });
+        }
+        edit(change);
+        return textResult({
+          at: Number((change.seek ?? state.previewTime).toFixed(2)),
+          playing: change.play ?? state.playing,
+        });
+      },
+    },
+    {
+      name: 'limelight_looks',
+      description:
+        'List the saved looks and apply one. A look is the presentation only: background, padding, shadow, tilt, entrance and the defaults new zooms are built from. It carries nothing about a particular recording, so applying one to a different video is safe.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          apply: { type: 'string', description: 'The name or id of a look to apply. Omit to just list them.' },
+        },
+      },
+      execute: (input = {}) => {
+        const state = read();
+        const listed = state.looks.map((look) => ({ id: look.id, name: look.name }));
+        const wanted = readString(input, 'apply').trim();
+        if (!wanted) return textResult({ looks: listed });
+
+        const match = state.looks.find((look) => look.id === wanted)
+          ?? state.looks.find((look) => look.name.toLowerCase() === wanted.toLowerCase());
+        if (!match) return errorResult(`There is no look called ${wanted}.`, { looks: listed });
+
+        edit({ applyLook: match.id });
+        return textResult({ applied: { id: match.id, name: match.name }, looks: listed });
+      },
+    },
+    {
       name: 'limelight_add_text',
       description:
         'Put a caption on the recording. It is drawn into the finished video, not overlaid in the page, so what the preview shows is what the file will contain. Position is given as fractions of the finished frame.',
@@ -469,4 +751,18 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+/** One zoom, as an agent reads it back. */
+function describeZoom(zoom: ZoomBlock | undefined): Record<string, unknown> | null {
+  if (!zoom) return null;
+  return {
+    id: zoom.id,
+    start: Number(zoom.start.toFixed(2)),
+    end: Number(zoom.end.toFixed(2)),
+    scale: Number(zoom.scale.toFixed(2)),
+    x: Number(zoom.x.toFixed(3)),
+    y: Number(zoom.y.toFixed(3)),
+    setByHand: zoom.pinned,
+  };
 }

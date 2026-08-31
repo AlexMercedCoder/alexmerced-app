@@ -44,6 +44,7 @@ const REGISTERED: Record<string, { name: string; description: string; inputSchem
       motion: { entrance: 'none' as const, exit: 'none' as const, seconds: 0.6 },
     },
     track: [], crop: { x: 0, y: 0, width: 1, height: 1 }, trim: { start: 0, end: 0 }, texts: [],
+    zooms: [], cuts: [], loudness: null, looks: [], previewTime: 0, playing: false,
   }), noop),
   loupe: loupeTools(),
   ordinate: ordinateTools(noop),

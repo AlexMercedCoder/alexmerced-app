@@ -2377,9 +2377,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    */
   const looksEl = $<HTMLDivElement>('ll-looks');
   const lookNameEl = $<HTMLInputElement>('ll-look-name');
+  /** Kept alongside the chips so an agent can name a look without reading the DOM. */
+  let knownLooks: Look[] = [];
 
   async function renderLooks(): Promise<void> {
     const saved = await loadLooks().catch(() => []);
+    knownLooks = saved;
     looksEl.innerHTML = '';
     for (const look of saved) {
       const chip = document.createElement('span');
@@ -2862,6 +2865,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       crop,
       trim,
       texts,
+      zooms,
+      cuts,
+      loudness: wave?.loudness ?? null,
+      looks: knownLooks,
+      previewTime,
+      playing,
     }),
     (change) => {
       if (change.crop) { crop = change.crop; cropAspect = 'free'; }
@@ -2869,6 +2878,25 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       if (change.texts) { texts = change.texts; selectedText = null; }
       if (change.tilt) settings.tilt = change.tilt;
       if (change.motion) settings.motion = change.motion;
+      if (change.zooms) {
+        zooms = change.zooms;
+        if (selected && !zooms.some((zoom) => zoom.id === selected)) selected = null;
+        if (focusTarget) focusTarget = zooms.find((zoom) => zoom.id === focusTarget!.id) ?? null;
+        if (!focusTarget) stopAiming();
+        invalidateTrack();
+      }
+      if (change.cuts) { cuts = change.cuts; selection = null; }
+      if (change.seek !== undefined) {
+        if (playing) pause();
+        previewTime = change.seek;
+        syncScrub();
+      }
+      if (change.applyLook) {
+        const look = knownLooks.find((entry) => entry.id === change.applyLook);
+        // Applying a look reaches for the wallpaper, which is asynchronous, so
+        // this hands off rather than blocking the tool call on it.
+        if (look) void applySavedLook(look);
+      }
       if (change.composition) {
         settings.composition = { ...settings.composition, ...change.composition };
         // A background chosen by name is no longer a picture, so the stored one
@@ -2879,8 +2907,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       renderTrim();
       renderCrop();
       renderTexts();
+      renderZooms();
+      renderCuts();
       renderControls();
-      void drawPreview();
+      // Playback is asked for last, so it starts from whatever the rest of the
+      // change left behind rather than racing it.
+      if (change.play === true && !playing) void play();
+      else if (change.play === false && playing) pause();
+      else void drawPreview();
     },
   ));
 }
