@@ -15,6 +15,7 @@ import {
 } from './plate';
 import { textsAt, wrapText, type TextBlock } from './text';
 import { keptDuration, keptSpans, sourceTimeAt, type Span } from './waveform';
+import { openFrameSource, type FrameSource } from './frames';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
 /**
@@ -73,6 +74,15 @@ export type Project = {
   end: number;
   /** Stretches inside that range which are skipped over. */
   cuts?: Span[];
+  /**
+   * A decoded frame to draw instead of the video element.
+   *
+   * Set while exporting, where frames arrive from a decoder running straight
+   * through the file rather than from seeking the element to each one. Nothing
+   * else about the compositing changes, which is what keeps the preview and the
+   * export producing the same picture.
+   */
+  frame?: CanvasImageSource | null;
 };
 
 function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
@@ -176,7 +186,7 @@ export function drawFrame(
     const behind = cropRect(project.crop, project.sourceWidth, project.sourceHeight);
     context.filter = 'blur(48px) brightness(0.7)';
     context.drawImage(
-      project.video,
+      project.frame ?? project.video,
       behind.x, behind.y, behind.width, behind.height,
       -width * 0.1, -height * 0.1, width * 1.2, height * 1.2,
     );
@@ -188,6 +198,7 @@ export function drawFrame(
   // The crop is the recording as far as everything below is concerned: it sets
   // the shape that gets fitted to the frame, and the zoom moves around inside
   // it rather than around the original.
+  const picture = project.frame ?? project.video;
   const region = cropRect(project.crop, project.sourceWidth, project.sourceHeight);
   const placed = contentRect(composition, region.width, region.height);
 
@@ -238,11 +249,11 @@ export function drawFrame(
   context.save();
   context.globalAlpha = move.opacity;
   if (tilt && hasTilt(tilt)) {
-    drawTilted(context, project.video, source, content, radius, tilt);
+    drawTilted(context, picture, source, content, radius, tilt);
   } else {
     context.clip(roundedPath(content, radius));
     context.drawImage(
-      project.video,
+      picture,
       source.x, source.y, source.width, source.height,
       content.x, content.y, content.width, content.height,
     );
@@ -595,195 +606,225 @@ export async function render(
   const total = Math.max(1, Math.round(span * project.frameRate));
   const step = 1 / project.frameRate;
 
-  /** Composes one frame onto the canvas. Shared by every format. */
-  const compose = async (index: number): Promise<number> => {
-    const time = index * step;
-    // Edited time in, source time out. With no cuts this is from + time, which
-    // is exactly what it used to be.
-    const sourceTime = sourceTimeAt(cuts, from, to, time);
-    await seekTo(project.video, Math.min(project.duration - 1e-3, sourceTime));
-    if (project.camera) {
-      await seekTo(project.camera, Math.min(Math.max(0, project.camera.duration - 1e-3), sourceTime)).catch(() => {});
-    }
-    // The zoom track and the cursor are both in source time.
-    drawFrame(context, project, sourceTime, zoomAt(track, sourceTime), cursorTrack.length ? sampleAt(cursorTrack, sourceTime) : null);
-    return time;
-  };
+  /**
+   * Frames straight from a decoder walking the file, when that is possible.
+   *
+   * Null means this browser or this file cannot do it, and every frame is
+   * fetched by seeking the element instead. That is the old behaviour and it
+   * still produces the same picture, just far more slowly.
+   */
+  let source: FrameSource | null = null;
+  if (project.source instanceof Blob) {
+    source = await openFrameSource(project.source);
+  }
 
-  // ------------------------------------------------------------------ GIF
-  if (project.format === 'gif') {
-    const frames: GifFrame[] = [];
-    const delay = Math.max(2, Math.round(100 / project.frameRate));
+  try {
+    /** Composes one frame onto the canvas. Shared by every format. */
+    const compose = async (index: number): Promise<number> => {
+      const time = index * step;
+      // Edited time in, source time out. With no cuts this is from + time, which
+      // is exactly what it used to be.
+      const sourceTime = sourceTimeAt(cuts, from, to, time);
+
+      let decoded: VideoFrame | null = null;
+      if (source) {
+        decoded = await source.frameAt(sourceTime);
+        // A source that stops producing has hit something it cannot decode. The
+        // seeking path picks up from here rather than the export failing.
+        if (!decoded) { source.close(); source = null; }
+      }
+      if (!decoded) {
+        await seekTo(project.video, Math.min(project.duration - 1e-3, sourceTime));
+      }
+      if (project.camera) {
+        await seekTo(project.camera, Math.min(Math.max(0, project.camera.duration - 1e-3), sourceTime)).catch(() => {});
+      }
+
+      // The zoom track and the cursor are both in source time.
+      const frameProject = decoded ? { ...project, frame: decoded } : project;
+      drawFrame(context, frameProject, sourceTime, zoomAt(track, sourceTime), cursorTrack.length ? sampleAt(cursorTrack, sourceTime) : null);
+      return time;
+    };
+
+    // ------------------------------------------------------------------ GIF
+    if (project.format === 'gif') {
+      const frames: GifFrame[] = [];
+      const delay = Math.max(2, Math.round(100 / project.frameRate));
+
+      for (let index = 0; index < total; index += 1) {
+        if (signal.aborted) throw new RenderError('Cancelled.');
+        await compose(index);
+        frames.push({ pixels: context.getImageData(0, 0, size.width, size.height).data, delay });
+        if (index % 4 === 0 || index === total - 1) onProgress({ stage: 'Rendering', done: index + 1, total });
+      }
+
+      onProgress({ stage: 'Building the GIF', done: total, total });
+      const bytes = encodeGif(frames, {
+        width: size.width,
+        height: size.height,
+        colours: Math.max(2, Math.min(256, project.gifColours)),
+        dither: true,
+      });
+      return {
+        blob: new Blob([bytes as unknown as BlobPart], { type: 'image/gif' }),
+        frames: total,
+        hasAudio: false,
+        extension: 'gif',
+        note: 'A GIF has no sound and at most 256 colours a frame.',
+      };
+    }
+
+    // ------------------------------------------------------------------ video
+    if (typeof VideoEncoder === 'undefined') {
+      throw new RenderError('This browser does not offer WebCodecs, so video cannot be encoded here.');
+    }
+
+    const wantsMp4 = project.format === 'mp4';
+    const codec = wantsMp4
+      ? await h264Codec(size.width, size.height)
+      : ((await VideoEncoder.isConfigSupported({
+          codec: 'vp09.00.10.08', width: size.width, height: size.height, bitrate: project.bitrate, framerate: project.frameRate,
+        })).supported ? 'vp09.00.10.08' : 'vp8');
+
+    if (!codec) {
+      throw new RenderError('This browser cannot encode H.264 at that size, so MP4 is not available. WebM will work.');
+    }
+
+    const chunks: { data: Uint8Array; timestamp: number; duration: number; keyframe: boolean }[] = [];
+    let description: Uint8Array | undefined;
+    let failure: Error | null = null;
+
+    const encoder = new VideoEncoder({
+      output: (chunk, metadata) => {
+        // MP4 needs the avcC record, which only arrives with the first chunk.
+        const config: unknown = metadata?.decoderConfig?.description;
+        if (config && !description) {
+          description = config instanceof ArrayBuffer
+            ? new Uint8Array(config)
+            : ArrayBuffer.isView(config)
+              ? new Uint8Array(config.buffer as ArrayBuffer, config.byteOffset, config.byteLength)
+              : undefined;
+        }
+        const data = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(data);
+        chunks.push({
+          data,
+          timestamp: chunk.timestamp,
+          duration: chunk.duration ?? Math.round(1_000_000 / project.frameRate),
+          keyframe: chunk.type === 'key',
+        });
+      },
+      error: (error) => { failure = error; },
+    });
+
+    encoder.configure({
+      codec,
+      width: size.width,
+      height: size.height,
+      bitrate: project.bitrate,
+      framerate: project.frameRate,
+      latencyMode: 'quality',
+      // Asking for the avc format is what makes the encoder hand back an avcC
+      // record. The alternative, annex B, carries its parameters inline and
+      // cannot be put in an MP4 without being rewritten.
+      ...(wantsMp4 ? { avc: { format: 'avc' as const } } : {}),
+    });
+
+    const durationUs = Math.round(1_000_000 / project.frameRate);
+    const keyframeEvery = Math.max(1, Math.round(project.frameRate * 2));
 
     for (let index = 0; index < total; index += 1) {
-      if (signal.aborted) throw new RenderError('Cancelled.');
-      await compose(index);
-      frames.push({ pixels: context.getImageData(0, 0, size.width, size.height).data, delay });
+      if (signal.aborted) { encoder.close(); throw new RenderError('Cancelled.'); }
+      if (failure) { encoder.close(); throw failure; }
+
+      const time = await compose(index);
+      const frame = new VideoFrame(canvas, { timestamp: Math.round(time * 1_000_000), duration: durationUs });
+      try {
+        encoder.encode(frame, { keyFrame: index % keyframeEvery === 0 });
+      } finally {
+        frame.close();
+      }
+
+      if (encoder.encodeQueueSize > 8) await new Promise((resolve) => setTimeout(resolve, 8));
       if (index % 4 === 0 || index === total - 1) onProgress({ stage: 'Rendering', done: index + 1, total });
     }
 
-    onProgress({ stage: 'Building the GIF', done: total, total });
-    const bytes = encodeGif(frames, {
-      width: size.width,
-      height: size.height,
-      colours: Math.max(2, Math.min(256, project.gifColours)),
-      dither: true,
-    });
-    return {
-      blob: new Blob([bytes as unknown as BlobPart], { type: 'image/gif' }),
-      frames: total,
-      hasAudio: false,
-      extension: 'gif',
-      note: 'A GIF has no sound and at most 256 colours a frame.',
-    };
-  }
+    await encoder.flush();
+    encoder.close();
+    if (failure) throw failure;
 
-  // ------------------------------------------------------------------ video
-  if (typeof VideoEncoder === 'undefined') {
-    throw new RenderError('This browser does not offer WebCodecs, so video cannot be encoded here.');
-  }
+    // ------------------------------------------------------------------ sound
+    let audio: Awaited<ReturnType<typeof encodeOpus>> = null;
+    let note: string | null = null;
 
-  const wantsMp4 = project.format === 'mp4';
-  const codec = wantsMp4
-    ? await h264Codec(size.width, size.height)
-    : ((await VideoEncoder.isConfigSupported({
-        codec: 'vp09.00.10.08', width: size.width, height: size.height, bitrate: project.bitrate, framerate: project.frameRate,
-      })).supported ? 'vp09.00.10.08' : 'vp8');
-
-  if (!codec) {
-    throw new RenderError('This browser cannot encode H.264 at that size, so MP4 is not available. WebM will work.');
-  }
-
-  const chunks: { data: Uint8Array; timestamp: number; duration: number; keyframe: boolean }[] = [];
-  let description: Uint8Array | undefined;
-  let failure: Error | null = null;
-
-  const encoder = new VideoEncoder({
-    output: (chunk, metadata) => {
-      // MP4 needs the avcC record, which only arrives with the first chunk.
-      const config: unknown = metadata?.decoderConfig?.description;
-      if (config && !description) {
-        description = config instanceof ArrayBuffer
-          ? new Uint8Array(config)
-          : ArrayBuffer.isView(config)
-            ? new Uint8Array(config.buffer as ArrayBuffer, config.byteOffset, config.byteLength)
-            : undefined;
-      }
-      const data = new Uint8Array(chunk.byteLength);
-      chunk.copyTo(data);
-      chunks.push({
-        data,
-        timestamp: chunk.timestamp,
-        duration: chunk.duration ?? Math.round(1_000_000 / project.frameRate),
-        keyframe: chunk.type === 'key',
-      });
-    },
-    error: (error) => { failure = error; },
-  });
-
-  encoder.configure({
-    codec,
-    width: size.width,
-    height: size.height,
-    bitrate: project.bitrate,
-    framerate: project.frameRate,
-    latencyMode: 'quality',
-    // Asking for the avc format is what makes the encoder hand back an avcC
-    // record. The alternative, annex B, carries its parameters inline and
-    // cannot be put in an MP4 without being rewritten.
-    ...(wantsMp4 ? { avc: { format: 'avc' as const } } : {}),
-  });
-
-  const durationUs = Math.round(1_000_000 / project.frameRate);
-  const keyframeEvery = Math.max(1, Math.round(project.frameRate * 2));
-
-  for (let index = 0; index < total; index += 1) {
-    if (signal.aborted) { encoder.close(); throw new RenderError('Cancelled.'); }
-    if (failure) { encoder.close(); throw failure; }
-
-    const time = await compose(index);
-    const frame = new VideoFrame(canvas, { timestamp: Math.round(time * 1_000_000), duration: durationUs });
-    try {
-      encoder.encode(frame, { keyFrame: index % keyframeEvery === 0 });
-    } finally {
-      frame.close();
+    if (project.keepAudio && project.source) {
+      onProgress({ stage: 'Encoding the sound', done: 0, total: 1 });
+      // The kept pieces, so the sound skips exactly what the picture skips.
+      audio = await encodeOpus(project.source, { start: from, end: to, track: 2, spans: keptSpans(cuts, from, to) });
+      if (!audio) note = 'No sound was found in the recording, so this is silent.';
     }
 
-    if (encoder.encodeQueueSize > 8) await new Promise((resolve) => setTimeout(resolve, 8));
-    if (index % 4 === 0 || index === total - 1) onProgress({ stage: 'Rendering', done: index + 1, total });
-  }
+    onProgress({ stage: 'Writing the file', done: total, total });
 
-  await encoder.flush();
-  encoder.close();
-  if (failure) throw failure;
+    if (wantsMp4) {
+      if (!description) throw new RenderError('The encoder gave no configuration record, so an MP4 cannot be written.');
 
-  // ------------------------------------------------------------------ sound
-  let audio: Awaited<ReturnType<typeof encodeOpus>> = null;
-  let note: string | null = null;
+      const tracks: Mp4Track[] = [{
+        kind: 'video', description, width: size.width, height: size.height, frameRate: project.frameRate,
+      }];
+      const samples: Mp4Sample[] = chunks.map((chunk) => ({
+        track: 1, timestamp: chunk.timestamp, duration: chunk.duration, data: chunk.data, keyframe: chunk.keyframe,
+      }));
 
-  if (project.keepAudio && project.source) {
-    onProgress({ stage: 'Encoding the sound', done: 0, total: 1 });
-    // The kept pieces, so the sound skips exactly what the picture skips.
-    audio = await encodeOpus(project.source, { start: from, end: to, track: 2, spans: keptSpans(cuts, from, to) });
-    if (!audio) note = 'No sound was found in the recording, so this is silent.';
-  }
+      if (audio) {
+        // Opus in MP4 is standardised and plays in Chrome, Edge and Firefox, but
+        // Safari will show the picture and stay silent. Saying so is better than
+        // letting someone find out after they have sent it to somebody.
+        tracks.push({
+          kind: 'audio', description: audio.track.kind === 'audio' ? audio.track.codecPrivate ?? new Uint8Array(0) : new Uint8Array(0),
+          codec: 'opus', sampleRate: 48000, channels: audio.track.kind === 'audio' ? audio.track.channels : 2,
+        });
+        for (const sample of alignToZero(audio.samples)) {
+          samples.push({ track: 2, timestamp: sample.timestamp, duration: 20_000, data: sample.data, keyframe: true });
+        }
+        note = 'The sound is Opus, which most players handle but Safari does not. Use WebM if it has to play everywhere.';
+      }
 
-  onProgress({ stage: 'Writing the file', done: total, total });
+      const file = muxMp4({ tracks }, samples);
+      return {
+        blob: new Blob([file as unknown as BlobPart], { type: 'video/mp4' }),
+        frames: total, hasAudio: audio !== null, extension: 'mp4', note,
+      };
+    }
 
-  if (wantsMp4) {
-    if (!description) throw new RenderError('The encoder gave no configuration record, so an MP4 cannot be written.');
+    const videoTrack: WebmTrack = {
+      kind: 'video',
+      codec: codec.startsWith('vp09') ? 'V_VP9' : 'V_VP8',
+      width: size.width,
+      height: size.height,
+      frameDuration: Math.round(1_000_000_000 / project.frameRate),
+    };
 
-    const tracks: Mp4Track[] = [{
-      kind: 'video', description, width: size.width, height: size.height, frameRate: project.frameRate,
-    }];
-    const samples: Mp4Sample[] = chunks.map((chunk) => ({
-      track: 1, timestamp: chunk.timestamp, duration: chunk.duration, data: chunk.data, keyframe: chunk.keyframe,
+    const tracks: WebmTrack[] = [videoTrack];
+    const all: WebmSample[] = chunks.map((chunk) => ({
+      track: 1, timestamp: chunk.timestamp, data: chunk.data, keyframe: chunk.keyframe,
     }));
 
     if (audio) {
-      // Opus in MP4 is standardised and plays in Chrome, Edge and Firefox, but
-      // Safari will show the picture and stay silent. Saying so is better than
-      // letting someone find out after they have sent it to somebody.
-      tracks.push({
-        kind: 'audio', description: audio.track.kind === 'audio' ? audio.track.codecPrivate ?? new Uint8Array(0) : new Uint8Array(0),
-        codec: 'opus', sampleRate: 48000, channels: audio.track.kind === 'audio' ? audio.track.channels : 2,
-      });
-      for (const sample of alignToZero(audio.samples)) {
-        samples.push({ track: 2, timestamp: sample.timestamp, duration: 20_000, data: sample.data, keyframe: true });
-      }
-      note = 'The sound is Opus, which most players handle but Safari does not. Use WebM if it has to play everywhere.';
+      tracks.push(audio.track);
+      all.push(...alignToZero(audio.samples));
     }
 
-    const file = muxMp4({ tracks }, samples);
+    const file = muxWebm({ tracks, writingApp: 'Limelight on alexmerced.app' }, all);
     return {
-      blob: new Blob([file as unknown as BlobPart], { type: 'video/mp4' }),
-      frames: total, hasAudio: audio !== null, extension: 'mp4', note,
+      blob: new Blob([file as unknown as BlobPart], { type: 'video/webm' }),
+      frames: total, hasAudio: audio !== null, extension: 'webm', note,
     };
+  } finally {
+    // A VideoFrame holds a hardware buffer until it is closed, and the
+    // decoder holds more, so this matters even on the paths that threw.
+    source?.close();
   }
-
-  const videoTrack: WebmTrack = {
-    kind: 'video',
-    codec: codec.startsWith('vp09') ? 'V_VP9' : 'V_VP8',
-    width: size.width,
-    height: size.height,
-    frameDuration: Math.round(1_000_000_000 / project.frameRate),
-  };
-
-  const tracks: WebmTrack[] = [videoTrack];
-  const all: WebmSample[] = chunks.map((chunk) => ({
-    track: 1, timestamp: chunk.timestamp, data: chunk.data, keyframe: chunk.keyframe,
-  }));
-
-  if (audio) {
-    tracks.push(audio.track);
-    all.push(...alignToZero(audio.samples));
-  }
-
-  const file = muxWebm({ tracks, writingApp: 'Limelight on alexmerced.app' }, all);
-  return {
-    blob: new Blob([file as unknown as BlobPart], { type: 'video/webm' }),
-    frames: total, hasAudio: audio !== null, extension: 'webm', note,
-  };
 }
 
 /** An image source's own dimensions, whichever kind of source it is. */
