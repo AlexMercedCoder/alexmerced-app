@@ -2,6 +2,7 @@ import { createId } from '../../lib/id';
 import { Collection, openDatabase } from '../../lib/idb';
 import { readPref, writePref } from '../../lib/prefs';
 import type { ClickSample, PointerSample } from './attention';
+import type { KeySample, MarkSample } from './capture';
 import {
   CAMERA_SHAPES, defaultComposition, FULL_CROP, reviveCrop,
   type CameraShape, type Composition, type Crop,
@@ -13,6 +14,9 @@ import {
 import { reviveTexts, type TextBlock } from './text';
 import { reviveBlocks, type ZoomBlock } from './zooms';
 import { mergeSpans, type Span } from './waveform';
+import { Scratch, type ScratchChunk, type ScratchSession } from './scratch';
+
+export type { ScratchSession } from './scratch';
 
 /**
  * Reads cuts back from storage.
@@ -43,7 +47,7 @@ export const APP_ID = 'limelight';
 export const APP_VERSION = 1;
 
 const DB_NAME = 'limelight';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const SETTINGS_KEY = 'limelight:settings';
 const CURRENT_KEY = 'limelight:current';
 
@@ -108,6 +112,10 @@ export type Project = {
   hasAudio: boolean;
   pointer: PointerSample[];
   clicks: ClickSample[];
+  /** Shortcuts pressed during the recording, drawn on the finished frame. */
+  keys: KeySample[];
+  /** Marked moments, which become chapters. */
+  marks: MarkSample[];
   /** Where the export begins and ends, in seconds. */
   start: number;
   end: number;
@@ -248,6 +256,8 @@ export function reviveProject(value: unknown): Project | null {
     zooms: reviveBlocks(project.zooms),
     texts: reviveTexts(project.texts),
     cuts: reviveCuts(project.cuts),
+    keys: Array.isArray(project.keys) ? (project.keys as KeySample[]) : [],
+    marks: Array.isArray(project.marks) ? (project.marks as MarkSample[]) : [],
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
     settings: reviveSettings(project.settings),
     createdAt: typeof project.createdAt === 'string' ? project.createdAt : stamp,
@@ -257,9 +267,9 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'crop' | 'wallpaper' | 'wallpaperMime'>
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>
     & Partial<Pick<Project,
-      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
+      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -269,6 +279,8 @@ export function createProject(
     zooms: [],
     texts: [],
     cuts: [],
+    keys: [],
+    marks: [],
     keyframes: null,
     crop: { ...FULL_CROP },
     wallpaper: null,
@@ -299,6 +311,9 @@ function db(): Promise<IDBDatabase> {
     database = openDatabase(DB_NAME, DB_VERSION, [
       { name: 'projects', keyPath: 'id' },
       { name: 'looks', keyPath: 'id' },
+      // Chunks of a recording still being made, plus what is known about it.
+      { name: 'scratch', keyPath: 'id' },
+      { name: 'scratchSessions', keyPath: 'id' },
     ]);
   }
   return database;
@@ -314,6 +329,19 @@ async function connectLooks(): Promise<Collection<Look>> {
   if (looks) return looks;
   looks = new Collection<Look>(await db(), 'looks');
   return looks;
+}
+
+let scratch: Scratch | null = null;
+
+/** The safety net a recording is written into while it is being made. */
+export async function openScratch(): Promise<Scratch> {
+  if (scratch) return scratch;
+  const handle = await db();
+  scratch = new Scratch(
+    new Collection<ScratchChunk>(handle, 'scratch'),
+    new Collection<ScratchSession>(handle, 'scratchSessions'),
+  );
+  return scratch;
 }
 
 /**
@@ -410,8 +438,49 @@ export async function loadProject(id: string): Promise<Project | null> {
   return reviveProject(await store.get(id));
 }
 
+export class StorageFullError extends Error {}
+
+/**
+ * What the browser will let this origin keep, and what is already used.
+ *
+ * Both numbers are estimates and a browser is free to refuse a write anyway, so
+ * this informs rather than decides. Some browsers do not implement it at all,
+ * which reads as unknown rather than as full.
+ */
+export async function storageRoom(): Promise<{ used: number; quota: number } | null> {
+  const estimate = navigator.storage?.estimate;
+  if (typeof estimate !== 'function') return null;
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (typeof usage !== 'number' || typeof quota !== 'number') return null;
+    return { used: usage, quota };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Saves a project, turning a full disk into something the caller can act on.
+ *
+ * A refused write used to reject with whatever the browser threw and the
+ * recording was simply gone. Recognising it as a distinct condition is what
+ * lets the page offer to make room instead.
+ */
 export async function saveProject(project: Project): Promise<void> {
-  await (await connect()).put({ ...project, updatedAt: new Date().toISOString() });
+  try {
+    await (await connect()).put({ ...project, updatedAt: new Date().toISOString() });
+  } catch (error) {
+    const name = (error as { name?: string } | null)?.name ?? '';
+    if (name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+      throw new StorageFullError('There is no room left in this browser to keep the recording.');
+    }
+    throw error;
+  }
+}
+
+/** The projects that could be removed to make room, oldest first. */
+export async function oldestProjects(): Promise<Project[]> {
+  return (await loadProjects()).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
 }
 
 export async function deleteProject(id: string): Promise<void> { await (await connect()).delete(id); }

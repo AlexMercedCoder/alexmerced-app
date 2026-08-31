@@ -19,6 +19,50 @@ export class CaptureError extends Error {}
 
 export type Source = 'screen' | 'tab';
 
+/** A key combination as it was pressed, ready to be drawn. */
+export type KeySample = { time: number; label: string };
+
+/** A moment somebody marked while recording, for chapters. */
+export type MarkSample = { time: number; label: string };
+
+/**
+ * Turns a keyboard event into what should be shown on screen.
+ *
+ * Modifiers are named the way the platform names them, and a plain letter with
+ * no modifier is left out by the caller: showing every character somebody types
+ * would be both noisy and a good way to put a password in a video.
+ */
+export function keyLabel(event: KeyboardEvent): string {
+  const apple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+  const parts: string[] = [];
+  if (event.ctrlKey) parts.push(apple ? '\u2303' : 'Ctrl');
+  if (event.altKey) parts.push(apple ? '\u2325' : 'Alt');
+  if (event.shiftKey) parts.push(apple ? '\u21e7' : 'Shift');
+  if (event.metaKey) parts.push(apple ? '\u2318' : 'Meta');
+
+  const named: Record<string, string> = {
+    ' ': 'Space', ArrowUp: '\u2191', ArrowDown: '\u2193', ArrowLeft: '\u2190', ArrowRight: '\u2192',
+    Enter: '\u21b5', Backspace: '\u232b', Escape: 'Esc', Tab: '\u21e5', Delete: 'Del',
+  };
+  const key = named[event.key] ?? (event.key.length === 1 ? event.key.toUpperCase() : event.key);
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return parts.join(' ');
+  parts.push(key);
+  return parts.join(' ');
+}
+
+/**
+ * Whether a keypress is worth showing.
+ *
+ * Plain typing is not: it is noise, and a recording that draws every character
+ * somebody types is one password away from being unpublishable. Shortcuts are
+ * the point, so anything with a modifier other than shift, or a named key,
+ * counts.
+ */
+export function worthShowing(event: KeyboardEvent): boolean {
+  if (event.ctrlKey || event.altKey || event.metaKey) return true;
+  return event.key.length > 1 && event.key !== 'Shift' && event.key !== 'Unidentified';
+}
+
 export type Recording = {
   blob: Blob;
   duration: number;
@@ -27,6 +71,10 @@ export type Recording = {
   /** Present only when the recording was of this page. */
   pointer: PointerSample[];
   clicks: ClickSample[];
+  /** Shortcuts pressed during the recording, for teaching videos. */
+  keys: KeySample[];
+  /** Moments marked while recording, which become chapters. */
+  marks: MarkSample[];
   /** A separate camera recording, when one was made. */
   camera: Blob | null;
   hasAudio: boolean;
@@ -116,6 +164,17 @@ export type CaptureOptions = {
   cameraBlur?: boolean;
   onTick: (seconds: number) => void;
   /**
+   * Called with each chunk as it arrives, roughly once a second.
+   *
+   * This is how a recording gets written down before it is finished. Capture
+   * stays unaware of where that is: it hands over the bytes and the caller
+   * decides. Deliberately not awaited, because a slow write must never stall
+   * the recorder or lose the chunk after it.
+   */
+  onChunk?: (kind: 'screen' | 'camera', seq: number, blob: Blob) => void;
+  /** Called when a chapter is marked, so the page can acknowledge it. */
+  onMark?: (count: number) => void;
+  /**
    * Called once everything is acquired and before the first frame is kept.
    *
    * The countdown belongs here rather than before the share dialog: counting
@@ -140,6 +199,8 @@ export class Session {
   private timer = 0;
   private readonly pointer: PointerSample[] = [];
   private readonly clicks: ClickSample[] = [];
+  private readonly keys: KeySample[] = [];
+  private readonly marks: MarkSample[] = [];
   private tracking = false;
   private width = 0;
   private height = 0;
@@ -203,7 +264,11 @@ export class Session {
     const mime = recordingMime();
     const combined = new MediaStream(tracks);
     this.recorder = new MediaRecorder(combined, mime ? { mimeType: mime, videoBitsPerSecond: 8_000_000 } : undefined);
-    this.recorder.ondataavailable = (event) => { if (event.data.size) this.chunks.push(event.data); };
+    this.recorder.ondataavailable = (event) => {
+      if (!event.data.size) return;
+      this.chunks.push(event.data);
+      this.options.onChunk?.('screen', this.chunks.length - 1, event.data);
+    };
 
     if (this.options.camera) {
       try {
@@ -220,7 +285,11 @@ export class Session {
         this.streams.push(camera);
         if (this.options.cameraBlur) this.blurred = await applyBackgroundBlur(camera);
         this.cameraRecorder = new MediaRecorder(camera, mime ? { mimeType: mime } : undefined);
-        this.cameraRecorder.ondataavailable = (event) => { if (event.data.size) this.cameraChunks.push(event.data); };
+        this.cameraRecorder.ondataavailable = (event) => {
+          if (!event.data.size) return;
+          this.cameraChunks.push(event.data);
+          this.options.onChunk?.('camera', this.cameraChunks.length - 1, event.data);
+        };
       } catch {
         this.cameraRecorder = null;
       }
@@ -232,7 +301,11 @@ export class Session {
     if (this.tracking) {
       window.addEventListener('pointermove', this.onPointerMove, { passive: true, capture: true });
       window.addEventListener('pointerdown', this.onPointerDown, { passive: true, capture: true });
+      window.addEventListener('keydown', this.onKeyDown, { capture: true });
     }
+    // Marking works whatever is being recorded, because it is a key pressed in
+    // this tab about the recording rather than a key pressed inside it.
+    window.addEventListener('keydown', this.onMarkKey, { capture: true });
 
     // Nothing has been kept yet, so a countdown here costs the recording nothing.
     await this.options.onReady?.();
@@ -252,6 +325,32 @@ export class Session {
     // Twenty samples a second is plenty for a path that will be smoothed.
     if (last && time - last.time < 0.05) return;
     this.pointer.push({ time, x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight });
+  };
+
+  private readonly onKeyDown = (event: KeyboardEvent) => {
+    if (!worthShowing(event)) return;
+    const label = keyLabel(event);
+    if (!label) return;
+    const time = (performance.now() - this.startedAt) / 1000;
+    const last = this.keys[this.keys.length - 1];
+    // A held key repeats; showing the same combination forty times is not
+    // informative and looks broken.
+    if (last && last.label === label && time - last.time < 0.4) return;
+    this.keys.push({ time, label });
+  };
+
+  /** M marks a chapter. Ignored while typing, so it cannot eat a keystroke. */
+  private readonly onMarkKey = (event: KeyboardEvent) => {
+    if (event.key !== 'm' && event.key !== 'M') return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+    if (target?.isContentEditable) return;
+    this.marks.push({
+      time: (performance.now() - this.startedAt) / 1000,
+      label: `Chapter ${this.marks.length + 1}`,
+    });
+    this.options.onMark?.(this.marks.length);
   };
 
   private readonly onPointerDown = (event: PointerEvent) => {
@@ -287,6 +386,8 @@ export class Session {
       height: this.height,
       pointer: [...this.pointer],
       clicks: [...this.clicks],
+      keys: [...this.keys],
+      marks: [...this.marks],
       camera: this.cameraChunks.length ? new Blob(this.cameraChunks, { type: mime }) : null,
       hasAudio: this.audio,
     };
@@ -300,9 +401,12 @@ export class Session {
 
   private cleanup(): void {
     window.clearInterval(this.timer);
+    // Registered whatever was being recorded, so removed unconditionally.
+    window.removeEventListener('keydown', this.onMarkKey, { capture: true });
     if (this.tracking) {
       window.removeEventListener('pointermove', this.onPointerMove, { capture: true });
       window.removeEventListener('pointerdown', this.onPointerDown, { capture: true });
+      window.removeEventListener('keydown', this.onKeyDown, { capture: true });
       this.tracking = false;
     }
     // Releasing the tracks is what turns the browser's recording indicator off

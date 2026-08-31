@@ -1,10 +1,11 @@
 import { formatBytes } from '../../lib/bytes';
+import { createId } from '../../lib/id';
 import { downloadBlob } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { registerTools } from '../../lib/webmcp';
 import type { Interest } from './attention';
 import {
-  canCapture, CaptureError, listDevices, Session,
+  canCapture, CaptureError, listDevices, recordingMime, Session,
   type CaptureDevice, type Recording, type Source,
 } from './capture';
 import {
@@ -21,8 +22,9 @@ import {
 } from './render';
 import {
   applyLook, createProject, deleteLook, deleteProject, loadCurrentId, loadLooks, loadProject,
-  loadProjects, loadSettings, lookFrom, saveCurrentId, saveLook, saveProject, saveSettings,
-  storedBytes, type Look, type Project as StoredProject, type Settings,
+  loadProjects, loadSettings, lookFrom, oldestProjects, openScratch, saveCurrentId, saveLook,
+  saveProject, saveSettings, storageRoom, StorageFullError, storedBytes,
+  type Look, type Project as StoredProject, type ScratchSession, type Settings,
 } from './store';
 import {
   addText, constrainText, duplicateText, MIN_TEXT, removeText, splitText, updateText,
@@ -360,6 +362,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         recordButton.textContent = 'Record';
         recordButton.classList.remove('is-recording');
         clockEl.textContent = '';
+        // Kept properly now, so the safety net is no longer needed.
+        void openScratch().then((net) => net.discardAll()).catch(() => {});
         // Permission has now been granted at least once, so the devices have
         // real names to show instead of "Microphone 1".
         void renderDevices();
@@ -368,8 +372,23 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
 
     const source = ($<HTMLInputElement>('ll-source-tab').checked ? 'tab' : 'screen') as Source;
+    // A fresh safety net for this recording. Anything left from a previous one
+    // has either been kept or already offered back, so it goes now.
+    const scratchId = createId('take');
+    const net = await openScratch().catch(() => null);
+    await net?.discardAll().catch(() => {});
+    await net?.begin({
+      id: scratchId,
+      startedAt: new Date().toISOString(),
+      mime: recordingMime() || 'video/webm',
+    }).catch(() => {});
+
     session = new Session({
       source,
+      onChunk: (kind, seq, blob) => {
+        // Not awaited on purpose: the recorder must not wait for a disk write.
+        void net?.append(scratchId, kind, seq, blob).catch(() => {});
+      },
       microphone: $<HTMLInputElement>('ll-mic').checked,
       systemAudio: $<HTMLInputElement>('ll-system-audio').checked,
       camera: $<HTMLInputElement>('ll-camera').checked,
@@ -416,12 +435,48 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       hasAudio: result.hasAudio,
       pointer: result.pointer,
       clicks: result.clicks,
+      keys: result.keys,
+      marks: result.marks,
       settings,
     });
     stored = project;
     saveCurrentId(project.id);
-    await saveProject(project);
+    await saveWithRoom(project);
     await renderProjects();
+  }
+
+  /**
+   * Saves a project, and offers to make room when there is none.
+   *
+   * A refused write is a lost recording, so it is worth interrupting somebody
+   * over. The offer names the oldest project rather than clearing everything,
+   * because the alternative to losing this recording should not be losing all
+   * of the previous ones.
+   */
+  async function saveWithRoom(project: StoredProject): Promise<void> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await saveProject(project);
+        return;
+      } catch (error) {
+        if (!(error instanceof StorageFullError)) throw error;
+        const candidates = (await oldestProjects()).filter((entry) => entry.id !== project.id);
+        if (candidates.length === 0) {
+          setStatus('There is no room left in this browser, and nothing older to remove.', 'bad');
+          throw error;
+        }
+        const oldest = candidates[0];
+        const size = oldest.bytes.length + (oldest.cameraBytes?.length ?? 0);
+        const room = confirm(
+          `There is no room left to keep this recording.\n\n`
+          + `Remove the oldest one, "${oldest.name}" (${formatBytes(size)}), to make space?`,
+        );
+        if (!room) throw error;
+        await deleteProject(oldest.id).catch(() => {});
+        toast(`Removed ${oldest.name} to make room.`);
+      }
+    }
+    throw new StorageFullError('There is still no room after clearing space.');
   }
 
   /** Reopens one that was stored earlier. */
@@ -446,6 +501,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       height: project.height,
       pointer: project.pointer,
       clicks: project.clicks,
+      keys: project.keys,
+      marks: project.marks,
       camera: project.cameraBytes ? new Blob([project.cameraBytes as unknown as BlobPart], { type: project.mime }) : null,
       hasAudio: project.hasAudio,
     }, { start: project.start, end: project.end });
@@ -606,7 +663,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   async function refreshStorage(): Promise<void> {
     const total = await storedBytes();
-    $<HTMLSpanElement>('ll-storage').textContent = total > 0 ? `${formatBytes(total)} of recordings kept here` : '';
+    const room = await storageRoom();
+    const parts: string[] = [];
+    if (total > 0) parts.push(`${formatBytes(total)} of recordings kept here`);
+    // Only worth mentioning the headroom once it is small enough to matter. A
+    // browser reporting tens of gigabytes free is noise.
+    if (room) {
+      const left = Math.max(0, room.quota - room.used);
+      if (left < 2_000_000_000) parts.push(`${formatBytes(left)} of room left`);
+    }
+    $<HTMLSpanElement>('ll-storage').textContent = parts.join(', ');
   }
 
   // ------------------------------------------------------------------ trim
@@ -2813,7 +2879,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     try {
       const opened: Recording = {
         blob: file, duration: 0, width: 0, height: 0,
-        pointer: [], clicks: [], camera: null, hasAudio: true,
+        pointer: [], clicks: [], keys: [], marks: [], camera: null, hasAudio: true,
       };
       await load(opened);
       // The size and length are only known once the browser has read the file,
@@ -2844,6 +2910,59 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   window.addEventListener('pagehide', () => { session?.cancel(); release(); });
 
+  /**
+   * Offers back a recording that was interrupted.
+   *
+   * A session with chunks written but never finished means the tab went away
+   * mid-recording. The chunks are a valid file: MediaRecorder writes a
+   * container that plays even when it was never closed properly, which is the
+   * whole reason writing them down as they arrive is worth doing.
+   */
+  async function offerRecovery(): Promise<void> {
+    const net = await openScratch().catch(() => null);
+    if (!net) return;
+    const orphans = await net.unfinished().catch((): ScratchSession[] => []);
+    if (orphans.length === 0) return;
+
+    const orphan = orphans[0];
+    const size = await net.bytes().catch(() => 0);
+    if (size === 0) { await net.discardAll().catch(() => {}); return; }
+
+    const when = new Date(orphan.startedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+    const wanted = confirm(
+      `A recording from ${when} was interrupted before it was saved. `
+      + `${formatBytes(size)} of it survived. Recover it?`,
+    );
+    if (!wanted) { await net.discardAll().catch(() => {}); return; }
+
+    const blob = await net.assemble(orphan.id, 'screen', orphan.mime).catch(() => null);
+    if (!blob) { await net.discardAll().catch(() => {}); return; }
+    const camera = await net.assemble(orphan.id, 'camera', orphan.mime).catch(() => null);
+
+    try {
+      // The duration is unknown, because the recording never ended cleanly.
+      // load() reads it back off the file itself, which it already does for any
+      // MediaRecorder output, since those often report no duration either.
+      const recovered: Recording = {
+        blob, camera, duration: 0, width: 0, height: 0,
+        pointer: [], clicks: [], keys: [], marks: [], hasAudio: true,
+      };
+      stored = null;
+      await load(recovered);
+      await keep({
+        ...recovered,
+        duration: recording?.duration ?? 0,
+        width: video?.videoWidth ?? 0,
+        height: video?.videoHeight ?? 0,
+        hasAudio: recording?.hasAudio ?? false,
+      }, `Recovered ${when}`);
+      await net.discardAll().catch(() => {});
+      setStatus('Recovered the interrupted recording.', 'good');
+    } catch {
+      setStatus('The interrupted recording could not be read back.', 'bad');
+    }
+  }
+
   renderControls();
   renderTransport();
   await describeFormat();
@@ -2854,6 +2973,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // Reopen whatever was last worked on, so a reload picks up where it left off.
   const last = loadCurrentId();
   if (last) await open(last).catch(() => {});
+
+  await offerRecovery();
 
   registerTools(limelightTools(
     () => ({
