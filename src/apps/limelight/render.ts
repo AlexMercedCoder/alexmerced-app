@@ -60,6 +60,13 @@ export type Project = {
   bitrate: number;
   showClicks: boolean;
   showCursor: boolean;
+  /** How large to draw the cursor, as a multiple of the default. */
+  cursorSize?: number;
+  /** Dims everything but a circle around the pointer. 0 is off. */
+  spotlight?: number;
+  /** Draws the shortcuts that were pressed. */
+  showKeys?: boolean;
+  keys?: { time: number; label: string }[];
   /** What to write. */
   format: OutputFormat;
   gifColours: number;
@@ -300,9 +307,32 @@ export function drawFrame(
     context.restore();
   }
 
+  // A spotlight dims everything but a circle around the pointer. Drawn before
+  // the cursor so the cursor itself stays bright inside it.
+  const spotlight = project.spotlight ?? 0;
+  if (spotlight > 0 && cursor) {
+    const at = project2(cursor.x, cursor.y);
+    if (at) {
+      const radius = Math.min(width, height) * 0.16;
+      const fade = context.createRadialGradient(at.x, at.y, radius * 0.55, at.x, at.y, radius * 1.7);
+      fade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      fade.addColorStop(1, `rgba(0, 0, 0, ${Math.min(0.85, spotlight)})`);
+      context.save();
+      context.fillStyle = fade;
+      context.fillRect(0, 0, width, height);
+      context.restore();
+    }
+  }
+
   if (project.showCursor && cursor) {
     const at = project2(cursor.x, cursor.y);
-    if (at) drawCursor(context, at.x, at.y, Math.min(width, height) * 0.022);
+    const scale = Math.max(0.5, Math.min(4, project.cursorSize ?? 1));
+    if (at) drawCursor(context, at.x, at.y, Math.min(width, height) * 0.022 * scale);
+  }
+
+  // ------------------------------------------------------------- keystrokes
+  if (project.showKeys && project.keys?.length) {
+    drawKeys(context, project.keys, time, width, height);
   }
 
   // ------------------------------------------------------------- camera
@@ -489,6 +519,57 @@ export function drawTexts(
 }
 
 /** The familiar arrow, drawn rather than taken from the frame. */
+/**
+ * Draws the shortcuts pressed around a moment.
+ *
+ * A short window rather than the whole recording, and stacked upwards so the
+ * most recent is nearest the bottom, which is where the eye already is when
+ * somebody is watching hands rather than reading.
+ */
+function drawKeys(
+  context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+  keys: { time: number; label: string }[],
+  time: number, width: number, height: number,
+): void {
+  const window = 1.6;
+  const recent = keys
+    .filter((key) => time - key.time >= 0 && time - key.time <= window)
+    .slice(-4)
+    .reverse();
+  if (recent.length === 0) return;
+
+  const size = Math.max(14, Math.round(Math.min(width, height) * 0.032));
+  const padX = size * 0.55;
+  const padY = size * 0.34;
+  const gap = size * 0.4;
+  context.save();
+  context.font = `600 ${size}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+  context.textBaseline = 'middle';
+
+  let bottom = height - Math.round(height * 0.06);
+  for (const key of recent) {
+    const age = (time - key.time) / window;
+    // Fades out over the last third of its life rather than vanishing.
+    context.globalAlpha = age > 0.66 ? Math.max(0, 1 - (age - 0.66) / 0.34) : 1;
+    const textWidth = context.measureText(key.label).width;
+    const boxWidth = textWidth + padX * 2;
+    const boxHeight = size + padY * 2;
+    const x = Math.round(width / 2 - boxWidth / 2);
+    const y = Math.round(bottom - boxHeight);
+
+    context.fillStyle = 'rgba(16, 16, 20, 0.82)';
+    context.fill(roundedPath({ x, y, width: boxWidth, height: boxHeight }, boxHeight * 0.28));
+    context.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    context.lineWidth = Math.max(1, size * 0.05);
+    context.stroke(roundedPath({ x, y, width: boxWidth, height: boxHeight }, boxHeight * 0.28));
+    context.fillStyle = '#f4f2ec';
+    context.fillText(key.label, x + padX, y + boxHeight / 2);
+
+    bottom = y - gap;
+  }
+  context.restore();
+}
+
 function drawCursor(
   context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
   x: number, y: number, size: number,

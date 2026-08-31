@@ -285,6 +285,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       bitrate: suggestBitrate(),
       showClicks: settings.showClicks,
       showCursor: settings.showCursor && recording.pointer.length > 0,
+      cursorSize: settings.cursorSize,
+      spotlight: recording.pointer.length > 0 ? settings.spotlight : 0,
+      showKeys: settings.showKeys,
+      keys: recording.keys,
       format: settings.format,
       gifColours: 128,
       keepAudio: settings.keepAudio && recording.hasAudio,
@@ -598,6 +602,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderTexts();
     renderSpeeds();
     renderRedactions();
+    renderChapters();
+    renderDestinations();
     await loadWaveform();
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
@@ -2528,6 +2534,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     ['ll-tilt-rotate', (value) => { settings.tilt.rotate = value; }, () => settings.tilt.rotate],
     ['ll-tilt-depth', (value) => { settings.tilt.depth = value; }, () => settings.tilt.depth],
     ['ll-motion-seconds', (value) => { settings.motion.seconds = value; }, () => settings.motion.seconds],
+    ['ll-cursor-size', (value) => { settings.cursorSize = value; }, () => settings.cursorSize],
+    ['ll-spotlight', (value) => { settings.spotlight = value; }, () => settings.spotlight],
   ];
   for (const [id, apply] of sliders) {
     const input = $<HTMLInputElement>(id);
@@ -2555,6 +2563,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     ['ll-zoom-on', (value) => { settings.zoom.enabled = value; }, () => settings.zoom.enabled],
     ['ll-clicks', (value) => { settings.showClicks = value; }, () => settings.showClicks],
     ['ll-cursor', (value) => { settings.showCursor = value; }, () => settings.showCursor],
+    ['ll-keys', (value) => { settings.showKeys = value; }, () => settings.showKeys],
     ['ll-camera-on', (value) => { settings.composition.camera.enabled = value; }, () => settings.composition.camera.enabled],
     ['ll-audio', (value) => { settings.keepAudio = value; }, () => settings.keepAudio],
   ];
@@ -2699,6 +2708,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       ['ll-tilt-rotate-out', `${Math.round(settings.tilt.rotate)}\u00b0`],
       ['ll-tilt-depth-out', `${Math.round(settings.tilt.depth * 100)}%`],
       ['ll-motion-seconds-out', `${settings.motion.seconds.toFixed(2)}s`],
+      ['ll-cursor-size-out', `${settings.cursorSize.toFixed(1)}x`],
+      ['ll-spotlight-out', settings.spotlight > 0 ? `${Math.round(settings.spotlight * 100)}%` : 'off'],
     ];
     for (const [id, text] of readouts) $<HTMLSpanElement>(id).textContent = text;
     $<HTMLSpanElement>('ll-bitrate-out').textContent = `${Math.round(suggestBitrate() / 1000)} kbps`;
@@ -2820,6 +2831,112 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     void drawPreview();
     void renderProjects();
   });
+
+  // ------------------------------------------------------------------ chapters
+
+  /**
+   * The moments marked during recording, as something to paste under a video.
+   *
+   * Marks are recorded as times; the names are added afterwards, because
+   * nobody types a chapter title while demonstrating something. YouTube wants
+   * the first one at zero, so one is added if the recording did not start with
+   * a mark.
+   */
+  function renderChapters(): void {
+    const card = $<HTMLElement>('ll-chapters-card');
+    const list = $<HTMLOListElement>('ll-chapters');
+    const marks = recording?.marks ?? [];
+    card.hidden = marks.length === 0;
+    list.innerHTML = '';
+
+    for (const [index, mark] of marks.entries()) {
+      const row = document.createElement('li');
+      const time = document.createElement('span');
+      time.className = 'll-time';
+      time.textContent = formatClock(mark.time);
+
+      const name = document.createElement('input');
+      name.type = 'text';
+      name.className = 'field';
+      name.value = mark.label;
+      name.setAttribute('aria-label', `Name of the chapter at ${formatClock(mark.time)}`);
+      name.addEventListener('input', () => {
+        if (!recording) return;
+        recording.marks[index] = { ...mark, label: name.value };
+        if (stored) { stored.marks = recording.marks; queueSave(); }
+      });
+
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'btn btn--sm btn--ghost';
+      go.textContent = 'Go';
+      go.addEventListener('click', () => seekTo(mark.time));
+
+      row.append(time, name, go);
+      list.append(row);
+    }
+  }
+
+  $<HTMLButtonElement>('ll-chapters-copy').addEventListener('click', async () => {
+    const marks = recording?.marks ?? [];
+    if (marks.length === 0) return;
+    const lines = marks.some((mark) => mark.time < 0.5)
+      ? []
+      : ['0:00 Start'];
+    for (const mark of marks) lines.push(`${formatClock(mark.time)} ${mark.label}`);
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      toast('Chapter list copied.');
+    } catch {
+      setStatus('The browser would not give access to the clipboard.', 'bad');
+    }
+  });
+
+  // ------------------------------------------------------------------ destinations
+
+  /**
+   * Where the video is going, as one action.
+   *
+   * The crop, the output size and the safe area are three settings that always
+   * move together for a given destination, and setting them separately is both
+   * tedious and easy to get half right.
+   */
+  const DESTINATIONS: { id: string; label: string; aspect: string; width: number; height: number }[] = [
+    { id: 'wide', label: 'Wide, 16:9', aspect: '16:9', width: 1920, height: 1080 },
+    { id: 'tall', label: 'Tall, 9:16', aspect: '9:16', width: 1080, height: 1920 },
+    { id: 'square', label: 'Square', aspect: '1:1', width: 1080, height: 1080 },
+  ];
+
+  function renderDestinations(): void {
+    const holder = $<HTMLDivElement>('ll-destinations');
+    holder.innerHTML = '';
+    for (const destination of DESTINATIONS) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn--sm ll-preset';
+      button.textContent = destination.label;
+      const active = settings.composition.width === destination.width
+        && settings.composition.height === destination.height;
+      button.setAttribute('aria-pressed', String(active));
+      button.addEventListener('click', () => {
+        if (!recording) return;
+        settings.composition.width = destination.width;
+        settings.composition.height = destination.height;
+        const ratio = CROP_ASPECTS.find((entry) => entry.id === destination.aspect);
+        if (ratio?.ratio) {
+          crop = cropToAspect(crop, ratio.ratio, video?.videoWidth || 1, video?.videoHeight || 1);
+        }
+        remember(`destination:${destination.id}`);
+        renderControls();
+        renderCrop();
+        renderDestinations();
+        void describeFormat();
+        void drawPreview();
+        toast(`Set up for ${destination.label.toLowerCase()}.`);
+      });
+      holder.append(button);
+    }
+  }
 
   // ------------------------------------------------------------------ looks
 
@@ -3355,6 +3472,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   renderControls();
   renderTransport();
+  renderDestinations();
   await describeFormat();
   await renderProjects();
   await renderDevices();

@@ -63,6 +63,12 @@ export type Settings = {
   frameRate: number;
   showClicks: boolean;
   showCursor: boolean;
+  /** How large the drawn cursor is, as a multiple of the default. */
+  cursorSize: number;
+  /** Dims everything but a circle around the pointer. 0 is off. */
+  spotlight: number;
+  /** Draws the shortcuts that were pressed, for teaching videos. */
+  showKeys: boolean;
   keepAudio: boolean;
   countdown: number;
   /** A blip on each number, so you do not have to be watching the screen. */
@@ -90,6 +96,9 @@ export const defaultSettings: Settings = {
   frameRate: 30,
   showClicks: true,
   showCursor: true,
+  cursorSize: 1,
+  spotlight: 0,
+  showKeys: true,
   keepAudio: true,
   countdown: 3,
   countdownSound: true,
@@ -155,7 +164,7 @@ export type Project = {
 export function reviveSettings(value: unknown): Settings {
   if (typeof value !== 'object' || value === null) return { ...defaultSettings };
   const stored = value as Partial<Settings>;
-  const flag = (key: 'showClicks' | 'showCursor' | 'keepAudio' | 'countdownSound' | 'cameraBlur') =>
+  const flag = (key: 'showClicks' | 'showCursor' | 'showKeys' | 'keepAudio' | 'countdownSound' | 'cameraBlur') =>
     typeof stored[key] === 'boolean' ? (stored[key] as boolean) : defaultSettings[key];
 
   return {
@@ -172,6 +181,9 @@ export function reviveSettings(value: unknown): Settings {
     frameRate: typeof stored.frameRate === 'number' && stored.frameRate > 0 ? stored.frameRate : 30,
     showClicks: flag('showClicks'),
     showCursor: flag('showCursor'),
+    showKeys: flag('showKeys'),
+    cursorSize: typeof stored.cursorSize === 'number' ? Math.max(0.5, Math.min(4, stored.cursorSize)) : 1,
+    spotlight: typeof stored.spotlight === 'number' ? Math.max(0, Math.min(1, stored.spotlight)) : 0,
     keepAudio: flag('keepAudio'),
     countdownSound: flag('countdownSound'),
     cameraBlur: flag('cameraBlur'),

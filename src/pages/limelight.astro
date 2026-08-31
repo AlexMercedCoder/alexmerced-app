@@ -233,6 +233,21 @@ const app = getApp('limelight');
 
       <div class="ll-editor" id="ll-editor" hidden>
         <section class="card ll-card">
+          <h2 class="ll-subhead">For</h2>
+          <p class="ll-note">Sets the shape and the output size together, and shows what will be cut off.</p>
+          <div class="ll-presets" id="ll-destinations"></div>
+        </section>
+
+        <section class="card ll-card" id="ll-chapters-card" hidden>
+          <h2 class="ll-subhead">Chapters</h2>
+          <p class="ll-note">Press <kbd>M</kbd> while recording to mark a moment. These are what you paste under a video.</p>
+          <ol class="ll-chapters" id="ll-chapters"></ol>
+          <div class="ll-scrubrow">
+            <button class="btn btn--sm" id="ll-chapters-copy">Copy the list</button>
+          </div>
+        </section>
+
+        <section class="card ll-card">
           <h2 class="ll-subhead">Looks</h2>
           <p class="ll-note">
             The background, padding, shadow, tilt, entrance and zoom defaults, saved under
@@ -285,6 +300,9 @@ const app = getApp('limelight');
           <label class="ll-slider"><span>How fast it moves</span><input type="range" id="ll-zoom-move" min="0.15" max="1.5" step="0.05" /><em id="ll-zoom-move-out"></em></label>
           <label class="ll-check"><input type="checkbox" id="ll-clicks" /><span>Show a ripple where you clicked</span></label>
           <label class="ll-check"><input type="checkbox" id="ll-cursor" /><span>Draw a smoothed cursor</span></label>
+          <label class="ll-slider"><span>Cursor size</span><input type="range" id="ll-cursor-size" min="0.5" max="4" step="0.1" /><em id="ll-cursor-size-out"></em></label>
+          <label class="ll-slider"><span>Spotlight</span><input type="range" id="ll-spotlight" min="0" max="1" step="0.05" /><em id="ll-spotlight-out"></em></label>
+          <label class="ll-check"><input type="checkbox" id="ll-keys" /><span>Show the keys I pressed</span></label>
           <p class="ll-note">The cursor and the ripples need a pointer track, so they only appear when you recorded this tab.</p>
         </section>
 
@@ -448,6 +466,10 @@ const app = getApp('limelight');
   .ll-vol { display: inline-flex; align-items: center; gap: 0.3rem; }
   .ll-vol input { width: 5rem; }
   .ll-vol[hidden] { display: none; }
+  .ll-chapters { list-style: none; margin: 0 0 0.7rem; padding: 0; display: grid; gap: 0.35rem; }
+  .ll-chapters li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
+  .ll-chapters .ll-time { min-width: 3.4rem; }
+  .ll-chapters input { min-width: 0; }
   .ll-speedtrack .ll-zoom { background: color-mix(in srgb, #2f6b9f 30%, transparent); border-color: #2f6b9f; }
   .ll-redacttrack .ll-zoom { background: color-mix(in srgb, #a3312a 30%, transparent); border-color: #a3312a; }
   .ll-speed-pick { max-width: 18rem; }
