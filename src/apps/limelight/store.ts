@@ -18,6 +18,8 @@ import { Scratch, type ScratchChunk, type ScratchSession } from './scratch';
 import { reviveSpeeds, type SpeedRegion } from './timeline';
 import { reviveRedactions, type RedactBlock } from './redact';
 import { reviveCues, type Cue } from './captions';
+import { reviveShapes, type Shape } from './shapes';
+import { defaultMusic, defaultVoice, type MusicSettings, type VoiceSettings } from './sound';
 
 export type { ScratchSession } from './scratch';
 
@@ -67,6 +69,10 @@ export type Settings = {
   captionSize: number;
   /** Whether the subtitles are drawn into the exported picture. */
   burnCaptions: boolean;
+  /** Levelling, rumble filtering and gating for the recorded voice. */
+  voice: VoiceSettings;
+  /** How loud a music bed sits, and how far it ducks under speech. */
+  music: MusicSettings;
   showCursor: boolean;
   /** How large the drawn cursor is, as a multiple of the default. */
   cursorSize: number;
@@ -102,6 +108,8 @@ export const defaultSettings: Settings = {
   showClicks: true,
   captionSize: 0.045,
   burnCaptions: false,
+  voice: defaultVoice,
+  music: defaultMusic,
   showCursor: true,
   cursorSize: 1,
   spotlight: 0,
@@ -163,6 +171,11 @@ export type Project = {
   redactions: RedactBlock[];
   /** Subtitles, written against the recording's own clock. */
   captions: Cue[];
+  /** Arrows, boxes and highlights. */
+  shapes: Shape[];
+  /** A music bed, kept as the file that was chosen. */
+  music: Uint8Array | null;
+  musicName: string;
   /** The derived camera move, kept so a reopened project renders identically. */
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
@@ -192,6 +205,15 @@ export function reviveSettings(value: unknown): Settings {
     showCursor: flag('showCursor'),
     showKeys: flag('showKeys'),
     burnCaptions: flag('burnCaptions'),
+    music: {
+      level: typeof stored.music?.level === 'number' ? Math.max(0, Math.min(1, stored.music.level)) : defaultMusic.level,
+      duck: typeof stored.music?.duck === 'number' ? Math.max(0, Math.min(1, stored.music.duck)) : defaultMusic.duck,
+    },
+    voice: {
+      normalise: stored.voice?.normalise === true,
+      highPass: typeof stored.voice?.highPass === 'number' ? Math.max(0, Math.min(300, stored.voice.highPass)) : 0,
+      gate: typeof stored.voice?.gate === 'number' ? Math.max(0, Math.min(0.5, stored.voice.gate)) : 0,
+    },
     captionSize: typeof stored.captionSize === 'number' ? Math.max(0.02, Math.min(0.12, stored.captionSize)) : 0.045,
     cursorSize: typeof stored.cursorSize === 'number' ? Math.max(0.5, Math.min(4, stored.cursorSize)) : 1,
     spotlight: typeof stored.spotlight === 'number' ? Math.max(0, Math.min(1, stored.spotlight)) : 0,
@@ -288,6 +310,9 @@ export function reviveProject(value: unknown): Project | null {
     speeds: reviveSpeeds(project.speeds, () => createId('speed')),
     redactions: reviveRedactions(project.redactions, () => createId('redact')),
     captions: reviveCues(project.captions, () => createId('cue')),
+    shapes: reviveShapes(project.shapes, () => createId('shape')),
+    music: project.music instanceof Uint8Array ? project.music : null,
+    musicName: typeof project.musicName === 'string' ? project.musicName : '',
     keys: Array.isArray(project.keys) ? (project.keys as KeySample[]) : [],
     marks: Array.isArray(project.marks) ? (project.marks as MarkSample[]) : [],
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
@@ -299,9 +324,9 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'captions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'captions' | 'shapes' | 'music' | 'musicName' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>
     & Partial<Pick<Project,
-      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'captions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
+      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'captions' | 'shapes' | 'music' | 'musicName' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -314,6 +339,9 @@ export function createProject(
     speeds: [],
     redactions: [],
     captions: [],
+    shapes: [],
+    music: null,
+    musicName: '',
     keys: [],
     marks: [],
     keyframes: null,

@@ -171,6 +171,25 @@ const app = getApp('limelight');
         </p>
 
         <div class="ll-zoomrow">
+          <span class="ll-tracklabel">Shapes</span>
+          <div class="ll-zoomtrack ll-shapetrack" id="ll-shapetrack" aria-label="Shape track"></div>
+        </div>
+        <div class="ll-scrubrow">
+          <select class="field ll-shapekind" id="ll-shape-kind"></select>
+          <button class="btn btn--sm" id="ll-shape-add">Add it here</button>
+          <div class="ll-redact-fields" id="ll-shape-selected" hidden>
+            <div class="ll-swatches" id="ll-shape-colours"></div>
+            <label class="ll-slider"><span>Weight</span><input type="range" id="ll-shape-weight" min="0.001" max="0.03" step="0.001" /><em id="ll-shape-weight-out"></em></label>
+            <label class="ll-slider"><span>Fade</span><input type="range" id="ll-shape-fade" min="0" max="1.5" step="0.05" /><em id="ll-shape-fade-out"></em></label>
+            <button class="btn btn--sm btn--ghost" id="ll-shape-delete">Delete</button>
+          </div>
+          <span class="ll-time" id="ll-shape-label"></span>
+        </div>
+        <p class="ll-note" id="ll-shape-note" hidden>
+          Drag on the picture to place it. An arrow runs from where you press to where you let go.
+        </p>
+
+        <div class="ll-zoomrow">
           <span class="ll-tracklabel">Text</span>
           <div class="ll-zoomtrack ll-texttrack" id="ll-texttrack" aria-label="Text track"></div>
         </div>
@@ -347,6 +366,17 @@ const app = getApp('limelight');
           </div>
 
           <label class="ll-check"><input type="checkbox" id="ll-audio" /><span>Keep the sound that was recorded</span></label>
+          <label class="ll-check"><input type="checkbox" id="ll-voice-normalise" /><span>Level the voice</span></label>
+          <label class="ll-slider"><span>Cut the rumble</span><input type="range" id="ll-voice-highpass" min="0" max="200" step="10" /><em id="ll-voice-highpass-out"></em></label>
+          <label class="ll-slider"><span>Quiet the gaps</span><input type="range" id="ll-voice-gate" min="0" max="0.4" step="0.01" /><em id="ll-voice-gate-out"></em></label>
+          <div class="ll-scrubrow">
+            <button class="btn btn--sm" id="ll-music-open">Music underneath</button>
+            <button class="btn btn--sm btn--ghost" id="ll-music-drop" hidden>Remove</button>
+            <span class="ll-time" id="ll-music-name"></span>
+            <input type="file" id="ll-music-file" accept="audio/*" hidden />
+          </div>
+          <label class="ll-slider"><span>Music level</span><input type="range" id="ll-music-level" min="0" max="0.6" step="0.02" /><em id="ll-music-level-out"></em></label>
+          <label class="ll-slider"><span>Duck under speech</span><input type="range" id="ll-music-duck" min="0" max="1" step="0.05" /><em id="ll-music-duck-out"></em></label>
 
           <div class="ll-pair">
             <label class="field-row"><span>Format</span>
@@ -501,6 +531,11 @@ const app = getApp('limelight');
   .ll-chapters li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
   .ll-chapters .ll-time { min-width: 3.4rem; }
   .ll-chapters input { min-width: 0; }
+  .ll-shapetrack .ll-zoom { background: color-mix(in srgb, #6b4bc4 30%, transparent); border-color: #6b4bc4; }
+  .ll-shapekind { max-width: 9rem; }
+  .ll-swatches { display: flex; gap: 0.25rem; }
+  .ll-swatch { width: 1.4rem; height: 1.4rem; border-radius: 5px; border: 2px solid transparent; cursor: pointer; padding: 0; }
+  .ll-swatch[aria-pressed='true'] { border-color: var(--ink); }
   .ll-speedtrack .ll-zoom { background: color-mix(in srgb, #2f6b9f 30%, transparent); border-color: #2f6b9f; }
   .ll-redacttrack .ll-zoom { background: color-mix(in srgb, #a3312a 30%, transparent); border-color: #a3312a; }
   .ll-speed-pick { max-width: 18rem; }

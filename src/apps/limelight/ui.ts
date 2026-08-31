@@ -46,6 +46,10 @@ import {
   alignToEdit, parseCaptions, sortCues, spansOf, toSrt, toVtt, type Cue,
 } from './captions';
 import {
+  addShape, removeShape, SHAPE_COLOURS, SHAPE_KINDS, sortShapes, updateShape,
+  type Shape, type ShapeKind,
+} from './shapes';
+import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
 } from './zooms';
@@ -114,6 +118,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let redactions: RedactBlock[] = [];
   /** Subtitles, and which lines are selected for cutting. */
   let captions: Cue[] = [];
+  /** Arrows, boxes and highlights, and the one being edited. */
+  let shapes: Shape[] = [];
+  let selectedShape: string | null = null;
+  let draggingShape: { x: number; y: number } | null = null;
   const pickedCues = new Set<string>();
   let selectedRedaction: string | null = null;
   let draggingRedaction = false;
@@ -129,13 +137,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     speeds: SpeedRegion[];
     redactions: RedactBlock[];
     captions: Cue[];
+    shapes: Shape[];
     crop: Crop;
     trim: { start: number; end: number };
     wallpaper: Uint8Array | null;
     wallpaperMime: string;
   };
   const history = new History<EditorState>({
-    settings, zooms, texts, cuts: [], speeds: [], redactions: [], captions: [],
+    settings, zooms, texts, cuts: [], speeds: [], redactions: [], captions: [], shapes: [],
     crop, trim, wallpaper: null, wallpaperMime: 'image/png',
   });
   /** Set while a state is being put back, so restoring does not record itself. */
@@ -170,6 +179,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       stored.speeds = speeds;
       stored.redactions = redactions;
       stored.captions = captions;
+      stored.shapes = shapes;
       // Derived from the blocks, and stored alongside them so a reopened
       // project renders exactly as it did.
       stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
@@ -181,7 +191,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function snapshot(): EditorState {
     return {
-      settings, zooms, texts, cuts, speeds, redactions, captions,
+      settings, zooms, texts, cuts, speeds, redactions, captions, shapes,
       crop, trim, wallpaper: wallpaperBytes, wallpaperMime,
     };
   }
@@ -208,6 +218,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       speeds = state.speeds;
       redactions = state.redactions;
       captions = state.captions;
+      shapes = state.shapes;
       crop = state.crop;
       trim = { ...state.trim };
       // The picture is held as bytes in the snapshot, so an undo across a
@@ -242,6 +253,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderCuts();
     renderSpeeds();
     renderRedactions();
+    renderShapes();
     renderCues();
     renderHistory();
     await drawPreview();
@@ -303,6 +315,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       // Aligned to the finished video, since a cut moves every later line.
       captions: settings.burnCaptions ? alignedCaptions() : [],
       captionSize: settings.captionSize,
+      shapes,
+      voice: settings.voice,
+      music: musicSamples,
+      musicSettings: settings.music,
       format: settings.format,
       gifColours: 128,
       keepAudio: settings.keepAudio && recording.hasAudio,
@@ -537,6 +553,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     speeds = project.speeds;
     redactions = project.redactions;
     captions = project.captions;
+    shapes = project.shapes;
+    musicSamples = project.music ? await decodeMusic(project.music) : null;
     crop = project.crop;
     dropWallpaper();
     if (project.wallpaper) await useWallpaper(project.wallpaper, project.wallpaperMime);
@@ -589,7 +607,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
 
     if (!stored) {
-      crop = { ...FULL_CROP }; texts = []; cuts = []; speeds = []; redactions = []; captions = [];
+      crop = { ...FULL_CROP }; texts = []; cuts = []; speeds = []; redactions = []; captions = []; shapes = [];
       dropWallpaper();
     }
 
@@ -617,8 +635,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderTexts();
     renderSpeeds();
     renderRedactions();
+    renderShapes();
     renderChapters();
     renderCues();
+    renderMusic();
     renderDestinations();
     await loadWaveform();
     // A reopened project already has its zooms, so it does not analyse again.
@@ -1399,6 +1419,168 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     toast('Back to normal speed. Undo with Ctrl+Z.');
   });
 
+  // ------------------------------------------------------------------ shapes
+
+  const shapeTrackEl = $<HTMLDivElement>('ll-shapetrack');
+  const shapePanel = $<HTMLDivElement>('ll-shape-selected');
+  const shapeNote = $<HTMLParagraphElement>('ll-shape-note');
+
+  for (const kind of SHAPE_KINDS) {
+    const option = document.createElement('option');
+    option.value = kind.id;
+    option.textContent = kind.label;
+    $<HTMLSelectElement>('ll-shape-kind').append(option);
+  }
+
+  function renderShapes(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    shapeTrackEl.innerHTML = '';
+
+    for (const shape of shapes) {
+      const bar = document.createElement('div');
+      bar.className = 'll-zoom is-pinned';
+      bar.style.left = `${(shape.start / duration) * 100}%`;
+      bar.style.width = `${((shape.end - shape.start) / duration) * 100}%`;
+      bar.dataset.id = shape.id;
+      bar.title = `${shape.kind}, ${formatClock(shape.start)} to ${formatClock(shape.end)}`;
+      const label = document.createElement('span');
+      label.className = 'll-zoom__label';
+      label.textContent = shape.kind;
+      bar.append(label);
+
+      for (const edge of ['start', 'end'] as const) {
+        const grip = document.createElement('button');
+        grip.type = 'button';
+        grip.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
+        grip.setAttribute('aria-label', `Move the ${edge} of this shape`);
+        grip.addEventListener('pointerdown', (event) => {
+          event.stopPropagation();
+          beginShapeDrag(event, shape.id, edge);
+        });
+        bar.append(grip);
+      }
+      bar.addEventListener('pointerdown', (event) => beginShapeDrag(event, shape.id, 'move'));
+      shapeTrackEl.append(bar);
+    }
+
+    for (const bar of shapeTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
+      bar.classList.toggle('is-selected', bar.dataset.id === selectedShape);
+    }
+
+    const shape = shapes.find((entry) => entry.id === selectedShape);
+    shapePanel.hidden = !shape;
+    shapeNote.hidden = !shape;
+    if (shape) {
+      $<HTMLInputElement>('ll-shape-weight').value = String(shape.thickness);
+      $<HTMLSpanElement>('ll-shape-weight-out').textContent = `${(shape.thickness * 1000).toFixed(0)}`;
+      $<HTMLInputElement>('ll-shape-fade').value = String(shape.fade);
+      $<HTMLSpanElement>('ll-shape-fade-out').textContent = `${shape.fade.toFixed(2)}s`;
+    }
+    renderSwatches(shape?.colour);
+    $<HTMLSpanElement>('ll-shape-label').textContent = shapes.length ? `${shapes.length} on screen` : '';
+  }
+
+  function renderSwatches(current?: string): void {
+    const holder = $<HTMLDivElement>('ll-shape-colours');
+    holder.innerHTML = '';
+    for (const colour of SHAPE_COLOURS) {
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = 'll-swatch';
+      swatch.style.background = colour;
+      swatch.setAttribute('aria-label', `Use ${colour}`);
+      swatch.setAttribute('aria-pressed', String(current === colour));
+      swatch.addEventListener('click', () => {
+        if (!selectedShape) return;
+        shapes = updateShape(shapes, selectedShape, { colour });
+        persistShapes('shape-colour');
+      });
+      holder.append(swatch);
+    }
+  }
+
+  let shapeDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
+
+  function shapeTimeAt(event: PointerEvent): number {
+    if (!recording) return 0;
+    const box = shapeTrackEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
+  }
+
+  function beginShapeDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
+    const shape = shapes.find((entry) => entry.id === id);
+    if (!shape) return;
+    const changed = selectedShape !== id;
+    selectedShape = id;
+    selectedRedaction = null;
+    shapeDrag = { id, edge, from: shapeTimeAt(event), start: shape.start, end: shape.end };
+    try { shapeTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
+    renderShapes();
+    renderRedactions();
+    if (changed) showBlock(shape.start, shape.end);
+    void drawPreview();
+  }
+
+  shapeTrackEl.addEventListener('pointermove', (event) => {
+    if (!shapeDrag || !recording) return;
+    const shift = shapeTimeAt(event) - shapeDrag.from;
+    shapes = shapes.map((shape) => {
+      if (shape.id !== shapeDrag!.id) return shape;
+      if (shapeDrag!.edge === 'move') {
+        const width = shapeDrag!.end - shapeDrag!.start;
+        return { ...shape, start: shapeDrag!.start + shift, end: shapeDrag!.start + shift + width };
+      }
+      if (shapeDrag!.edge === 'start') return { ...shape, start: shapeDrag!.start + shift };
+      return { ...shape, end: shapeDrag!.end + shift };
+    });
+    shapes = sortShapes(shapes);
+    renderShapes();
+  });
+
+  for (const done of ['pointerup', 'pointercancel'] as const) {
+    shapeTrackEl.addEventListener(done, () => {
+      if (!shapeDrag) return;
+      shapeDrag = null;
+      persistShapes();
+    });
+  }
+
+  function persistShapes(label = ''): void {
+    remember(label);
+    renderShapes();
+    void drawPreview();
+  }
+
+  $<HTMLButtonElement>('ll-shape-add').addEventListener('click', () => {
+    if (!recording) return;
+    const kind = $<HTMLSelectElement>('ll-shape-kind').value as ShapeKind;
+    shapes = addShape(shapes, previewTime, recording.duration, kind, createId('shape'));
+    selectedShape = shapes.find((shape) => shape.start <= previewTime + 0.01 && shape.end >= previewTime - 0.01)?.id ?? null;
+    selectedRedaction = null;
+    renderRedactions();
+    persistShapes();
+    toast('Drag on the picture to place it.');
+  });
+
+  $<HTMLInputElement>('ll-shape-weight').addEventListener('input', (event) => {
+    if (!selectedShape) return;
+    shapes = updateShape(shapes, selectedShape, { thickness: Number((event.target as HTMLInputElement).value) });
+    persistShapes(`shape-weight:${selectedShape}`);
+  });
+  $<HTMLInputElement>('ll-shape-fade').addEventListener('input', (event) => {
+    if (!selectedShape) return;
+    shapes = updateShape(shapes, selectedShape, { fade: Number((event.target as HTMLInputElement).value) });
+    persistShapes(`shape-fade:${selectedShape}`);
+  });
+  $<HTMLButtonElement>('ll-shape-delete').addEventListener('click', () => {
+    if (!selectedShape) return;
+    shapes = removeShape(shapes, selectedShape);
+    selectedShape = null;
+    persistShapes();
+    toast('Shape removed. Undo with Ctrl+Z.');
+  });
+
   // ------------------------------------------------------------------ redaction
 
   const redactTrackEl = $<HTMLDivElement>('ll-redacttrack');
@@ -1914,6 +2096,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       placeRedaction(aimPointAt(event));
       return;
     }
+    // A shape is drawn by dragging: an arrow runs from press to release, and a
+    // box spans between them, which is the gesture people already know.
+    if (selectedShape) {
+      event.preventDefault();
+      draggingShape = aimPointAt(event);
+      try { canvas.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
+      shapes = updateShape(shapes, selectedShape, {
+        x: draggingShape.x, y: draggingShape.y, width: 0.001, height: 0.001,
+      });
+      renderShapes();
+      paint(previewTime);
+      return;
+    }
     if (!focusTarget) return;
     event.preventDefault();
     draggingFocus = true;
@@ -1922,12 +2117,22 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   });
   canvas.addEventListener('pointermove', (event) => {
     if (draggingRedaction) { placeRedaction(aimPointAt(event)); return; }
+    if (draggingShape && selectedShape) {
+      const to = aimPointAt(event);
+      shapes = updateShape(shapes, selectedShape, {
+        width: to.x - draggingShape.x, height: to.y - draggingShape.y,
+      });
+      renderShapes();
+      paint(previewTime);
+      return;
+    }
     if (!draggingFocus || !focusTarget) return;
     moveFocus(aimPointAt(event), `zoom-aim:${focusTarget.id}`);
   });
   for (const done of ['pointerup', 'pointercancel'] as const) {
     canvas.addEventListener(done, () => {
       if (draggingRedaction) { draggingRedaction = false; remember('redact-move'); }
+      if (draggingShape) { draggingShape = null; remember('shape-draw'); }
       draggingFocus = false;
     });
   }
@@ -2551,6 +2756,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     ['ll-tilt-depth', (value) => { settings.tilt.depth = value; }, () => settings.tilt.depth],
     ['ll-motion-seconds', (value) => { settings.motion.seconds = value; }, () => settings.motion.seconds],
     ['ll-cursor-size', (value) => { settings.cursorSize = value; }, () => settings.cursorSize],
+    ['ll-voice-highpass', (value) => { settings.voice.highPass = value; }, () => settings.voice.highPass],
+    ['ll-voice-gate', (value) => { settings.voice.gate = value; }, () => settings.voice.gate],
     ['ll-spotlight', (value) => { settings.spotlight = value; }, () => settings.spotlight],
   ];
   for (const [id, apply] of sliders) {
@@ -2580,6 +2787,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     ['ll-clicks', (value) => { settings.showClicks = value; }, () => settings.showClicks],
     ['ll-cursor', (value) => { settings.showCursor = value; }, () => settings.showCursor],
     ['ll-keys', (value) => { settings.showKeys = value; }, () => settings.showKeys],
+    ['ll-voice-normalise', (value) => { settings.voice.normalise = value; }, () => settings.voice.normalise],
     ['ll-camera-on', (value) => { settings.composition.camera.enabled = value; }, () => settings.composition.camera.enabled],
     ['ll-audio', (value) => { settings.keepAudio = value; }, () => settings.keepAudio],
   ];
@@ -2725,6 +2933,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       ['ll-tilt-depth-out', `${Math.round(settings.tilt.depth * 100)}%`],
       ['ll-motion-seconds-out', `${settings.motion.seconds.toFixed(2)}s`],
       ['ll-cursor-size-out', `${settings.cursorSize.toFixed(1)}x`],
+      ['ll-voice-highpass-out', settings.voice.highPass > 0 ? `${settings.voice.highPass} Hz` : 'off'],
+      ['ll-voice-gate-out', settings.voice.gate > 0 ? `${Math.round(settings.voice.gate * 100)}%` : 'off'],
       ['ll-spotlight-out', settings.spotlight > 0 ? `${Math.round(settings.spotlight * 100)}%` : 'off'],
     ];
     for (const [id, text] of readouts) $<HTMLSpanElement>(id).textContent = text;
@@ -2993,6 +3203,91 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderCues();
     void drawPreview();
   });
+
+  // ------------------------------------------------------------------ music
+
+  /**
+   * The bed, decoded once and kept at the encoder's rate.
+   *
+   * Decoding happens when the file is chosen rather than at export time, so a
+   * file the browser cannot read is reported straight away instead of failing
+   * halfway through a render somebody has waited for.
+   */
+  let musicSamples: Float32Array | null = null;
+  const musicFile = $<HTMLInputElement>('ll-music-file');
+
+  async function decodeMusic(bytes: Uint8Array): Promise<Float32Array | null> {
+    const Context = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Context) return null;
+    let context: AudioContext | null = null;
+    try {
+      context = new Context({ sampleRate: 48000 });
+      const buffer = await context.decodeAudioData(bytes.slice().buffer as ArrayBuffer);
+      // Mixed to mono: the bed is background, and a stereo image under a voice
+      // recorded in mono is not worth the memory.
+      const length = buffer.length;
+      const out = new Float32Array(length);
+      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+        const data = buffer.getChannelData(channel);
+        for (let at = 0; at < length; at += 1) out[at] += data[at] / buffer.numberOfChannels;
+      }
+      return out;
+    } catch {
+      return null;
+    } finally {
+      await context?.close().catch(() => {});
+    }
+  }
+
+  function renderMusic(): void {
+    const name = stored?.musicName ?? '';
+    $<HTMLSpanElement>('ll-music-name').textContent = name;
+    $<HTMLButtonElement>('ll-music-drop').hidden = !name;
+    $<HTMLInputElement>('ll-music-level').value = String(settings.music.level);
+    $<HTMLSpanElement>('ll-music-level-out').textContent = `${Math.round(settings.music.level * 100)}%`;
+    $<HTMLInputElement>('ll-music-duck').value = String(settings.music.duck);
+    $<HTMLSpanElement>('ll-music-duck-out').textContent = `${Math.round(settings.music.duck * 100)}%`;
+  }
+
+  $<HTMLButtonElement>('ll-music-open').addEventListener('click', () => musicFile.click());
+  musicFile.addEventListener('change', async () => {
+    const [file] = Array.from(musicFile.files ?? []);
+    musicFile.value = '';
+    if (!file || !stored) return;
+    setStatus(`Reading ${file.name}.`, 'busy');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const decoded = await decodeMusic(bytes);
+    if (!decoded) {
+      setStatus('That file could not be read as audio.', 'bad');
+      return;
+    }
+    musicSamples = decoded;
+    stored.music = bytes;
+    stored.musicName = file.name;
+    remember('music');
+    renderMusic();
+    setStatus(`${file.name} will play underneath.`, 'good');
+  });
+
+  $<HTMLButtonElement>('ll-music-drop').addEventListener('click', () => {
+    if (!stored) return;
+    musicSamples = null;
+    stored.music = null;
+    stored.musicName = '';
+    remember('music-drop');
+    renderMusic();
+  });
+
+  for (const [id, apply] of [
+    ['ll-music-level', (value: number) => { settings.music.level = value; }],
+    ['ll-music-duck', (value: number) => { settings.music.duck = value; }],
+  ] as [string, (value: number) => void][]) {
+    $<HTMLInputElement>(id).addEventListener('input', (event) => {
+      apply(Number((event.target as HTMLInputElement).value));
+      remember(`music:${id}`);
+      renderMusic();
+    });
+  }
 
   // ------------------------------------------------------------------ chapters
 

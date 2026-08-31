@@ -36,6 +36,13 @@ export type AudioTrackOptions = {
    * existed.
    */
   spans?: { start: number; end: number; speed?: number }[];
+  /**
+   * Applied to each channel after the spans are joined and before encoding.
+   *
+   * Kept as a hook rather than built in, so the shared encoder stays about
+   * containers and codecs and the app decides what to do to the sound.
+   */
+  process?: (samples: Float32Array, rate: number) => Float32Array;
 };
 
 export type EncodedAudio = { samples: WebmSample[]; track: WebmTrack; duration: number };
@@ -68,7 +75,10 @@ export async function encodeOpus(
   const planes = spans.length > 0
     ? joinSpans(buffer, spans, channels)
     : resampleTo48k(buffer, start, end, channels);
-  const frames = planes[0].length;
+  const processed = options.process
+    ? planes.map((plane) => options.process!(plane, OPUS_RATE))
+    : planes;
+  const frames = processed[0].length;
   if (frames === 0) return null;
 
   const samples: WebmSample[] = [];
@@ -123,7 +133,7 @@ export async function encodeOpus(
     // interleaved, however natural interleaving would feel.
     const flat = new Float32Array(length * channels);
     for (let channel = 0; channel < channels; channel += 1) {
-      flat.set(planes[channel].subarray(offset, offset + length), channel * length);
+      flat.set(processed[channel].subarray(offset, offset + length), channel * length);
     }
 
     const data = new AudioData({

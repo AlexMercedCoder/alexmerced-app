@@ -15,6 +15,25 @@ import {
 } from './plate';
 import { textsAt, wrapText, type TextBlock } from './text';
 import { cuesAt, type Cue } from './captions';
+import { boundsOf, shapesAt, type Shape } from './shapes';
+import {
+  duckingEnvelope, cleanVoice, mixUnder, type MusicSettings, type VoiceSettings,
+} from './sound';
+
+/** Root mean square per column, for the ducking envelope. */
+function coarseLoudness(samples: Float32Array, columns: number): Float32Array {
+  const out = new Float32Array(Math.max(1, columns));
+  if (samples.length === 0) return out;
+  const per = samples.length / out.length;
+  for (let index = 0; index < out.length; index += 1) {
+    const from = Math.floor(index * per);
+    const to = Math.max(from + 1, Math.min(samples.length, Math.floor((index + 1) * per)));
+    let sum = 0;
+    for (let at = from; at < to; at += 1) sum += samples[at] * samples[at];
+    out[index] = Math.sqrt(sum / (to - from));
+  }
+  return out;
+}
 import { type Span } from './waveform';
 import { editedDuration, segmentsOf, sourceAt, type SpeedRegion } from './timeline';
 import { rectAt, redactionsAt, type RedactBlock } from './redact';
@@ -72,6 +91,13 @@ export type Project = {
   captions?: Cue[];
   /** Height of a caption as a fraction of the frame. */
   captionSize?: number;
+  /** Arrows, boxes and highlights laid over the finished frame. */
+  shapes?: Shape[];
+  /** Levelling, rumble filtering and gating for the recorded voice. */
+  voice?: VoiceSettings;
+  /** A bed to put under the narration, already at the encoder's sample rate. */
+  music?: Float32Array | null;
+  musicSettings?: MusicSettings;
   /** What to write. */
   format: OutputFormat;
   gifColours: number;
@@ -375,9 +401,89 @@ export function drawFrame(
   if (project.texts && project.texts.length > 0) {
     drawTexts(context, project.texts, time, width, height);
   }
+  if (project.shapes?.length) {
+    drawShapes(context, project.shapes, time, width, height);
+  }
   if (project.captions?.length) {
     drawCaptions(context, project.captions, time, width, height, project.captionSize ?? 0.045);
   }
+}
+
+/**
+ * Draws the arrows, boxes and highlights.
+ *
+ * Under the captions, because a subtitle is read and a shape is looked at, and
+ * the reading should win when they collide.
+ */
+function drawShapes(
+  context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+  shapes: Shape[], time: number, width: number, height: number,
+): void {
+  const unit = Math.min(width, height);
+  for (const { shape, opacity } of shapesAt(shapes, time)) {
+    if (opacity <= 0) continue;
+    const box = boundsOf(shape);
+    const x = box.x * width;
+    const y = box.y * height;
+    const w = box.width * width;
+    const h = box.height * height;
+    const line = Math.max(1, shape.thickness * unit);
+
+    context.save();
+    context.globalAlpha = opacity;
+    context.strokeStyle = shape.colour;
+    context.fillStyle = shape.colour;
+    context.lineWidth = line;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+
+    if (shape.kind === 'highlight') {
+      // Multiply so the text underneath still reads, which is the difference
+      // between a highlighter and a sticker.
+      context.globalCompositeOperation = 'multiply';
+      context.globalAlpha = opacity * 0.45;
+      context.fillRect(x, y, w, h);
+    } else if (shape.kind === 'box') {
+      context.strokeRect(x, y, w, h);
+    } else if (shape.kind === 'ellipse') {
+      context.beginPath();
+      context.ellipse(x + w / 2, y + h / 2, Math.max(1, w / 2), Math.max(1, h / 2), 0, 0, Math.PI * 2);
+      context.stroke();
+    } else {
+      drawArrow(context, shape, width, height, line);
+    }
+    context.restore();
+  }
+}
+
+/** An arrow from its tail to its head, with the head scaled to the line. */
+function drawArrow(
+  context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+  shape: Shape, width: number, height: number, line: number,
+): void {
+  const fromX = shape.x * width;
+  const fromY = shape.y * height;
+  const toX = (shape.x + shape.width) * width;
+  const toY = (shape.y + shape.height) * height;
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  const head = Math.max(line * 3, 8);
+
+  // The shaft stops short of the point, or the head's fill and the shaft's
+  // round cap overlap and the tip looks blunt.
+  const shaftX = toX - Math.cos(angle) * head * 0.8;
+  const shaftY = toY - Math.sin(angle) * head * 0.8;
+
+  context.beginPath();
+  context.moveTo(fromX, fromY);
+  context.lineTo(shaftX, shaftY);
+  context.stroke();
+
+  context.beginPath();
+  context.moveTo(toX, toY);
+  context.lineTo(toX - Math.cos(angle - 0.42) * head, toY - Math.sin(angle - 0.42) * head);
+  context.lineTo(toX - Math.cos(angle + 0.42) * head, toY - Math.sin(angle + 0.42) * head);
+  context.closePath();
+  context.fill();
 }
 
 /**
@@ -917,7 +1023,27 @@ export async function render(
       // The kept pieces, so the sound skips exactly what the picture skips.
       // The kept pieces with their speeds, so the sound skips and hurries exactly
     // where the picture does.
-    audio = await encodeOpus(sourceBytes ?? project.source, { start: from, end: to, track: 2, spans: segments });
+    const voice = project.voice;
+    const bed = project.music;
+    const music = project.musicSettings;
+    const cleaning = voice && (voice.normalise || voice.highPass > 0 || voice.gate > 0);
+    const bedding = bed && bed.length > 0 && music && music.level > 0;
+
+    audio = await encodeOpus(sourceBytes ?? project.source, {
+      start: from, end: to, track: 2, spans: segments,
+      // Applied after the kept pieces are joined, so a filter's state does not
+      // restart at every cut and click at the joins.
+      process: cleaning || bedding
+        ? (samples, rate) => {
+          const cleaned = cleaning ? cleanVoice(samples, rate, voice) : samples;
+          if (!bedding) return cleaned;
+          // The envelope comes from the voice itself, so the bed ducks for
+          // whatever the person actually said rather than a fixed pattern.
+          const columns = Math.max(1, Math.round(cleaned.length / (rate * 0.05)));
+          return mixUnder(cleaned, bed, duckingEnvelope(coarseLoudness(cleaned, columns), columns, music));
+        }
+        : undefined,
+    });
       if (!audio) note = 'No sound was found in the recording, so this is silent.';
     }
 
