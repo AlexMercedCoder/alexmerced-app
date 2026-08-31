@@ -35,6 +35,13 @@ import {
   analyseAudio, findSilences, keptDuration, mergeSpans, type Peak, type Span,
 } from './waveform';
 import {
+  addSpeed, clampSpeed, editedDuration, removeSpeed, segmentsOf, sortSpeeds, type SpeedRegion,
+} from './timeline';
+import {
+  addRedaction, rectAt, redactionsAt, removeRedaction, REDACT_STYLES, setPoint, sortRedactions,
+  type RedactBlock, type RedactStyle,
+} from './redact';
+import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
 } from './zooms';
@@ -96,6 +103,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let draggingFocus = false;
   /** Stretches removed from the middle, and the decoded sound they came from. */
   let cuts: Span[] = [];
+  /** Stretches that run at a different pace, and the one being edited. */
+  let speeds: SpeedRegion[] = [];
+  let selectedSpeed: string | null = null;
+  /** Rectangles covered over, and the one being edited. */
+  let redactions: RedactBlock[] = [];
+  let selectedRedaction: string | null = null;
+  let draggingRedaction = false;
   let wave: { peaks: Peak[]; loudness: Float32Array; duration: number } | null = null;
   let selection: { start: number; end: number } | null = null;
   let selectingWave = false;
@@ -105,13 +119,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     zooms: ZoomBlock[];
     texts: TextBlock[];
     cuts: Span[];
+    speeds: SpeedRegion[];
+    redactions: RedactBlock[];
     crop: Crop;
     trim: { start: number; end: number };
     wallpaper: Uint8Array | null;
     wallpaperMime: string;
   };
   const history = new History<EditorState>({
-    settings, zooms, texts, cuts: [], crop, trim, wallpaper: null, wallpaperMime: 'image/png',
+    settings, zooms, texts, cuts: [], speeds: [], redactions: [],
+    crop, trim, wallpaper: null, wallpaperMime: 'image/png',
   });
   /** Set while a state is being put back, so restoring does not record itself. */
   let restoring = false;
@@ -142,6 +159,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       stored.zooms = zooms;
       stored.texts = texts;
       stored.cuts = cuts;
+      stored.speeds = speeds;
+      stored.redactions = redactions;
       // Derived from the blocks, and stored alongside them so a reopened
       // project renders exactly as it did.
       stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
@@ -152,7 +171,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // ------------------------------------------------------------------ history
 
   function snapshot(): EditorState {
-    return { settings, zooms, texts, cuts, crop, trim, wallpaper: wallpaperBytes, wallpaperMime };
+    return {
+      settings, zooms, texts, cuts, speeds, redactions,
+      crop, trim, wallpaper: wallpaperBytes, wallpaperMime,
+    };
   }
 
   /**
@@ -174,6 +196,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       zooms = state.zooms;
       texts = state.texts;
       cuts = state.cuts;
+      speeds = state.speeds;
+      redactions = state.redactions;
       crop = state.crop;
       trim = { ...state.trim };
       // The picture is held as bytes in the snapshot, so an undo across a
@@ -206,6 +230,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderZooms();
     renderTexts();
     renderCuts();
+    renderSpeeds();
+    renderRedactions();
     renderHistory();
     await drawPreview();
   }
@@ -263,6 +289,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       gifColours: 128,
       keepAudio: settings.keepAudio && recording.hasAudio,
       cuts,
+      speeds,
+      redactions,
       start: trim.start,
       end: trim.end > trim.start ? trim.end : recording.duration,
     };
@@ -488,6 +516,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     zooms = project.zooms;
     texts = project.texts;
     cuts = project.cuts;
+    speeds = project.speeds;
+    redactions = project.redactions;
     crop = project.crop;
     dropWallpaper();
     if (project.wallpaper) await useWallpaper(project.wallpaper, project.wallpaperMime);
@@ -539,7 +569,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remember();
     }
 
-    if (!stored) { crop = { ...FULL_CROP }; texts = []; cuts = []; dropWallpaper(); }
+    if (!stored) {
+      crop = { ...FULL_CROP }; texts = []; cuts = []; speeds = []; redactions = [];
+      dropWallpaper();
+    }
 
     trim = range && range.end > range.start
       ? { start: Math.max(0, range.start), end: Math.min(recording.duration, range.end) }
@@ -563,6 +596,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderCrop();
     renderZooms();
     renderTexts();
+    renderSpeeds();
+    renderRedactions();
     await loadWaveform();
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
@@ -702,7 +737,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const time = trimTimeAt(event);
     // Grab whichever handle is nearer, so a drag anywhere moves the closer end.
     trimming = Math.abs(time - trim.start) <= Math.abs(time - trim.end) ? 'start' : 'end';
-    trimEl.setPointerCapture(event.pointerId);
+    try { trimEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
     applyTrim(time);
   });
 
@@ -1206,6 +1241,306 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     new ResizeObserver(() => { drawWave(); renderCuts(); }).observe(waveWrap);
   }
 
+  // ------------------------------------------------------------------ speed
+
+  const speedTrackEl = $<HTMLDivElement>('ll-speedtrack');
+  const speedPanel = $<HTMLLabelElement>('ll-speed-selected');
+
+  function renderSpeeds(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    speedTrackEl.innerHTML = '';
+
+    for (const region of speeds) {
+      const bar = document.createElement('div');
+      bar.className = 'll-zoom is-pinned';
+      bar.style.left = `${(region.start / duration) * 100}%`;
+      bar.style.width = `${((region.end - region.start) / duration) * 100}%`;
+      bar.dataset.id = region.id;
+      bar.title = `${region.speed}x, ${formatClock(region.start)} to ${formatClock(region.end)}`;
+      const label = document.createElement('span');
+      label.className = 'll-zoom__label';
+      label.textContent = `${region.speed}x`;
+      bar.append(label);
+
+      for (const edge of ['start', 'end'] as const) {
+        const grip = document.createElement('button');
+        grip.type = 'button';
+        grip.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
+        grip.setAttribute('aria-label', `Move the ${edge} of this speed change`);
+        grip.addEventListener('pointerdown', (event) => {
+          event.stopPropagation();
+          beginSpeedDrag(event, region.id, edge);
+        });
+        bar.append(grip);
+      }
+      bar.addEventListener('pointerdown', (event) => beginSpeedDrag(event, region.id, 'move'));
+      speedTrackEl.append(bar);
+    }
+
+    for (const bar of speedTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
+      bar.classList.toggle('is-selected', bar.dataset.id === selectedSpeed);
+    }
+
+    const region = speeds.find((entry) => entry.id === selectedSpeed);
+    speedPanel.hidden = !region;
+    $<HTMLButtonElement>('ll-speed-delete').hidden = !region;
+    if (region) {
+      $<HTMLInputElement>('ll-speed-amount').value = String(region.speed);
+      $<HTMLSpanElement>('ll-speed-amount-out').textContent = `${region.speed}x`;
+    }
+
+    // What the edit has done to the length, which is the whole reason for it.
+    const finished = editedDuration(segmentsOf(trim, cuts, speeds));
+    const raw = trim.end - trim.start;
+    // To a tenth, because whole seconds hide the difference between 2x and 4x
+    // on a short recording and the readout then looks broken.
+    const tenth = (value: number) => `${value.toFixed(1)}s`;
+    $<HTMLSpanElement>('ll-speed-label').textContent =
+      Math.abs(finished - raw) < 0.05 ? '' : `${tenth(raw)} becomes ${tenth(finished)}`;
+  }
+
+  let speedDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
+
+  function speedTimeAt(event: PointerEvent): number {
+    if (!recording) return 0;
+    const box = speedTrackEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
+  }
+
+  function beginSpeedDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
+    const region = speeds.find((entry) => entry.id === id);
+    if (!region) return;
+    const changed = selectedSpeed !== id;
+    selectedSpeed = id;
+    speedDrag = { id, edge, from: speedTimeAt(event), start: region.start, end: region.end };
+    try { speedTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
+    renderSpeeds();
+    if (changed) showBlock(region.start, region.end);
+  }
+
+  speedTrackEl.addEventListener('pointermove', (event) => {
+    if (!speedDrag || !recording) return;
+    const shift = speedTimeAt(event) - speedDrag.from;
+    speeds = speeds.map((region) => {
+      if (region.id !== speedDrag!.id) return region;
+      if (speedDrag!.edge === 'move') {
+        const width = speedDrag!.end - speedDrag!.start;
+        return { ...region, start: speedDrag!.start + shift, end: speedDrag!.start + shift + width };
+      }
+      if (speedDrag!.edge === 'start') return { ...region, start: speedDrag!.start + shift };
+      return { ...region, end: speedDrag!.end + shift };
+    });
+    speeds = sortSpeeds(speeds);
+    renderSpeeds();
+  });
+
+  for (const done of ['pointerup', 'pointercancel'] as const) {
+    speedTrackEl.addEventListener(done, () => {
+      if (!speedDrag) return;
+      speedDrag = null;
+      persistSpeeds();
+    });
+  }
+
+  function persistSpeeds(label = ''): void {
+    remember(label);
+    renderSpeeds();
+    renderCuts();
+    void drawPreview();
+  }
+
+  $<HTMLButtonElement>('ll-speed-add').addEventListener('click', () => {
+    if (!recording) return;
+    const before = speeds.length;
+    speeds = addSpeed(speeds, previewTime, recording.duration, 2, createId('speed'));
+    if (speeds.length === before) {
+      setStatus('There is no room for a speed change there.', 'bad');
+      return;
+    }
+    selectedSpeed = speeds.find((region) => region.start <= previewTime + 0.01 && region.end >= previewTime - 0.01)?.id ?? null;
+    persistSpeeds();
+  });
+
+  $<HTMLInputElement>('ll-speed-amount').addEventListener('input', (event) => {
+    if (!selectedSpeed) return;
+    const speed = clampSpeed(Number((event.target as HTMLInputElement).value));
+    speeds = speeds.map((region) => (region.id === selectedSpeed ? { ...region, speed } : region));
+    persistSpeeds(`speed:${selectedSpeed}`);
+  });
+
+  $<HTMLButtonElement>('ll-speed-delete').addEventListener('click', () => {
+    if (!selectedSpeed) return;
+    speeds = removeSpeed(speeds, selectedSpeed);
+    selectedSpeed = null;
+    persistSpeeds();
+    toast('Back to normal speed. Undo with Ctrl+Z.');
+  });
+
+  // ------------------------------------------------------------------ redaction
+
+  const redactTrackEl = $<HTMLDivElement>('ll-redacttrack');
+  const redactPanel = $<HTMLDivElement>('ll-redact-selected');
+  const redactNote = $<HTMLParagraphElement>('ll-redact-note');
+
+  for (const style of REDACT_STYLES) {
+    const option = document.createElement('option');
+    option.value = style.id;
+    option.textContent = style.label;
+    $<HTMLSelectElement>('ll-redact-style').append(option);
+  }
+
+  function renderRedactions(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    redactTrackEl.innerHTML = '';
+
+    for (const block of redactions) {
+      const bar = document.createElement('div');
+      bar.className = 'll-zoom is-pinned';
+      bar.style.left = `${(block.start / duration) * 100}%`;
+      bar.style.width = `${((block.end - block.start) / duration) * 100}%`;
+      bar.dataset.id = block.id;
+      bar.title = `${block.style}, ${formatClock(block.start)} to ${formatClock(block.end)}`;
+      const label = document.createElement('span');
+      label.className = 'll-zoom__label';
+      // The number of following points, because a box that follows is the
+      // thing people forget they set up.
+      label.textContent = block.points.length > 1 ? `${block.style} ×${block.points.length}` : block.style;
+      bar.append(label);
+
+      for (const edge of ['start', 'end'] as const) {
+        const grip = document.createElement('button');
+        grip.type = 'button';
+        grip.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
+        grip.setAttribute('aria-label', `Move the ${edge} of this redaction`);
+        grip.addEventListener('pointerdown', (event) => {
+          event.stopPropagation();
+          beginRedactDrag(event, block.id, edge);
+        });
+        bar.append(grip);
+      }
+      bar.addEventListener('pointerdown', (event) => beginRedactDrag(event, block.id, 'move'));
+      redactTrackEl.append(bar);
+    }
+
+    for (const bar of redactTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
+      bar.classList.toggle('is-selected', bar.dataset.id === selectedRedaction);
+    }
+
+    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    redactPanel.hidden = !block;
+    redactNote.hidden = !block;
+    if (block) {
+      $<HTMLSelectElement>('ll-redact-style').value = block.style;
+      $<HTMLInputElement>('ll-redact-w').value = String(block.width);
+      $<HTMLSpanElement>('ll-redact-w-out').textContent = `${Math.round(block.width * 100)}%`;
+      $<HTMLInputElement>('ll-redact-h').value = String(block.height);
+      $<HTMLSpanElement>('ll-redact-h-out').textContent = `${Math.round(block.height * 100)}%`;
+    }
+    $<HTMLSpanElement>('ll-redact-label').textContent = redactions.length
+      ? `${redactions.length} hidden`
+      : '';
+  }
+
+  let redactDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
+
+  function redactTimeAt(event: PointerEvent): number {
+    if (!recording) return 0;
+    const box = redactTrackEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
+  }
+
+  function beginRedactDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
+    const block = redactions.find((entry) => entry.id === id);
+    if (!block) return;
+    const changed = selectedRedaction !== id;
+    selectedRedaction = id;
+    redactDrag = { id, edge, from: redactTimeAt(event), start: block.start, end: block.end };
+    try { redactTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
+    renderRedactions();
+    if (changed) showBlock(block.start, block.end);
+    void drawPreview();
+  }
+
+  redactTrackEl.addEventListener('pointermove', (event) => {
+    if (!redactDrag || !recording) return;
+    const shift = redactTimeAt(event) - redactDrag.from;
+    redactions = redactions.map((block) => {
+      if (block.id !== redactDrag!.id) return block;
+      if (redactDrag!.edge === 'move') {
+        const width = redactDrag!.end - redactDrag!.start;
+        return { ...block, start: redactDrag!.start + shift, end: redactDrag!.start + shift + width };
+      }
+      if (redactDrag!.edge === 'start') return { ...block, start: redactDrag!.start + shift };
+      return { ...block, end: redactDrag!.end + shift };
+    });
+    redactions = sortRedactions(redactions);
+    renderRedactions();
+  });
+
+  for (const done of ['pointerup', 'pointercancel'] as const) {
+    redactTrackEl.addEventListener(done, () => {
+      if (!redactDrag) return;
+      redactDrag = null;
+      persistRedactions();
+    });
+  }
+
+  function persistRedactions(label = ''): void {
+    remember(label);
+    renderRedactions();
+    void drawPreview();
+  }
+
+  $<HTMLButtonElement>('ll-redact-add').addEventListener('click', () => {
+    if (!recording) return;
+    const current = project();
+    const at = current ? cursorAt(current, previewTime) : null;
+    redactions = addRedaction(
+      redactions, previewTime, recording.duration, createId('redact'),
+      at ? { x: at.x, y: at.y } : { x: 0.5, y: 0.5 },
+    );
+    selectedRedaction = redactions.find((block) => block.start <= previewTime + 0.01 && block.end >= previewTime - 0.01)?.id ?? null;
+    persistRedactions();
+    toast('Drag on the picture to place what should be hidden.');
+  });
+
+  function editRedaction(change: Partial<RedactBlock>, label: string): void {
+    if (!selectedRedaction) return;
+    redactions = redactions.map((block) => (block.id === selectedRedaction ? { ...block, ...change } : block));
+    persistRedactions(label);
+  }
+
+  $<HTMLSelectElement>('ll-redact-style').addEventListener('change', (event) => {
+    editRedaction({ style: (event.target as HTMLSelectElement).value as RedactStyle }, 'redact-style');
+  });
+  $<HTMLInputElement>('ll-redact-w').addEventListener('input', (event) => {
+    editRedaction({ width: Number((event.target as HTMLInputElement).value) }, `redact-w:${selectedRedaction}`);
+  });
+  $<HTMLInputElement>('ll-redact-h').addEventListener('input', (event) => {
+    editRedaction({ height: Number((event.target as HTMLInputElement).value) }, `redact-h:${selectedRedaction}`);
+  });
+
+  $<HTMLButtonElement>('ll-redact-point').addEventListener('click', () => {
+    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    if (!block) return;
+    const here = rectAt(block, previewTime);
+    redactions = redactions.map((entry) => (entry.id === block.id
+      ? setPoint(entry, previewTime, here.x + here.width / 2, here.y + here.height / 2)
+      : entry));
+    persistRedactions('redact-point');
+    toast('It will follow to wherever you drag it from here.');
+  });
+
+  $<HTMLButtonElement>('ll-redact-delete').addEventListener('click', () => {
+    if (!selectedRedaction) return;
+    redactions = removeRedaction(redactions, selectedRedaction);
+    selectedRedaction = null;
+    persistRedactions();
+    toast('Redaction removed. Undo with Ctrl+Z.');
+  });
+
   // ------------------------------------------------------------------ aiming a zoom
 
   /**
@@ -1271,6 +1606,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     context.stroke();
     context.fillStyle = 'rgba(255, 255, 255, 0.22)';
     context.fill();
+  }
+
+  /**
+   * Outlines the selected redaction on the preview.
+   *
+   * The box itself is already burnt into the picture by the renderer, so this
+   * only says which one is being edited and where its edges are. Drawn in the
+   * composed frame's coordinates, which is close enough for placing by eye and
+   * avoids inverting the zoom transform.
+   */
+  function drawRedactOutline(context: CanvasRenderingContext2D, time: number): void {
+    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    if (!block || time < block.start || time > block.end) return;
+    const box = rectAt(block, time);
+    const { width, height } = canvas;
+    context.save();
+    context.strokeStyle = '#e0796f';
+    context.lineWidth = Math.max(2, Math.min(width, height) * 0.004);
+    context.setLineDash([Math.max(6, width * 0.01), Math.max(4, width * 0.006)]);
+    context.strokeRect(box.x * width, box.y * height, box.width * width, box.height * height);
+    context.restore();
   }
 
   /** Turns a pointer event on the canvas into a 0..1 point in the zoom region. */
@@ -1392,7 +1748,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     selectedText = null;
     renderTextSelected();
     dragging = { id, edge, from: zoomTimeAt(event), start: zoom.start, end: zoom.end };
-    zoomTrackEl.setPointerCapture(event.pointerId);
+    try { zoomTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
     renderSelected();
     // Selecting a block puts the playhead inside it. Without this you can edit
     // a zoom at 0:40 while looking at 0:05 and see nothing change, which reads
@@ -1526,18 +1882,51 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // Aiming happens on the picture itself. The crop editor owns the canvas while
   // it is open, so these only act when a zoom is being aimed instead.
   canvas.addEventListener('pointerdown', (event) => {
-    if (!focusTarget || cropping) return;
+    if (cropping) return;
+    // A selected redaction takes the picture, since placing what is hidden is
+    // more urgent than aiming a zoom and the two are never wanted at once.
+    if (selectedRedaction) {
+      event.preventDefault();
+      draggingRedaction = true;
+      try { canvas.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
+      placeRedaction(aimPointAt(event));
+      return;
+    }
+    if (!focusTarget) return;
     event.preventDefault();
     draggingFocus = true;
-    canvas.setPointerCapture(event.pointerId);
+    try { canvas.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
     moveFocus(aimPointAt(event), `zoom-aim:${focusTarget.id}`);
   });
   canvas.addEventListener('pointermove', (event) => {
+    if (draggingRedaction) { placeRedaction(aimPointAt(event)); return; }
     if (!draggingFocus || !focusTarget) return;
     moveFocus(aimPointAt(event), `zoom-aim:${focusTarget.id}`);
   });
   for (const done of ['pointerup', 'pointercancel'] as const) {
-    canvas.addEventListener(done, () => { draggingFocus = false; });
+    canvas.addEventListener(done, () => {
+      if (draggingRedaction) { draggingRedaction = false; remember('redact-move'); }
+      draggingFocus = false;
+    });
+  }
+
+  /**
+   * Puts the selected redaction where the pointer is.
+   *
+   * A block with one point is moved outright; one that already follows has the
+   * point nearest the playhead moved instead, so adjusting a path does not
+   * flatten it.
+   */
+  function placeRedaction(point: { x: number; y: number }): void {
+    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    if (!block) return;
+    redactions = redactions.map((entry) => (entry.id === block.id
+      ? (entry.points.length <= 1
+        ? { ...entry, points: [{ time: entry.start, x: point.x, y: point.y }] }
+        : setPoint(entry, previewTime, point.x, point.y))
+      : entry));
+    renderRedactions();
+    paint(previewTime);
   }
 
   $<HTMLButtonElement>('ll-zoom-add').addEventListener('click', () => {
@@ -1836,6 +2225,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (focusTarget) { drawAimEditor(context); return; }
 
     drawFrame(context, current, time, zoomAt(zoomTrack(), time), cursorAt(current, time));
+    if (selectedRedaction) drawRedactOutline(context, time);
   }
 
   /**

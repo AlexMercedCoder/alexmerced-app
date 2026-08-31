@@ -15,6 +15,8 @@ import { reviveTexts, type TextBlock } from './text';
 import { reviveBlocks, type ZoomBlock } from './zooms';
 import { mergeSpans, type Span } from './waveform';
 import { Scratch, type ScratchChunk, type ScratchSession } from './scratch';
+import { reviveSpeeds, type SpeedRegion } from './timeline';
+import { reviveRedactions, type RedactBlock } from './redact';
 
 export type { ScratchSession } from './scratch';
 
@@ -139,6 +141,10 @@ export type Project = {
    * skips over.
    */
   cuts: Span[];
+  /** Stretches that run faster or slower than they were recorded. */
+  speeds: SpeedRegion[];
+  /** Rectangles covered over, burnt into the exported picture. */
+  redactions: RedactBlock[];
   /** The derived camera move, kept so a reopened project renders identically. */
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
@@ -256,6 +262,8 @@ export function reviveProject(value: unknown): Project | null {
     zooms: reviveBlocks(project.zooms),
     texts: reviveTexts(project.texts),
     cuts: reviveCuts(project.cuts),
+    speeds: reviveSpeeds(project.speeds, () => createId('speed')),
+    redactions: reviveRedactions(project.redactions, () => createId('redact')),
     keys: Array.isArray(project.keys) ? (project.keys as KeySample[]) : [],
     marks: Array.isArray(project.marks) ? (project.marks as MarkSample[]) : [],
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
@@ -267,9 +275,9 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>
     & Partial<Pick<Project,
-      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
+      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -279,6 +287,8 @@ export function createProject(
     zooms: [],
     texts: [],
     cuts: [],
+    speeds: [],
+    redactions: [],
     keys: [],
     marks: [],
     keyframes: null,

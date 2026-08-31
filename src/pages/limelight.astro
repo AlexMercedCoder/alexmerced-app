@@ -136,6 +136,41 @@ const app = getApp('limelight');
         <p class="ll-note" id="ll-zoom-hint"></p>
 
         <div class="ll-zoomrow">
+          <span class="ll-tracklabel">Speed</span>
+          <div class="ll-zoomtrack ll-speedtrack" id="ll-speedtrack" aria-label="Speed track"></div>
+        </div>
+        <div class="ll-scrubrow">
+          <button class="btn btn--sm" id="ll-speed-add">Speed up from here</button>
+          <label class="ll-slider ll-speed-pick" id="ll-speed-selected" hidden>
+            <span>Pace</span>
+            <input type="range" id="ll-speed-amount" min="0.25" max="8" step="0.25" />
+            <em id="ll-speed-amount-out"></em>
+          </label>
+          <button class="btn btn--sm btn--ghost" id="ll-speed-delete" hidden>Back to normal</button>
+          <span class="ll-time" id="ll-speed-label"></span>
+        </div>
+
+        <div class="ll-zoomrow">
+          <span class="ll-tracklabel">Hide</span>
+          <div class="ll-zoomtrack ll-redacttrack" id="ll-redacttrack" aria-label="Redaction track"></div>
+        </div>
+        <div class="ll-scrubrow">
+          <button class="btn btn--sm" id="ll-redact-add">Hide something</button>
+          <div class="ll-redact-fields" id="ll-redact-selected" hidden>
+            <label class="field-row"><span>Style</span><select class="field" id="ll-redact-style"></select></label>
+            <label class="ll-slider"><span>Width</span><input type="range" id="ll-redact-w" min="0.02" max="1" step="0.01" /><em id="ll-redact-w-out"></em></label>
+            <label class="ll-slider"><span>Height</span><input type="range" id="ll-redact-h" min="0.02" max="1" step="0.01" /><em id="ll-redact-h-out"></em></label>
+            <button class="btn btn--sm" id="ll-redact-point">Follow from here</button>
+            <button class="btn btn--sm btn--ghost" id="ll-redact-delete">Delete</button>
+          </div>
+          <span class="ll-time" id="ll-redact-label"></span>
+        </div>
+        <p class="ll-note" id="ll-redact-note" hidden>
+          Drag on the picture to place what is hidden. It is burnt into the exported video,
+          not laid over it.
+        </p>
+
+        <div class="ll-zoomrow">
           <span class="ll-tracklabel">Text</span>
           <div class="ll-zoomtrack ll-texttrack" id="ll-texttrack" aria-label="Text track"></div>
         </div>
@@ -413,6 +448,10 @@ const app = getApp('limelight');
   .ll-vol { display: inline-flex; align-items: center; gap: 0.3rem; }
   .ll-vol input { width: 5rem; }
   .ll-vol[hidden] { display: none; }
+  .ll-speedtrack .ll-zoom { background: color-mix(in srgb, #2f6b9f 30%, transparent); border-color: #2f6b9f; }
+  .ll-redacttrack .ll-zoom { background: color-mix(in srgb, #a3312a 30%, transparent); border-color: #a3312a; }
+  .ll-speed-pick { max-width: 18rem; }
+  .ll-redact-fields { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
   .ll-zoom-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
   .ll-zoom-head .ll-tracklabel { margin-right: auto; }
 

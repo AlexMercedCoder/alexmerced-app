@@ -35,7 +35,7 @@ export type AudioTrackOptions = {
    * start-to-end window is used, which is what every caller did before cuts
    * existed.
    */
-  spans?: { start: number; end: number }[];
+  spans?: { start: number; end: number; speed?: number }[];
 };
 
 export type EncodedAudio = { samples: WebmSample[]; track: WebmTrack; duration: number };
@@ -187,9 +187,9 @@ async function decodeAudio(source: Blob | ArrayBuffer | Uint8Array): Promise<Aud
  * afterwards would put a cut mid-sample and click.
  */
 export function joinSpans(
-  buffer: AudioBuffer, spans: { start: number; end: number }[], channels: number,
+  buffer: AudioBuffer, spans: { start: number; end: number; speed?: number }[], channels: number,
 ): Float32Array[] {
-  const pieces = spans.map((span) => resampleTo48k(buffer, span.start, span.end, channels));
+  const pieces = spans.map((span) => resampleTo48k(buffer, span.start, span.end, channels, span.speed));
   const total = pieces.reduce((sum, piece) => sum + piece[0].length, 0);
 
   const planes: Float32Array[] = [];
@@ -206,24 +206,31 @@ export function joinSpans(
 }
 
 export function resampleTo48k(
-  buffer: AudioBuffer, start: number, end: number, channels: number,
+  buffer: AudioBuffer, start: number, end: number, channels: number, speed = 1,
 ): Float32Array[] {
+  const rate = Number.isFinite(speed) && speed > 0 ? speed : 1;
   const startFrame = Math.floor(start * buffer.sampleRate);
   const endFrame = Math.min(buffer.length, Math.ceil(end * buffer.sampleRate));
   const sourceLength = Math.max(0, endFrame - startFrame);
-  const targetLength = Math.round((sourceLength / buffer.sampleRate) * OPUS_RATE);
+  // A stretch played at double speed occupies half as much of the finished
+  // track, so the output is shorter and the source is walked twice as fast.
+  // This shifts the pitch, which is what playing a recording faster does; the
+  // alternative is a phase vocoder, and for hurrying past an install step the
+  // honest speed-up is what people expect.
+  const targetLength = Math.round((sourceLength / buffer.sampleRate / rate) * OPUS_RATE);
+  const step = (buffer.sampleRate / OPUS_RATE) * rate;
 
   const planes: Float32Array[] = [];
   for (let channel = 0; channel < channels; channel += 1) {
     const source = buffer.getChannelData(Math.min(channel, buffer.numberOfChannels - 1));
     const target = new Float32Array(targetLength);
 
-    if (buffer.sampleRate === OPUS_RATE) {
+    if (buffer.sampleRate === OPUS_RATE && rate === 1) {
       // Nothing to do but copy the window.
       target.set(source.subarray(startFrame, startFrame + targetLength));
     } else {
       for (let index = 0; index < targetLength; index += 1) {
-        const position = startFrame + (index * buffer.sampleRate) / OPUS_RATE;
+        const position = startFrame + index * step;
         const left = Math.floor(position);
         const right = Math.min(endFrame - 1, left + 1);
         const mix = position - left;

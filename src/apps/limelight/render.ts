@@ -14,7 +14,9 @@ import {
   cornersBounds, hasTilt, plateMotion, tiltCorners, type MotionSettings, type Point, type Tilt,
 } from './plate';
 import { textsAt, wrapText, type TextBlock } from './text';
-import { keptDuration, keptSpans, sourceTimeAt, type Span } from './waveform';
+import { type Span } from './waveform';
+import { editedDuration, segmentsOf, sourceAt, type SpeedRegion } from './timeline';
+import { rectAt, redactionsAt, type RedactBlock } from './redact';
 import { openFrameSource, type FrameSource } from './frames';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
@@ -74,6 +76,10 @@ export type Project = {
   end: number;
   /** Stretches inside that range which are skipped over. */
   cuts?: Span[];
+  /** Stretches that run faster or slower than recorded. */
+  speeds?: SpeedRegion[];
+  /** Rectangles covered over, burnt into the picture rather than laid on top. */
+  redactions?: RedactBlock[];
   /**
    * A decoded frame to draw instead of the video element.
    *
@@ -186,7 +192,7 @@ export function drawFrame(
     const behind = cropRect(project.crop, project.sourceWidth, project.sourceHeight);
     context.filter = 'blur(48px) brightness(0.7)';
     context.drawImage(
-      project.frame ?? project.video,
+      redact(project, time),
       behind.x, behind.y, behind.width, behind.height,
       -width * 0.1, -height * 0.1, width * 1.2, height * 1.2,
     );
@@ -198,7 +204,12 @@ export function drawFrame(
   // The crop is the recording as far as everything below is concerned: it sets
   // the shape that gets fitted to the frame, and the zoom moves around inside
   // it rather than around the original.
-  const picture = project.frame ?? project.video;
+  // Redactions are burnt into the source before anything else looks at it, so
+  // the zoom, the crop and the tilt all carry them and there is no path that
+  // renders the frame without them. A redaction applied as an overlay could be
+  // missed by a code path that draws the picture some other way, and shipping a
+  // recording with an uncovered API key is the worst bug this app could have.
+  const picture = redact(project, time);
   const region = cropRect(project.crop, project.sourceWidth, project.sourceHeight);
   const placed = contentRect(composition, region.width, region.height);
 
@@ -600,9 +611,11 @@ export async function render(
   const from = Math.max(0, project.start);
   const to = Math.min(project.duration, project.end > project.start ? project.end : project.duration);
   const cuts = project.cuts ?? [];
-  // The finished video is what is left after the cuts, so the frame count comes
-  // from the kept duration rather than the trimmed span.
-  const span = Math.max(1 / project.frameRate, keptDuration(cuts, from, to));
+  // What survives the cuts, at whatever speed each piece runs. The frame count
+  // comes from the finished length rather than the trimmed span, and with no
+  // cuts and no speed regions that is exactly the trimmed span again.
+  const segments = segmentsOf({ start: from, end: to }, cuts, project.speeds ?? []);
+  const span = Math.max(1 / project.frameRate, editedDuration(segments));
   const total = Math.max(1, Math.round(span * project.frameRate));
   const step = 1 / project.frameRate;
 
@@ -622,9 +635,8 @@ export async function render(
     /** Composes one frame onto the canvas. Shared by every format. */
     const compose = async (index: number): Promise<number> => {
       const time = index * step;
-      // Edited time in, source time out. With no cuts this is from + time, which
-      // is exactly what it used to be.
-      const sourceTime = sourceTimeAt(cuts, from, to, time);
+      // Edited time in, source time out.
+      const sourceTime = sourceAt(segments, time);
 
       let decoded: VideoFrame | null = null;
       if (source) {
@@ -760,7 +772,9 @@ export async function render(
     if (project.keepAudio && project.source) {
       onProgress({ stage: 'Encoding the sound', done: 0, total: 1 });
       // The kept pieces, so the sound skips exactly what the picture skips.
-      audio = await encodeOpus(project.source, { start: from, end: to, track: 2, spans: keptSpans(cuts, from, to) });
+      // The kept pieces with their speeds, so the sound skips and hurries exactly
+    // where the picture does.
+    audio = await encodeOpus(project.source, { start: from, end: to, track: 2, spans: segments });
       if (!audio) note = 'No sound was found in the recording, so this is silent.';
     }
 
@@ -844,6 +858,80 @@ function wallpaperSize(source: CanvasImageSource): { width: number; height: numb
  * spend its time in the garbage collector rather than in the encoder.
  */
 let scratchCanvas: OffscreenCanvas | null = null;
+let redactCanvas: OffscreenCanvas | null = null;
+
+/**
+ * The recording with its redactions burnt in.
+ *
+ * Returns the untouched picture when there is nothing to cover, so the common
+ * case costs nothing. Otherwise the frame is copied onto a canvas of its own,
+ * the boxes are applied there, and that canvas is what everything downstream
+ * draws.
+ *
+ * Coordinates are fractions of the whole source frame, so a redaction stays on
+ * its target through a crop or a change of output size.
+ */
+function redact(project: Project, time: number): CanvasImageSource {
+  const source = project.frame ?? project.video;
+  const blocks = project.redactions?.length ? redactionsAt(project.redactions, time) : [];
+  if (blocks.length === 0) return source;
+
+  const width = project.sourceWidth;
+  const height = project.sourceHeight;
+  if (!redactCanvas || redactCanvas.width !== width || redactCanvas.height !== height) {
+    redactCanvas = new OffscreenCanvas(width, height);
+  }
+  const context = redactCanvas.getContext('2d');
+  if (!context) return source;
+
+  context.filter = 'none';
+  context.clearRect(0, 0, width, height);
+  context.drawImage(source, 0, 0, width, height);
+
+  for (const block of blocks) {
+    const box = rectAt(block, time);
+    const x = box.x * width;
+    const y = box.y * height;
+    const w = Math.max(1, box.width * width);
+    const h = Math.max(1, box.height * height);
+
+    if (block.style === 'solid') {
+      context.fillStyle = '#101014';
+      context.fillRect(x, y, w, h);
+      continue;
+    }
+
+    if (block.style === 'pixelate') {
+      // Down to a handful of blocks and back up. Drawn through a second canvas
+      // because scaling a region onto itself reads the pixels it is writing.
+      const small = scratch(Math.max(1, Math.round(w / 24)), Math.max(1, Math.round(h / 24)));
+      const smallContext = small.getContext('2d');
+      if (!smallContext) continue;
+      smallContext.imageSmoothingEnabled = true;
+      smallContext.clearRect(0, 0, small.width, small.height);
+      smallContext.drawImage(redactCanvas, x, y, w, h, 0, 0, small.width, small.height);
+      context.imageSmoothingEnabled = false;
+      context.drawImage(small, 0, 0, small.width, small.height, x, y, w, h);
+      context.imageSmoothingEnabled = true;
+      continue;
+    }
+
+    // Blur. Clipped to the box, then the whole frame is redrawn through the
+    // filter, so the blur samples the neighbouring pixels rather than smearing
+    // the box's own edge inwards and leaving the text legible.
+    context.save();
+    context.beginPath();
+    context.rect(x, y, w, h);
+    context.clip();
+    context.filter = `blur(${Math.max(6, Math.round(Math.min(w, h) / 3))}px)`;
+    context.drawImage(redactCanvas, 0, 0, width, height);
+    context.filter = 'none';
+    context.restore();
+  }
+
+  return redactCanvas;
+}
+
 function scratch(width: number, height: number): OffscreenCanvas {
   if (!scratchCanvas || scratchCanvas.width !== width || scratchCanvas.height !== height) {
     scratchCanvas = new OffscreenCanvas(width, height);
