@@ -113,6 +113,22 @@ const app = getApp('limelight');
           <span class="ll-time" id="ll-crop-label"></span>
         </div>
 
+        <div class="ll-zoomrow" id="ll-soundrow" hidden>
+          <span class="ll-tracklabel">Sound</span>
+          <div class="ll-wavewrap" id="ll-wavewrap" aria-label="Waveform, drag to select a stretch">
+            <canvas class="ll-wave" id="ll-wave"></canvas>
+            <div class="ll-cutbands" id="ll-cutbands"></div>
+            <div class="ll-waveselect" id="ll-waveselect" hidden></div>
+            <div class="ll-wavehead" id="ll-wavehead"></div>
+          </div>
+        </div>
+        <div class="ll-scrubrow" id="ll-cutrow" hidden>
+          <button class="btn btn--sm" id="ll-cut-selection" disabled>Cut the selection</button>
+          <button class="btn btn--sm" id="ll-cut-silences">Remove silences</button>
+          <button class="btn btn--sm btn--ghost" id="ll-cut-clear" disabled>Keep everything</button>
+          <span class="ll-time" id="ll-cut-label"></span>
+        </div>
+
         <div class="ll-zoomrow">
           <span class="ll-tracklabel">Zoom</span>
           <div class="ll-zoomtrack" id="ll-zoomtrack" aria-label="Zoom track"></div>
@@ -386,6 +402,27 @@ const app = getApp('limelight');
   .ll-vol[hidden] { display: none; }
   .ll-zoom-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
   .ll-zoom-head .ll-tracklabel { margin-right: auto; }
+
+  /* The waveform. Its own row rather than a backdrop to the zoom track, because
+     it answers a different question: not "where does the camera move" but
+     "where is anybody talking". */
+  .ll-wavewrap {
+    position: relative; flex: 1 1 auto; min-width: 0; height: 3.2rem;
+    border: 1px solid var(--rule); border-radius: 7px; overflow: hidden;
+    background: var(--surface); cursor: crosshair; touch-action: none;
+  }
+  .ll-wave { display: block; width: 100%; height: 100%; }
+  .ll-cutbands, .ll-waveselect, .ll-wavehead { position: absolute; inset-block: 0; pointer-events: none; }
+  .ll-cutbands { inset-inline: 0; }
+  .ll-cutband {
+    position: absolute; inset-block: 0;
+    background: repeating-linear-gradient(
+      -45deg, rgba(190, 60, 50, 0.34) 0 6px, rgba(190, 60, 50, 0.16) 6px 12px);
+    border-left: 1px solid rgba(190, 60, 50, 0.8);
+    border-right: 1px solid rgba(190, 60, 50, 0.8);
+  }
+  .ll-waveselect { background: color-mix(in srgb, var(--accent) 26%, transparent); border-inline: 1px solid var(--accent); }
+  .ll-wavehead { width: 2px; background: var(--ink); opacity: 0.75; }
 
   .ll-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-items: start; }
   .ll-card { padding: 1rem; min-width: 0; display: grid; gap: 0.55rem; align-content: start; }

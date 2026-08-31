@@ -14,6 +14,7 @@ import {
   cornersBounds, hasTilt, plateMotion, tiltCorners, type MotionSettings, type Point, type Tilt,
 } from './plate';
 import { textsAt, wrapText, type TextBlock } from './text';
+import { keptDuration, keptSpans, sourceTimeAt, type Span } from './waveform';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
 /**
@@ -70,6 +71,8 @@ export type Project = {
   /** Seconds into the recording that the export begins and ends. */
   start: number;
   end: number;
+  /** Stretches inside that range which are skipped over. */
+  cuts?: Span[];
 };
 
 function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
@@ -585,14 +588,19 @@ export async function render(
 
   const from = Math.max(0, project.start);
   const to = Math.min(project.duration, project.end > project.start ? project.end : project.duration);
-  const span = Math.max(1 / project.frameRate, to - from);
+  const cuts = project.cuts ?? [];
+  // The finished video is what is left after the cuts, so the frame count comes
+  // from the kept duration rather than the trimmed span.
+  const span = Math.max(1 / project.frameRate, keptDuration(cuts, from, to));
   const total = Math.max(1, Math.round(span * project.frameRate));
   const step = 1 / project.frameRate;
 
   /** Composes one frame onto the canvas. Shared by every format. */
   const compose = async (index: number): Promise<number> => {
     const time = index * step;
-    const sourceTime = from + time;
+    // Edited time in, source time out. With no cuts this is from + time, which
+    // is exactly what it used to be.
+    const sourceTime = sourceTimeAt(cuts, from, to, time);
     await seekTo(project.video, Math.min(project.duration - 1e-3, sourceTime));
     if (project.camera) {
       await seekTo(project.camera, Math.min(Math.max(0, project.camera.duration - 1e-3), sourceTime)).catch(() => {});
@@ -715,7 +723,8 @@ export async function render(
 
   if (project.keepAudio && project.source) {
     onProgress({ stage: 'Encoding the sound', done: 0, total: 1 });
-    audio = await encodeOpus(project.source, { start: from, end: to, track: 2 });
+    // The kept pieces, so the sound skips exactly what the picture skips.
+    audio = await encodeOpus(project.source, { start: from, end: to, track: 2, spans: keptSpans(cuts, from, to) });
     if (!audio) note = 'No sound was found in the recording, so this is silent.';
   }
 

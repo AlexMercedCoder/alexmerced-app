@@ -27,6 +27,15 @@ export type AudioTrackOptions = {
   bitrate?: number;
   /** Forced channel count. Otherwise the source's, capped at two. */
   channels?: 1 | 2;
+  /**
+   * The pieces to keep, in source seconds, when the middle has been cut.
+   *
+   * Given, these are encoded end to end as one continuous track, so the sound
+   * matches a video that skips the same stretches. Omitted, the single
+   * start-to-end window is used, which is what every caller did before cuts
+   * existed.
+   */
+  spans?: { start: number; end: number }[];
 };
 
 export type EncodedAudio = { samples: WebmSample[]; track: WebmTrack; duration: number };
@@ -55,7 +64,10 @@ export async function encodeOpus(
   const end = Math.min(buffer.duration, options.end ?? buffer.duration);
   if (end <= start) return null;
 
-  const planes = resampleTo48k(buffer, start, end, channels);
+  const spans = (options.spans ?? []).filter((span) => span.end > span.start);
+  const planes = spans.length > 0
+    ? joinSpans(buffer, spans, channels)
+    : resampleTo48k(buffer, start, end, channels);
   const frames = planes[0].length;
   if (frames === 0) return null;
 
@@ -167,6 +179,32 @@ async function decodeAudio(source: Blob | ArrayBuffer | Uint8Array): Promise<Aud
  * audio the difference is inaudible, and this avoids pulling in a resampler
  * for something that runs once per export.
  */
+/**
+ * Resamples several windows and lays them end to end.
+ *
+ * Each span is resampled on its own rather than the whole buffer being
+ * resampled and then sliced, so the joins land on whole output samples. Slicing
+ * afterwards would put a cut mid-sample and click.
+ */
+export function joinSpans(
+  buffer: AudioBuffer, spans: { start: number; end: number }[], channels: number,
+): Float32Array[] {
+  const pieces = spans.map((span) => resampleTo48k(buffer, span.start, span.end, channels));
+  const total = pieces.reduce((sum, piece) => sum + piece[0].length, 0);
+
+  const planes: Float32Array[] = [];
+  for (let channel = 0; channel < channels; channel += 1) {
+    const target = new Float32Array(total);
+    let at = 0;
+    for (const piece of pieces) {
+      target.set(piece[channel], at);
+      at += piece[channel].length;
+    }
+    planes.push(target);
+  }
+  return planes;
+}
+
 export function resampleTo48k(
   buffer: AudioBuffer, start: number, end: number, channels: number,
 ): Float32Array[] {

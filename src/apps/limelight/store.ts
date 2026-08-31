@@ -12,6 +12,23 @@ import {
 } from './plate';
 import { reviveTexts, type TextBlock } from './text';
 import { reviveBlocks, type ZoomBlock } from './zooms';
+import { mergeSpans, type Span } from './waveform';
+
+/**
+ * Reads cuts back from storage.
+ *
+ * Merged on the way in, so a stored file that somehow holds overlapping cuts
+ * cannot make the edited duration disagree with what the export produces.
+ */
+function reviveCuts(value: unknown): Span[] {
+  if (!Array.isArray(value)) return [];
+  const spans = value
+    .filter((entry): entry is Span =>
+      typeof entry === 'object' && entry !== null
+      && Number.isFinite((entry as Span).start) && Number.isFinite((entry as Span).end))
+    .map((entry) => ({ start: Math.max(0, entry.start), end: entry.end }));
+  return mergeSpans(spans);
+}
 
 /**
  * Keeping a recording between visits.
@@ -106,6 +123,14 @@ export type Project = {
   zooms: ZoomBlock[];
   /** Captions laid over the finished frame. */
   texts: TextBlock[];
+  /**
+   * Stretches taken out of the middle, in source seconds.
+   *
+   * Trim only ever set an outer start and end, so removing a fumbled passage
+   * meant recording the whole thing again. These are the pieces the export
+   * skips over.
+   */
+  cuts: Span[];
   /** The derived camera move, kept so a reopened project renders identically. */
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
@@ -222,6 +247,7 @@ export function reviveProject(value: unknown): Project | null {
       ? project.wallpaperMime : 'image/png',
     zooms: reviveBlocks(project.zooms),
     texts: reviveTexts(project.texts),
+    cuts: reviveCuts(project.cuts),
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
     settings: reviveSettings(project.settings),
     createdAt: typeof project.createdAt === 'string' ? project.createdAt : stamp,
@@ -231,9 +257,9 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'crop' | 'wallpaper' | 'wallpaperMime'>
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'crop' | 'wallpaper' | 'wallpaperMime'>
     & Partial<Pick<Project,
-      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
+      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -242,6 +268,7 @@ export function createProject(
     name,
     zooms: [],
     texts: [],
+    cuts: [],
     keyframes: null,
     crop: { ...FULL_CROP },
     wallpaper: null,

@@ -30,6 +30,9 @@ import {
 } from './text';
 import { defaultZoom, viewRect, zoomAt, type ZoomSettings } from './zoom';
 import {
+  analyseAudio, findSilences, keptDuration, mergeSpans, type Peak, type Span,
+} from './waveform';
+import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
 } from './zooms';
@@ -89,18 +92,24 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** The zoom whose focal point is being shown on the canvas, if any. */
   let focusTarget: ZoomBlock | null = null;
   let draggingFocus = false;
+  /** Stretches removed from the middle, and the decoded sound they came from. */
+  let cuts: Span[] = [];
+  let wave: { peaks: Peak[]; loudness: Float32Array; duration: number } | null = null;
+  let selection: { start: number; end: number } | null = null;
+  let selectingWave = false;
   /** Everything an undo has to put back. The recording itself never changes. */
   type EditorState = {
     settings: Settings;
     zooms: ZoomBlock[];
     texts: TextBlock[];
+    cuts: Span[];
     crop: Crop;
     trim: { start: number; end: number };
     wallpaper: Uint8Array | null;
     wallpaperMime: string;
   };
   const history = new History<EditorState>({
-    settings, zooms, texts, crop, trim, wallpaper: null, wallpaperMime: 'image/png',
+    settings, zooms, texts, cuts: [], crop, trim, wallpaper: null, wallpaperMime: 'image/png',
   });
   /** Set while a state is being put back, so restoring does not record itself. */
   let restoring = false;
@@ -130,6 +139,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       stored.crop = crop;
       stored.zooms = zooms;
       stored.texts = texts;
+      stored.cuts = cuts;
       // Derived from the blocks, and stored alongside them so a reopened
       // project renders exactly as it did.
       stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
@@ -140,7 +150,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // ------------------------------------------------------------------ history
 
   function snapshot(): EditorState {
-    return { settings, zooms, texts, crop, trim, wallpaper: wallpaperBytes, wallpaperMime };
+    return { settings, zooms, texts, cuts, crop, trim, wallpaper: wallpaperBytes, wallpaperMime };
   }
 
   /**
@@ -161,6 +171,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       settings = state.settings;
       zooms = state.zooms;
       texts = state.texts;
+      cuts = state.cuts;
       crop = state.crop;
       trim = { ...state.trim };
       // The picture is held as bytes in the snapshot, so an undo across a
@@ -192,6 +203,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderCrop();
     renderZooms();
     renderTexts();
+    renderCuts();
     renderHistory();
     await drawPreview();
   }
@@ -248,6 +260,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       format: settings.format,
       gifColours: 128,
       keepAudio: settings.keepAudio && recording.hasAudio,
+      cuts,
       start: trim.start,
       end: trim.end > trim.start ? trim.end : recording.duration,
     };
@@ -419,6 +432,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     settings = project.settings;
     zooms = project.zooms;
     texts = project.texts;
+    cuts = project.cuts;
     crop = project.crop;
     dropWallpaper();
     if (project.wallpaper) await useWallpaper(project.wallpaper, project.wallpaperMime);
@@ -468,7 +482,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remember();
     }
 
-    if (!stored) { crop = { ...FULL_CROP }; texts = []; dropWallpaper(); }
+    if (!stored) { crop = { ...FULL_CROP }; texts = []; cuts = []; dropWallpaper(); }
 
     trim = range && range.end > range.start
       ? { start: Math.max(0, range.start), end: Math.min(recording.duration, range.end) }
@@ -492,6 +506,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderCrop();
     renderZooms();
     renderTexts();
+    await loadWaveform();
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
     else sourceNote.hidden = true;
@@ -932,6 +947,197 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         context.fillRect(cx - grip / 2, cy - grip / 2, grip, grip);
       }
     }
+  }
+
+  // ------------------------------------------------------------------ sound and cuts
+
+  const waveWrap = $<HTMLDivElement>('ll-wavewrap');
+  const waveCanvas = $<HTMLCanvasElement>('ll-wave');
+  const cutBandsEl = $<HTMLDivElement>('ll-cutbands');
+  const waveSelectEl = $<HTMLDivElement>('ll-waveselect');
+  const waveHeadEl = $<HTMLDivElement>('ll-wavehead');
+
+  /**
+   * Decodes the recording's audio once and keeps what is needed from it.
+   *
+   * Peaks for drawing, loudness for finding silences. Decoding is much the most
+   * expensive part, so it happens on load and never again; the drawing is done
+   * from the peaks at whatever width the element happens to be.
+   */
+  async function loadWaveform(): Promise<void> {
+    wave = null;
+    selection = null;
+    const hasSound = recording?.hasAudio ?? false;
+    $<HTMLDivElement>('ll-soundrow').hidden = !hasSound;
+    $<HTMLDivElement>('ll-cutrow').hidden = !hasSound;
+    if (!hasSound || !recording) { renderCuts(); return; }
+
+    wave = await analyseAudio(recording.blob);
+    // A recording whose audio the decoder will not read still edits perfectly
+    // well, so the row simply goes away rather than showing an error.
+    if (!wave) {
+      $<HTMLDivElement>('ll-soundrow').hidden = true;
+      $<HTMLDivElement>('ll-cutrow').hidden = true;
+    }
+    drawWave();
+    renderCuts();
+  }
+
+  function drawWave(): void {
+    if (!wave || !recording) return;
+    const width = Math.max(1, Math.round(waveWrap.clientWidth));
+    const height = Math.max(1, Math.round(waveWrap.clientHeight));
+    if (waveCanvas.width !== width) waveCanvas.width = width;
+    if (waveCanvas.height !== height) waveCanvas.height = height;
+
+    const context = waveCanvas.getContext('2d');
+    if (!context) return;
+    const style = getComputedStyle(root);
+    context.clearRect(0, 0, width, height);
+
+    const middle = height / 2;
+    context.fillStyle = style.getPropertyValue('--accent').trim() || '#b0842a';
+    context.globalAlpha = 0.85;
+
+    // One bar per pixel column, taken from the nearest peak. Peaks were reduced
+    // to a fixed count at decode time, so this rescales rather than redecodes.
+    const peaks = wave.peaks;
+    for (let x = 0; x < width; x += 1) {
+      const peak = peaks[Math.min(peaks.length - 1, Math.floor((x / width) * peaks.length))];
+      const top = middle - Math.max(0, peak.max) * middle;
+      const bottom = middle - Math.min(0, peak.min) * middle;
+      context.fillRect(x, top, 1, Math.max(1, bottom - top));
+    }
+    context.globalAlpha = 1;
+  }
+
+  /** Draws the cut bands, the selection and the playhead over the waveform. */
+  function renderCuts(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    const percent = (time: number) => `${Math.max(0, Math.min(100, (time / duration) * 100))}%`;
+
+    cutBandsEl.innerHTML = '';
+    for (const cut of cuts) {
+      const band = document.createElement('div');
+      band.className = 'll-cutband';
+      band.style.left = percent(cut.start);
+      band.style.width = `${Math.max(0, ((cut.end - cut.start) / duration) * 100)}%`;
+      cutBandsEl.append(band);
+    }
+
+    waveSelectEl.hidden = !selection;
+    if (selection) {
+      const from = Math.min(selection.start, selection.end);
+      const to = Math.max(selection.start, selection.end);
+      waveSelectEl.style.left = percent(from);
+      waveSelectEl.style.width = `${Math.max(0, ((to - from) / duration) * 100)}%`;
+    }
+    renderPlayhead();
+
+    $<HTMLButtonElement>('ll-cut-selection').disabled = !selection
+      || Math.abs(selection.end - selection.start) < 0.05;
+    $<HTMLButtonElement>('ll-cut-clear').disabled = cuts.length === 0;
+
+    const removed = trim.end - trim.start - keptDuration(cuts, trim.start, trim.end);
+    $<HTMLSpanElement>('ll-cut-label').textContent = cuts.length
+      ? `${cuts.length} cut${cuts.length === 1 ? '' : 's'}, ${formatClock(removed)} removed, ${formatClock(keptDuration(cuts, trim.start, trim.end))} left`
+      : '';
+  }
+
+  /** Just the playhead, cheap enough to run on every frame of playback. */
+  function renderPlayhead(): void {
+    if (!recording) return;
+    const duration = Math.max(0.001, recording.duration);
+    waveHeadEl.style.left = `${Math.max(0, Math.min(100, (previewTime / duration) * 100))}%`;
+  }
+
+  function waveTimeAt(event: PointerEvent): number {
+    if (!recording) return 0;
+    const box = waveWrap.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
+  }
+
+  waveWrap.addEventListener('pointerdown', (event) => {
+    if (!recording) return;
+    event.preventDefault();
+    if (playing) pause();
+    const at = waveTimeAt(event);
+    selection = { start: at, end: at };
+    selectingWave = true;
+    try { waveWrap.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
+    // A click with no drag is a seek, which is what a waveform invites.
+    previewTime = at;
+    syncScrub();
+    void drawPreview();
+    renderCuts();
+  });
+
+  waveWrap.addEventListener('pointermove', (event) => {
+    if (!selectingWave || !selection) return;
+    selection = { start: selection.start, end: waveTimeAt(event) };
+    renderCuts();
+  });
+
+  for (const done of ['pointerup', 'pointercancel'] as const) {
+    waveWrap.addEventListener(done, () => {
+      selectingWave = false;
+      // A drag too short to be a range was a click, so the selection goes away
+      // rather than leaving an invisible sliver armed for cutting.
+      if (selection && Math.abs(selection.end - selection.start) < 0.05) selection = null;
+      renderCuts();
+    });
+  }
+
+  function applyCuts(next: Span[], label: string): void {
+    cuts = mergeSpans(next);
+    selection = null;
+    remember(label);
+    renderCuts();
+    renderTrim();
+    if (recording && previewTime > trim.end) { previewTime = trim.end; syncScrub(); }
+    void drawPreview();
+  }
+
+  $<HTMLButtonElement>('ll-cut-selection').addEventListener('click', () => {
+    if (!selection) return;
+    const from = Math.min(selection.start, selection.end);
+    const to = Math.max(selection.start, selection.end);
+    applyCuts([...cuts, { start: from, end: to }], 'cut');
+    toast(`Cut ${formatClock(to - from)}. Undo with Ctrl+Z.`);
+  });
+
+  $<HTMLButtonElement>('ll-cut-silences').addEventListener('click', () => {
+    if (!wave || !recording) {
+      setStatus('There is no sound in this recording to find silences in.', 'bad');
+      return;
+    }
+    const found = findSilences(wave.loudness, recording.duration)
+      // Only inside the trimmed range: cutting silence from a part that is
+      // already being thrown away achieves nothing and reads as a bug.
+      .map((span) => ({ start: Math.max(span.start, trim.start), end: Math.min(span.end, trim.end) }))
+      .filter((span) => span.end - span.start > 0.05);
+
+    if (found.length === 0) {
+      setStatus('No silences long enough to be worth cutting.', 'good');
+      return;
+    }
+    const before = keptDuration(cuts, trim.start, trim.end);
+    applyCuts([...cuts, ...found], 'silences');
+    const saved = before - keptDuration(cuts, trim.start, trim.end);
+    toast(`Removed ${found.length} silence${found.length === 1 ? '' : 's'}, ${formatClock(saved)} shorter.`);
+  });
+
+  $<HTMLButtonElement>('ll-cut-clear').addEventListener('click', () => {
+    if (!cuts.length) return;
+    applyCuts([], 'cuts-cleared');
+    toast('Every cut put back.');
+  });
+
+  // The waveform is drawn to the element's pixel width, so it has to be redrawn
+  // when that changes or it stretches.
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => { drawWave(); renderCuts(); }).observe(waveWrap);
   }
 
   // ------------------------------------------------------------------ aiming a zoom
@@ -1604,6 +1810,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function syncScrub(): void {
     scrubber.value = String(previewTime);
     $<HTMLSpanElement>('ll-time').textContent = formatClock(previewTime);
+    renderPlayhead();
   }
 
   scrubber.addEventListener('input', () => {
@@ -2320,6 +2527,24 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       previewTime = trim.end;
       syncScrub();
       paint(previewTime);
+      return;
+    }
+
+    // Skip anything cut out, so the preview is the finished video rather than
+    // the raw recording with some bands drawn on it.
+    const inCut = cuts.find((cut) => time >= cut.start && time < cut.end - 1e-3);
+    if (inCut) {
+      if (inCut.end >= trim.end - 1e-3) {
+        if (looping) { void restart(); return; }
+        pause();
+        previewTime = trim.end;
+        syncScrub();
+        paint(previewTime);
+        return;
+      }
+      video.currentTime = inCut.end;
+      if (cameraVideo) cameraVideo.currentTime = inCut.end;
+      queueFrame();
       return;
     }
 
