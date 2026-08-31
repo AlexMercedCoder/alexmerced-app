@@ -150,6 +150,24 @@ describe('addBlock', () => {
     expect(addBlock([], 5, 20, settings())[0].pinned).toBe(true);
   });
 
+  it('aims at the focal point it is given', () => {
+    const blocks = addBlock([], 5, 20, settings(), { x: 0.22, y: 0.78 });
+    expect(blocks[0].x).toBeCloseTo(0.22);
+    expect(blocks[0].y).toBeCloseTo(0.78);
+  });
+
+  it('falls back to the middle when there is no pointer track to aim with', () => {
+    const blocks = addBlock([], 5, 20, settings());
+    expect(blocks[0].x).toBeCloseTo(0.5);
+    expect(blocks[0].y).toBeCloseTo(0.5);
+  });
+
+  it('keeps a focal point inside the frame', () => {
+    const blocks = addBlock([], 5, 20, settings(), { x: -3, y: 9 });
+    expect(blocks[0].x).toBe(0);
+    expect(blocks[0].y).toBe(1);
+  });
+
   it('refuses to add one inside an existing block', () => {
     const existing = [block(4, 8)];
     expect(addBlock(existing, 6, 20, settings())).toHaveLength(1);

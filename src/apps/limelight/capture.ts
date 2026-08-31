@@ -32,6 +32,47 @@ export type Recording = {
   hasAudio: boolean;
 };
 
+/**
+ * Turns a chosen device id into a constraint.
+ *
+ * Deliberately not `exact`. An exact id that has gone away throws
+ * OverconstrainedError and loses the whole recording, which is a bad trade for
+ * a preference; asking nicely falls back to the default device instead.
+ */
+function deviceConstraint(id: string | undefined): MediaTrackConstraints | true {
+  return id && id !== 'default' ? { deviceId: id } : true;
+}
+
+export type CaptureDevice = { id: string; label: string };
+
+/**
+ * The microphones and cameras this browser will admit to having.
+ *
+ * Labels are empty until the user has granted permission at least once, which
+ * is a privacy measure rather than a bug, so unnamed devices are numbered
+ * instead of shown blank. Callers re-run this after a recording, by which point
+ * the real names are available.
+ */
+export async function listDevices(): Promise<{ microphones: CaptureDevice[]; cameras: CaptureDevice[] }> {
+  if (!navigator.mediaDevices?.enumerateDevices) return { microphones: [], cameras: [] };
+  let devices: MediaDeviceInfo[] = [];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch {
+    return { microphones: [], cameras: [] };
+  }
+
+  const pick = (kind: MediaDeviceKind, noun: string): CaptureDevice[] =>
+    devices
+      .filter((device) => device.kind === kind && device.deviceId)
+      .map((device, index) => ({
+        id: device.deviceId,
+        label: device.label || `${noun} ${index + 1}`,
+      }));
+
+  return { microphones: pick('audioinput', 'Microphone'), cameras: pick('videoinput', 'Camera') };
+}
+
 export function canCapture(): boolean {
   return typeof navigator !== 'undefined'
     && !!navigator.mediaDevices?.getDisplayMedia
@@ -57,6 +98,16 @@ export type CaptureOptions = {
   microphone: boolean;
   systemAudio: boolean;
   camera: boolean;
+  /**
+   * Which devices to record from, when a machine has more than one.
+   *
+   * Undefined or 'default' means "let the browser choose", which is what
+   * happens on a laptop with one microphone and one camera. An id that no
+   * longer resolves, because the device was unplugged between choosing and
+   * recording, falls back to the default rather than failing the recording.
+   */
+  microphoneId?: string;
+  cameraId?: string;
   /**
    * Ask the platform to blur behind the camera. Chrome hands this to the
    * operating system, which is the only place it can be done properly. When a
@@ -138,7 +189,9 @@ export class Session {
 
     if (this.options.microphone) {
       try {
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mic = await navigator.mediaDevices.getUserMedia({
+          audio: deviceConstraint(this.options.microphoneId),
+        });
         this.streams.push(mic);
         tracks.push(...mic.getAudioTracks());
       } catch {
@@ -154,8 +207,15 @@ export class Session {
 
     if (this.options.camera) {
       try {
+        const wanted = deviceConstraint(this.options.cameraId);
         const camera = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            // A chosen camera wins over facingMode, which would otherwise pull
+            // the browser back to the front-facing one on a phone.
+            ...(typeof wanted === 'object' ? wanted : { facingMode: 'user' }),
+          },
         });
         this.streams.push(camera);
         if (this.options.cameraBlur) this.blurred = await applyBackgroundBlur(camera);

@@ -37,6 +37,21 @@ const app = getApp('limelight');
           </label>
           <label class="ll-check"><input type="checkbox" id="ll-countdown-sound" /><span>Count out loud</span></label>
         </div>
+        <div class="ll-capture__options ll-devices" id="ll-devices" hidden>
+          <label class="field-row ll-devicepick" id="ll-mic-pick" hidden>
+            <span>Microphone</span>
+            <select class="field" id="ll-mic-device"></select>
+          </label>
+          <label class="field-row ll-devicepick" id="ll-camera-pick" hidden>
+            <span>Camera</span>
+            <select class="field" id="ll-camera-device"></select>
+          </label>
+          <button class="btn btn--sm btn--ghost" id="ll-devices-refresh">Rescan</button>
+        </div>
+        <p class="ll-note" id="ll-devices-note" hidden>
+          Device names appear once you have allowed access at least once. Until then a browser
+          only says how many there are.
+        </p>
         <p class="ll-note">
           Recording this tab is the only case where a browser knows where your pointer is, so it is the
           only case where the zoom can follow your cursor exactly. Recording anything else still works:
@@ -62,9 +77,20 @@ const app = getApp('limelight');
 
       <div class="ll-stage" id="ll-stage" hidden>
         <canvas id="ll-preview" class="ll-preview"></canvas>
-        <div class="ll-scrubrow">
+        <div class="ll-transport">
+          <button class="ll-icon" id="ll-to-start" title="Back to the start" aria-label="Back to the start">&#9198;</button>
+          <button class="ll-icon" id="ll-step-back" title="Back one frame" aria-label="Back one frame">&#9666;</button>
+          <button class="ll-icon ll-icon--play" id="ll-play" title="Play" aria-label="Play">&#9654;</button>
+          <button class="ll-icon" id="ll-step-fwd" title="Forward one frame" aria-label="Forward one frame">&#9656;</button>
+          <button class="ll-icon" id="ll-to-end" title="Skip to the end" aria-label="Skip to the end">&#9197;</button>
           <input type="range" id="ll-scrub" class="ll-scrub" min="0" max="10" step="0.04" value="0" aria-label="Preview position" />
           <span class="ll-time" id="ll-time">0:00</span>
+          <span class="ll-time ll-time--total" id="ll-total"></span>
+          <button class="ll-icon ll-icon--wide" id="ll-loop" title="Loop the trimmed range" aria-label="Loop the trimmed range" aria-pressed="false">Loop</button>
+          <label class="ll-vol" id="ll-vol-wrap">
+            <button class="ll-icon" id="ll-mute" title="Mute" aria-label="Mute" aria-pressed="false">&#128266;</button>
+            <input type="range" id="ll-vol" min="0" max="1" step="0.05" value="1" aria-label="Volume" />
+          </label>
         </div>
 
         <div class="ll-trim" id="ll-trim" aria-label="Trim range">
@@ -115,11 +141,19 @@ const app = getApp('limelight');
         </div>
 
         <div class="ll-zoom-selected" id="ll-zoom-selected" hidden>
-          <label class="ll-slider">
-            <span>How far this one goes in</span>
-            <input type="range" id="ll-zoom-amount" min="1" max="4" step="0.1" />
-            <em id="ll-zoom-amount-out"></em>
-          </label>
+          <div class="ll-zoom-head">
+            <span class="ll-tracklabel">This zoom</span>
+            <button class="btn btn--sm" id="ll-zoom-aim" aria-pressed="false">Aim it</button>
+            <button class="btn btn--sm btn--ghost" id="ll-zoom-delete">Delete</button>
+          </div>
+          <div class="ll-text-fields">
+            <label class="ll-slider"><span>How far in</span><input type="range" id="ll-zoom-amount" min="1" max="4" step="0.1" /><em id="ll-zoom-amount-out"></em></label>
+            <label class="ll-slider"><span>Across</span><input type="range" id="ll-zoom-x" min="0" max="1" step="0.01" /><em id="ll-zoom-x-out"></em></label>
+            <label class="ll-slider"><span>Down</span><input type="range" id="ll-zoom-y" min="0" max="1" step="0.01" /><em id="ll-zoom-y-out"></em></label>
+          </div>
+          <p class="ll-note" id="ll-aim-note" hidden>
+            Drag on the picture to say what this zoom should look at. The bright rectangle is what it will show.
+          </p>
         </div>
 
         <p class="ll-keys">
@@ -176,9 +210,13 @@ const app = getApp('limelight');
         </section>
 
         <section class="card ll-card">
-          <h2 class="ll-subhead">Zoom</h2>
+          <h2 class="ll-subhead">Automatic zoom</h2>
+          <p class="ll-note">
+            These are the defaults the automatic zooms are built from. To change one zoom,
+            click it on the timeline instead.
+          </p>
           <label class="ll-check"><input type="checkbox" id="ll-zoom-on" /><span>Zoom in on what is happening</span></label>
-          <label class="ll-slider"><span>How far</span><input type="range" id="ll-zoom-scale" min="1" max="3" step="0.05" /><em id="ll-zoom-scale-out"></em></label>
+          <label class="ll-slider"><span>Default how far in</span><input type="range" id="ll-zoom-scale" min="1" max="3" step="0.05" /><em id="ll-zoom-scale-out"></em></label>
           <label class="ll-slider"><span>How long it stays</span><input type="range" id="ll-zoom-hold" min="0.4" max="4" step="0.1" /><em id="ll-zoom-hold-out"></em></label>
           <label class="ll-slider"><span>How fast it moves</span><input type="range" id="ll-zoom-move" min="0.15" max="1.5" step="0.05" /><em id="ll-zoom-move-out"></em></label>
           <label class="ll-check"><input type="checkbox" id="ll-clicks" /><span>Show a ripple where you clicked</span></label>
@@ -324,6 +362,30 @@ const app = getApp('limelight');
   .ll-scrubrow { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
   .ll-scrub { flex: 1 1 240px; min-width: 0; }
   .ll-time { font-variant-numeric: tabular-nums; font-size: 0.82rem; color: var(--ink-soft); min-width: 3rem; }
+  .ll-time--total { min-width: 0; color: var(--ink-faint); }
+
+  /* Transport. The play button is deliberately the largest target in the row:
+     it is the control people reach for first and the one that was missing. */
+  .ll-transport { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+  .ll-transport .ll-scrub { margin-inline: 0.4rem; }
+  .ll-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 2rem; height: 2rem; padding: 0 0.4rem;
+    border: 1px solid var(--rule); border-radius: 7px;
+    background: var(--surface); color: var(--ink); cursor: pointer;
+    font-size: 0.9rem; line-height: 1;
+  }
+  .ll-icon:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .ll-icon:disabled { opacity: 0.4; cursor: default; }
+  .ll-icon--play { min-width: 2.5rem; height: 2.5rem; font-size: 1rem; border-color: var(--accent); color: var(--accent); }
+  .ll-icon--play[data-playing='true'] { background: var(--accent); color: var(--surface); }
+  .ll-icon--wide { min-width: auto; padding: 0 0.6rem; font-size: 0.74rem; letter-spacing: 0.04em; text-transform: uppercase; }
+  .ll-icon[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .ll-vol { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .ll-vol input { width: 5rem; }
+  .ll-vol[hidden] { display: none; }
+  .ll-zoom-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .ll-zoom-head .ll-tracklabel { margin-right: auto; }
 
   .ll-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-items: start; }
   .ll-card { padding: 1rem; min-width: 0; display: grid; gap: 0.55rem; align-content: start; }

@@ -126,9 +126,17 @@ export function constrain(blocks: ZoomBlock[], id: string, duration: number): Zo
   return sortBlocks(sorted.map((entry) => (entry.id === id ? block : entry)));
 }
 
-/** Adds a block at a moment, in whatever gap is available there. */
+/**
+ * Adds a block at a moment, in whatever gap is available there.
+ *
+ * The focal point can be given, and should be wherever the pointer was at that
+ * moment. Defaulting to the middle of the screen was the old behaviour and it
+ * was almost always wrong: the thing worth zooming to is rarely dead centre,
+ * and there was no way to say so afterwards.
+ */
 export function addBlock(
   blocks: ZoomBlock[], at: number, duration: number, settings: ZoomSettings,
+  focus?: { x: number; y: number },
 ): ZoomBlock[] {
   const sorted = sortBlocks(blocks);
   if (sorted.some((block) => at >= block.start && at <= block.end)) return sorted;
@@ -149,8 +157,8 @@ export function addBlock(
     start,
     end: Math.max(start + MIN_BLOCK, end),
     scale: settings.scale,
-    x: 0.5,
-    y: 0.5,
+    x: Math.max(0, Math.min(1, focus?.x ?? 0.5)),
+    y: Math.max(0, Math.min(1, focus?.y ?? 0.5)),
     pinned: true,
   }]);
 }

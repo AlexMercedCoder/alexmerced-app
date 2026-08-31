@@ -3,10 +3,13 @@ import { downloadBlob } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { registerTools } from '../../lib/webmcp';
 import type { Interest } from './attention';
-import { canCapture, CaptureError, Session, type Recording, type Source } from './capture';
 import {
-  CAMERA_SHAPES, cameraRect, CROP_ASPECTS, cropToAspect, defaultComposition, FULL_CROP, isFullCrop,
-  MIN_CROP, normaliseCrop, OUTPUT_SIZES, PRESETS, QUALITY,
+  canCapture, CaptureError, listDevices, Session,
+  type CaptureDevice, type Recording, type Source,
+} from './capture';
+import {
+  CAMERA_SHAPES, cameraRect, CROP_ASPECTS, cropRect, cropToAspect, defaultComposition, FULL_CROP,
+  isFullCrop, MIN_CROP, normaliseCrop, OUTPUT_SIZES, PRESETS, QUALITY,
   type CameraCorner, type CameraShape, type Composition, type Crop,
 } from './layout';
 import { countdown } from './countdown';
@@ -25,12 +28,21 @@ import {
   addText, constrainText, duplicateText, MIN_TEXT, removeText, splitText, updateText,
   type TextBlock,
 } from './text';
-import { defaultZoom, zoomAt, type ZoomSettings } from './zoom';
+import { defaultZoom, viewRect, zoomAt, type ZoomSettings } from './zoom';
 import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
 } from './zooms';
 
+
+/**
+ * requestVideoFrameCallback is not in the DOM lib everywhere yet, and Firefox
+ * still does not ship it, so it is described here and treated as optional.
+ */
+type VideoWithFrameCallback = HTMLVideoElement & {
+  requestVideoFrameCallback?: (callback: () => void) => number;
+  cancelVideoFrameCallback?: (handle: number) => void;
+};
 
 export async function mountLimelight(root: HTMLElement): Promise<void> {
   const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!;
@@ -45,6 +57,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   const scrubber = $<HTMLInputElement>('ll-scrub');
   const editorEl = $<HTMLDivElement>('ll-editor');
   const sourceNote = $<HTMLParagraphElement>('ll-source-note');
+  const playButton = $<HTMLButtonElement>('ll-play');
+  const loopButton = $<HTMLButtonElement>('ll-loop');
+  const muteButton = $<HTMLButtonElement>('ll-mute');
+  const volInput = $<HTMLInputElement>('ll-vol');
+  const volWrap = $<HTMLLabelElement>('ll-vol-wrap');
+  const aimButton = $<HTMLButtonElement>('ll-zoom-aim');
+  const aimNote = $<HTMLParagraphElement>('ll-aim-note');
 
   let settings = loadSettings();
   let session: Session | null = null;
@@ -61,6 +80,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let texts: TextBlock[] = [];
   let crop: Crop = { ...FULL_CROP };
   let trim = { start: 0, end: 0 };
+  /** Playback state. The video element carries the position; these carry intent. */
+  let playing = false;
+  let looping = false;
+  let muted = false;
+  let frameHandle = 0;
+  let rafHandle = 0;
+  /** The zoom whose focal point is being shown on the canvas, if any. */
+  let focusTarget: ZoomBlock | null = null;
+  let draggingFocus = false;
   /** Everything an undo has to put back. The recording itself never changes. */
   type EditorState = {
     settings: Settings;
@@ -93,6 +121,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    */
   const remember = (label = '') => {
     record(label);
+    invalidateTrack();
     saveSettings(settings);
     if (stored) {
       stored.settings = settings;
@@ -238,6 +267,66 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     setStatus('This browser cannot record the screen. Chrome, Edge and Firefox on a desktop can; phones cannot.', 'bad');
   }
 
+  // ------------------------------------------------------------------ devices
+
+  /**
+   * Which microphone and camera to record from.
+   *
+   * A picker only appears when there is a choice to make: one microphone needs
+   * no menu. Labels stay empty until permission has been granted at least once,
+   * so the list is refreshed after every recording, by which point the names
+   * have arrived and the numbered placeholders can be replaced.
+   */
+  let devices: { microphones: CaptureDevice[]; cameras: CaptureDevice[] } = { microphones: [], cameras: [] };
+
+  function fillDevicePicker(
+    select: HTMLSelectElement, wrap: HTMLElement, found: CaptureDevice[], chosen: string,
+  ): void {
+    // More than one is a choice. Exactly one is just a fact about the machine.
+    wrap.hidden = found.length < 2;
+    select.innerHTML = '';
+    const options = [{ id: 'default', label: 'Whatever the browser picks' }, ...found];
+    for (const device of options) {
+      const option = document.createElement('option');
+      option.value = device.id;
+      option.textContent = device.label;
+      select.append(option);
+    }
+    // A device that has gone away leaves a stored id pointing at nothing, so
+    // the menu falls back to the default rather than showing an empty box.
+    select.value = options.some((device) => device.id === chosen) ? chosen : 'default';
+  }
+
+  async function renderDevices(): Promise<void> {
+    devices = await listDevices();
+    fillDevicePicker(
+      $<HTMLSelectElement>('ll-mic-device'), $<HTMLLabelElement>('ll-mic-pick'),
+      devices.microphones, settings.microphoneId,
+    );
+    fillDevicePicker(
+      $<HTMLSelectElement>('ll-camera-device'), $<HTMLLabelElement>('ll-camera-pick'),
+      devices.cameras, settings.cameraId,
+    );
+    const anyPicker = devices.microphones.length > 1 || devices.cameras.length > 1;
+    $<HTMLDivElement>('ll-devices').hidden = !anyPicker;
+    // Only worth explaining the missing names while they are actually missing.
+    $<HTMLParagraphElement>('ll-devices-note').hidden =
+      !anyPicker || [...devices.microphones, ...devices.cameras].every((device) => device.label && !/^(Microphone|Camera) \d+$/.test(device.label));
+  }
+
+  $<HTMLSelectElement>('ll-mic-device').addEventListener('change', (event) => {
+    settings.microphoneId = (event.target as HTMLSelectElement).value;
+    remember();
+  });
+  $<HTMLSelectElement>('ll-camera-device').addEventListener('change', (event) => {
+    settings.cameraId = (event.target as HTMLSelectElement).value;
+    remember();
+  });
+  $<HTMLButtonElement>('ll-devices-refresh').addEventListener('click', () => { void renderDevices(); });
+
+  // Plugging a headset in mid-session should be enough to make it offerable.
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => { void renderDevices(); });
+
   recordButton.addEventListener('click', async () => {
     if (session?.running) {
       recordButton.disabled = true;
@@ -258,6 +347,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         recordButton.textContent = 'Record';
         recordButton.classList.remove('is-recording');
         clockEl.textContent = '';
+        // Permission has now been granted at least once, so the devices have
+        // real names to show instead of "Microphone 1".
+        void renderDevices();
       }
       return;
     }
@@ -268,6 +360,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       microphone: $<HTMLInputElement>('ll-mic').checked,
       systemAudio: $<HTMLInputElement>('ll-system-audio').checked,
       camera: $<HTMLInputElement>('ll-camera').checked,
+      microphoneId: settings.microphoneId,
+      cameraId: settings.cameraId,
       cameraBlur: settings.cameraBlur,
       onTick: (seconds) => { clockEl.textContent = formatClock(seconds); },
       onReady: () => countdown({ seconds: settings.countdown, sound: settings.countdownSound }),
@@ -385,6 +479,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     scrubber.max = String(Math.max(0.1, recording.duration));
     scrubber.value = String(trim.start);
     previewTime = trim.start;
+    $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
+    renderTransport();
 
     setStatus(
       `${video.videoWidth} by ${video.videoHeight}, ${formatClock(recording.duration)}, ${formatBytes(result.blob.size)}.`,
@@ -838,6 +934,117 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
   }
 
+  // ------------------------------------------------------------------ aiming a zoom
+
+  /**
+   * The region a zoom moves around inside, in source pixels.
+   *
+   * The renderer treats the crop as the recording, and the zoom pans within
+   * that rather than the original frame, so aiming has to use the same region
+   * or the rectangle drawn here would not match the picture produced.
+   */
+  function zoomRegion(): { x: number; y: number; width: number; height: number } | null {
+    const current = project();
+    if (!current) return null;
+    return cropRect(crop, current.sourceWidth, current.sourceHeight);
+  }
+
+  /**
+   * Aiming a zoom: the whole croppable frame, with the part the zoom will show
+   * picked out of it.
+   *
+   * Shaped like the crop editor on purpose. Cropping already taught the gesture
+   * of dragging a rectangle over the real picture, and a zoom target is the
+   * same idea with the rectangle's size coming from the scale rather than the
+   * pointer. The alternative, sliders alone, makes you guess.
+   */
+  function drawAimEditor(context: CanvasRenderingContext2D): void {
+    const region = zoomRegion();
+    if (!video || !focusTarget || !region) return;
+    const { width, height } = canvas;
+
+    context.clearRect(0, 0, width, height);
+    context.drawImage(video, region.x, region.y, region.width, region.height, 0, 0, width, height);
+
+    // viewRect is the renderer's own function, so the rectangle shown here and
+    // the frame that comes out cannot drift apart, including at the edges where
+    // the view is clamped back inside the picture.
+    const view = viewRect({ time: 0, scale: focusTarget.scale, x: focusTarget.x, y: focusTarget.y }, width, height);
+
+    const shade = new Path2D();
+    shade.rect(0, 0, width, height);
+    shade.rect(view.x, view.y, view.width, view.height);
+    context.fillStyle = 'rgba(0, 0, 0, 0.58)';
+    context.fill(shade, 'evenodd');
+
+    const line = Math.max(2, Math.min(width, height) * 0.004);
+    context.strokeStyle = '#ffffff';
+    context.lineWidth = line;
+    context.strokeRect(view.x, view.y, view.width, view.height);
+
+    // The focal point itself, which is what the sliders and the drag move. It
+    // is not always the centre of the rectangle: near an edge the view is
+    // clamped and the two come apart, and seeing that is the point.
+    const cx = focusTarget.x * width;
+    const cy = focusTarget.y * height;
+    const reach = Math.min(width, height) * 0.035;
+    context.beginPath();
+    context.moveTo(cx - reach, cy);
+    context.lineTo(cx + reach, cy);
+    context.moveTo(cx, cy - reach);
+    context.lineTo(cx, cy + reach);
+    context.stroke();
+    context.beginPath();
+    context.arc(cx, cy, reach * 0.5, 0, Math.PI * 2);
+    context.stroke();
+    context.fillStyle = 'rgba(255, 255, 255, 0.22)';
+    context.fill();
+  }
+
+  /** Turns a pointer event on the canvas into a 0..1 point in the zoom region. */
+  function aimPointAt(event: PointerEvent): { x: number; y: number } {
+    const box = canvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)),
+      y: Math.max(0, Math.min(1, (event.clientY - box.top) / box.height)),
+    };
+  }
+
+  function moveFocus(point: { x: number; y: number }, label: string): void {
+    if (!focusTarget || !recording) return;
+    const id = focusTarget.id;
+    zooms = zooms.map((zoom) => (zoom.id === id ? { ...zoom, x: point.x, y: point.y, pinned: true } : zoom));
+    focusTarget = zooms.find((zoom) => zoom.id === id) ?? null;
+    invalidateTrack();
+    renderSelected();
+    persistZooms(label);
+    paint(previewTime);
+  }
+
+  function startAiming(id: string): void {
+    const zoom = zooms.find((entry) => entry.id === id);
+    if (!zoom || !recording) return;
+    if (playing) pause();
+    if (cropping) return;
+    focusTarget = zoom;
+    aimButton.setAttribute('aria-pressed', 'true');
+    aimNote.hidden = false;
+    // The picture has to be from inside the zoom or you would be aiming at a
+    // frame that is not the one the zoom covers.
+    previewTime = Math.min(Math.max(previewTime, zoom.start), zoom.end);
+    syncScrub();
+    void drawPreview();
+  }
+
+  function stopAiming(): void {
+    if (!focusTarget) return;
+    focusTarget = null;
+    draggingFocus = false;
+    aimButton.setAttribute('aria-pressed', 'false');
+    aimNote.hidden = true;
+    void drawPreview();
+  }
+
   // ------------------------------------------------------------------ zoom track
 
   const zoomTrackEl = $<HTMLDivElement>('ll-zoomtrack');
@@ -846,6 +1053,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function renderZooms(): void {
     if (!recording) return;
+    invalidateTrack();
     const duration = Math.max(0.001, recording.duration);
     zoomTrackEl.innerHTML = '';
 
@@ -877,18 +1085,20 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
       bar.addEventListener('pointerdown', (event) => beginZoomDrag(event, zoom.id, 'move'));
       bar.addEventListener('contextmenu', (event) => { selected = zoom.id; zoomMenu(event, zoom.id); });
+      // Double click opens the zoom for aiming. It used to delete it, which is
+      // the opposite of what a double click means everywhere else, and there
+      // was no confirmation and no visible undo.
       bar.addEventListener('dblclick', () => {
-        zooms = removeBlock(zooms, zoom.id);
-        renderZooms();
-        persistZooms();
-        void drawPreview();
+        selected = zoom.id;
+        renderSelected();
+        startAiming(zoom.id);
       });
 
       zoomTrackEl.append(bar);
     }
 
     $<HTMLParagraphElement>('ll-zoom-hint').textContent = zooms.length
-      ? 'Drag a zoom to move it, its edges to resize, and double click to delete. Select one to change how far it goes in.'
+      ? 'Drag a zoom to move it, or its edges to resize. Click one to edit it, double click to aim it at something.'
       : 'No zooms yet. Press Add a zoom to put one at the playhead.';
     renderSelected();
   }
@@ -905,12 +1115,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function beginZoomDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
     const zoom = zooms.find((entry) => entry.id === id);
     if (!zoom) return;
+    const changed = selected !== id;
     selected = id;
     selectedText = null;
     renderTextSelected();
     dragging = { id, edge, from: zoomTimeAt(event), start: zoom.start, end: zoom.end };
     zoomTrackEl.setPointerCapture(event.pointerId);
     renderSelected();
+    // Selecting a block puts the playhead inside it. Without this you can edit
+    // a zoom at 0:40 while looking at 0:05 and see nothing change, which reads
+    // as a broken control rather than a preview pointed elsewhere.
+    if (changed) showBlock(zoom.start, zoom.end);
+  }
+
+  /** Moves the playhead into a block so its edits are visible in the preview. */
+  function showBlock(start: number, end: number): void {
+    if (!recording) return;
+    if (previewTime >= start && previewTime <= end) return;
+    if (playing) pause();
+    previewTime = Math.min(Math.max((start + end) / 2, 0), recording.duration);
+    syncScrub();
+    void drawPreview();
   }
 
   zoomTrackEl.addEventListener('pointermove', (event) => {
@@ -944,32 +1169,100 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const panel = $<HTMLDivElement>('ll-zoom-selected');
     const zoom = zooms.find((entry) => entry.id === selected);
     panel.hidden = !zoom;
-    if (!zoom) return;
+    if (!zoom) { if (focusTarget) stopAiming(); return; }
     $<HTMLInputElement>('ll-zoom-amount').value = String(zoom.scale);
     $<HTMLSpanElement>('ll-zoom-amount-out').textContent = `${zoom.scale.toFixed(1)}x`;
+    $<HTMLInputElement>('ll-zoom-x').value = String(zoom.x);
+    $<HTMLSpanElement>('ll-zoom-x-out').textContent = `${Math.round(zoom.x * 100)}%`;
+    $<HTMLInputElement>('ll-zoom-y').value = String(zoom.y);
+    $<HTMLSpanElement>('ll-zoom-y-out').textContent = `${Math.round(zoom.y * 100)}%`;
     for (const bar of zoomTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
       bar.classList.toggle('is-selected', bar.dataset.id === selected);
     }
   }
 
-  $<HTMLInputElement>('ll-zoom-amount').addEventListener('input', (event) => {
+  /** Applies a change to the selected zoom and keeps the aim view in step. */
+  function editSelectedZoom(change: Partial<ZoomBlock>, label: string): void {
     if (!selected || !recording) return;
-    const scale = Number((event.target as HTMLInputElement).value);
-    zooms = zooms.map((zoom) => (zoom.id === selected ? { ...zoom, scale, pinned: true } : zoom));
-    zooms = constrain(zooms, selected, recording.duration);
+    const id = selected;
+    zooms = zooms.map((zoom) => (zoom.id === id ? { ...zoom, ...change, pinned: true } : zoom));
+    zooms = constrain(zooms, id, recording.duration);
+    if (focusTarget) focusTarget = zooms.find((zoom) => zoom.id === id) ?? null;
+    invalidateTrack();
     renderZooms();
-    persistZooms(`zoom-scale:${selected}`);
-    void drawPreview();
+    persistZooms(label);
+    // Aiming paints straight from the current frame; anything else may need a
+    // seek if the playhead has not been anywhere near this block.
+    if (focusTarget) paint(previewTime);
+    else void drawPreview();
+  }
+
+  $<HTMLInputElement>('ll-zoom-amount').addEventListener('input', (event) => {
+    editSelectedZoom({ scale: Number((event.target as HTMLInputElement).value) }, `zoom-scale:${selected}`);
   });
+  $<HTMLInputElement>('ll-zoom-x').addEventListener('input', (event) => {
+    editSelectedZoom({ x: Number((event.target as HTMLInputElement).value) }, `zoom-x:${selected}`);
+  });
+  $<HTMLInputElement>('ll-zoom-y').addEventListener('input', (event) => {
+    editSelectedZoom({ y: Number((event.target as HTMLInputElement).value) }, `zoom-y:${selected}`);
+  });
+
+  aimButton.addEventListener('click', () => {
+    if (focusTarget) stopAiming();
+    else if (selected) startAiming(selected);
+  });
+
+  $<HTMLButtonElement>('ll-zoom-delete').addEventListener('click', () => {
+    if (!selected) return;
+    deleteZoom(selected);
+  });
+
+  /** Removes a zoom and says so, because undo is not where the eye is. */
+  function deleteZoom(id: string): void {
+    if (focusTarget?.id === id) stopAiming();
+    zooms = removeBlock(zooms, id);
+    if (selected === id) selected = null;
+    invalidateTrack();
+    renderZooms();
+    persistZooms();
+    void drawPreview();
+    toast('Zoom removed. Undo with Ctrl+Z.');
+  }
+
+  // Aiming happens on the picture itself. The crop editor owns the canvas while
+  // it is open, so these only act when a zoom is being aimed instead.
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!focusTarget || cropping) return;
+    event.preventDefault();
+    draggingFocus = true;
+    canvas.setPointerCapture(event.pointerId);
+    moveFocus(aimPointAt(event), `zoom-aim:${focusTarget.id}`);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!draggingFocus || !focusTarget) return;
+    moveFocus(aimPointAt(event), `zoom-aim:${focusTarget.id}`);
+  });
+  for (const done of ['pointerup', 'pointercancel'] as const) {
+    canvas.addEventListener(done, () => { draggingFocus = false; });
+  }
 
   $<HTMLButtonElement>('ll-zoom-add').addEventListener('click', () => {
     if (!recording) return;
     const before = zooms.length;
-    zooms = addBlock(zooms, previewTime, recording.duration, settings.zoom);
+    const current = project();
+    // Aim it where the pointer actually was at that moment. The recording
+    // already carries that track, so a new zoom starts pointed at the thing you
+    // were doing rather than at the middle of the screen.
+    const at = current ? cursorAt(current, previewTime) : null;
+    zooms = addBlock(
+      zooms, previewTime, recording.duration, settings.zoom,
+      at ? { x: at.x, y: at.y } : undefined,
+    );
     if (zooms.length === before) {
       setStatus('There is no room for a zoom there. Move the playhead into a gap.', 'bad');
       return;
     }
+    invalidateTrack();
     selected = zooms.find((zoom) => zoom.pinned && zoom.start <= previewTime + 0.01 && zoom.end >= previewTime - 0.01)?.id ?? selected;
     selectedText = null;
     renderTextSelected();
@@ -982,6 +1275,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!zooms.length || !confirm('Remove every zoom, including the ones you set by hand?')) return;
     zooms = [];
     selected = null;
+    stopAiming();
+    invalidateTrack();
     renderZooms();
     persistZooms();
     void drawPreview();
@@ -1029,12 +1324,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
       bar.addEventListener('pointerdown', (event) => beginTextDrag(event, text.id, 'move'));
       bar.addEventListener('contextmenu', (event) => { selectedText = text.id; textMenu(event, text.id); });
+      // Opens the words for editing. Deleting on a double click was too easy
+      // to do by accident and too quiet when it happened.
       bar.addEventListener('dblclick', () => {
-        texts = removeText(texts, text.id);
-        if (selectedText === text.id) selectedText = null;
+        selectedText = text.id;
+        selected = null;
+        renderSelected();
         renderTexts();
-        persistTexts();
-        void drawPreview();
+        showBlock(text.start, text.end);
+        $<HTMLTextAreaElement>('ll-text-words').focus();
       });
 
       textTrackEl.append(bar);
@@ -1053,12 +1351,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function beginTextDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
     const text = texts.find((entry) => entry.id === id);
     if (!text) return;
+    const changed = selectedText !== id;
     selectedText = id;
     selected = null;
     renderSelected();
     textDrag = { id, edge, from: textTimeAt(event), start: text.start, end: text.end };
     try { textTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
     renderTexts();
+    if (changed) showBlock(text.start, text.end);
   }
 
   textTrackEl.addEventListener('pointermove', (event) => {
@@ -1161,40 +1461,118 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ preview
 
-  let drawing = false;
+  /**
+   * The zoom track, rebuilt only when the zooms change.
+   *
+   * Playback paints a frame at the recording's own rate, and rebuilding this
+   * from every block on every frame was pure waste. Anything that edits a zoom
+   * or the zoom settings clears it.
+   */
+  let trackCache: ReturnType<typeof trackFromBlocks> | null = null;
+  function invalidateTrack(): void { trackCache = null; }
+  function zoomTrack(): ReturnType<typeof trackFromBlocks> {
+    if (!trackCache) trackCache = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
+    return trackCache;
+  }
+
+  /**
+   * The recorded pointer position nearest a moment.
+   *
+   * Samples are in time order, so this is a binary search. It used to be a
+   * linear scan of every sample, which is fine once but not sixty times a
+   * second against a recording that may hold thousands of them.
+   */
+  function cursorAt(current: Project, time: number): Project['pointer'][number] | null {
+    const points = current.pointer;
+    if (points.length === 0) return null;
+    let low = 0;
+    let high = points.length - 1;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (points[mid].time < time) low = mid + 1;
+      else high = mid;
+    }
+    const after = points[low];
+    const before = points[low > 0 ? low - 1 : 0];
+    return Math.abs(before.time - time) <= Math.abs(after.time - time) ? before : after;
+  }
+
+  /**
+   * Composes one frame onto the preview canvas from whatever the media
+   * elements are showing right now.
+   *
+   * This deliberately does not seek. During playback the video element is the
+   * clock and its decoder is already handing over frames in order, which is the
+   * whole reason playback can run at the recording's rate.
+   */
+  function paint(time: number): void {
+    const current = project();
+    if (!current || !video) return;
+
+    // Cropping and aiming both work on the real picture rather than the
+    // composed one, so the canvas takes their coordinates: the whole source for
+    // a crop, the cropped region for a zoom target.
+    const region = focusTarget ? zoomRegion() : null;
+    const size = cropping
+      ? { width: video.videoWidth || current.sourceWidth, height: video.videoHeight || current.sourceHeight }
+      : region
+        ? { width: Math.round(region.width), height: Math.round(region.height) }
+        : settings.composition;
+    if (canvas.width !== size.width) canvas.width = size.width;
+    if (canvas.height !== size.height) canvas.height = size.height;
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    if (cropping) { drawCropEditor(context); return; }
+    if (focusTarget) { drawAimEditor(context); return; }
+
+    drawFrame(context, current, time, zoomAt(zoomTrack(), time), cursorAt(current, time));
+  }
+
+  /**
+   * Seeks to a moment and paints it, for scrubbing and for edits made paused.
+   *
+   * Requests coalesce to the most recent instead of being dropped. The previous
+   * version returned early whenever a draw was already running and scheduled
+   * nothing afterwards, so a fast scrub discarded almost every request
+   * including, sometimes, the last one. The canvas was then left showing a
+   * frame the playhead had already moved past.
+   */
+  let seeking = false;
+  let pendingSeek: number | null = null;
   async function drawPreview(): Promise<void> {
     const current = project();
-    if (!current || !video || drawing) return;
-    drawing = true;
+    if (!current || !video) return;
+    if (seeking) { pendingSeek = previewTime; return; }
+
+    seeking = true;
     try {
-      // While cropping, the canvas takes the source's own shape so the
-      // rectangle can be dragged in the recording's coordinates directly.
-      const size = cropping
-        ? { width: video.videoWidth || current.sourceWidth, height: video.videoHeight || current.sourceHeight }
-        : settings.composition;
-      canvas.width = size.width;
-      canvas.height = size.height;
-      const context = canvas.getContext('2d');
-      if (!context) return;
-
-      await seekSafely(video, Math.min(current.duration - 1e-3, previewTime));
-      if (cropping) { drawCropEditor(context); return; }
-
-      if (cameraVideo) await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), previewTime));
-
-      const track = trackFromBlocks(zooms, current.duration, settings.zoom);
-      const cursor = current.pointer.length
-        ? current.pointer.reduce((best, sample) =>
-            Math.abs(sample.time - previewTime) < Math.abs(best.time - previewTime) ? sample : best, current.pointer[0])
-        : null;
-
-      drawFrame(context, current, previewTime, zoomAt(track, previewTime), cursor);
+      let target = previewTime;
+      for (;;) {
+        await seekSafely(video, Math.min(current.duration - 1e-3, target));
+        if (cameraVideo) {
+          await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), target)).catch(() => {});
+        }
+        paint(target);
+        if (pendingSeek === null || pendingSeek === target) break;
+        target = pendingSeek;
+        pendingSeek = null;
+      }
     } finally {
-      drawing = false;
+      seeking = false;
+      pendingSeek = null;
     }
   }
 
+  function syncScrub(): void {
+    scrubber.value = String(previewTime);
+    $<HTMLSpanElement>('ll-time').textContent = formatClock(previewTime);
+  }
+
   scrubber.addEventListener('input', () => {
+    // Dragging the scrubber during playback means "take me there", so playback
+    // stops rather than fighting the pointer for the position.
+    if (playing) pause();
     previewTime = Number(scrubber.value);
     $<HTMLSpanElement>('ll-time').textContent = formatClock(previewTime);
     void drawPreview();
@@ -1455,10 +1833,22 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const input = $<HTMLInputElement>(id);
     input.addEventListener('input', () => {
       apply(Number(input.value));
+      // The default scale used to write a value that only new blocks would ever
+      // read, so after a recording the slider looked broken. It now carries the
+      // blocks nobody has touched with it, which is what a default should mean.
+      if (id === 'll-zoom-scale') applyDefaultScale();
       remember(`slider:${id}`);
       renderReadouts();
       void drawPreview();
     });
+  }
+
+  /** Retunes every zoom still on the automatic settings. Pinned ones are yours. */
+  function applyDefaultScale(): void {
+    if (!zooms.some((zoom) => !zoom.pinned)) return;
+    zooms = zooms.map((zoom) => (zoom.pinned ? zoom : { ...zoom, scale: settings.zoom.scale }));
+    invalidateTrack();
+    renderZooms();
   }
 
   const toggles: [string, (value: boolean) => void, () => boolean][] = [
@@ -1857,38 +2247,162 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   });
 
   /**
-   * Plays the preview by walking the scrubber forward in real time.
+   * Playback, driven by the video element rather than by seeking it.
    *
-   * Every frame is composed from a seek, so this cannot run at the recording's
-   * own frame rate on a long clip. It runs as fast as the composing allows and
-   * uses the wall clock for position, which keeps the timing honest even when
-   * the picture cannot keep up.
+   * The previous version walked a wall clock and seeked to each position, which
+   * meant a full decoder seek per frame and no sound at all. Now the element
+   * plays, its own currentTime is the clock, and each decoded frame is
+   * composed as it arrives. requestVideoFrameCallback fires once per frame with
+   * the decoder's timing; browsers without it fall back to animation frames,
+   * which is close enough because the element is still the clock.
    */
-  let playing = 0;
-  function togglePlay(): void {
-    if (playing) {
-      cancelAnimationFrame(playing);
-      playing = 0;
+  function stopFrames(): void {
+    if (frameHandle && video) {
+      const cancel = (video as VideoWithFrameCallback).cancelVideoFrameCallback;
+      if (typeof cancel === 'function') cancel.call(video, frameHandle);
+    }
+    if (rafHandle) cancelAnimationFrame(rafHandle);
+    frameHandle = 0;
+    rafHandle = 0;
+  }
+
+  function queueFrame(): void {
+    if (!video || !playing) return;
+    const request = (video as VideoWithFrameCallback).requestVideoFrameCallback;
+    if (typeof request === 'function') frameHandle = request.call(video, () => step());
+    else rafHandle = requestAnimationFrame(() => step());
+  }
+
+  function step(): void {
+    if (!playing || !video || !recording) return;
+    const time = video.currentTime;
+
+    if (time >= trim.end - 1e-3) {
+      if (looping) { void restart(); return; }
+      pause();
+      previewTime = trim.end;
+      syncScrub();
+      paint(previewTime);
       return;
     }
-    if (!recording) return;
-    if (previewTime >= trim.end - 1e-3) previewTime = trim.start;
 
-    let last = performance.now();
-    const tick = async () => {
-      const now = performance.now();
-      const elapsed = (now - last) / 1000;
-      last = now;
-      previewTime = Math.min(trim.end, previewTime + elapsed);
-      scrubber.value = String(previewTime);
-      $<HTMLSpanElement>('ll-time').textContent = formatClock(previewTime);
-      await drawPreview();
-      if (!playing) return;
-      if (previewTime >= trim.end - 1e-3) { playing = 0; return; }
-      playing = requestAnimationFrame(() => { void tick(); });
-    };
-    playing = requestAnimationFrame(() => { void tick(); });
+    previewTime = time;
+    syncScrub();
+    paint(time);
+    queueFrame();
   }
+
+  async function restart(): Promise<void> {
+    if (!video) return;
+    await seekSafely(video, trim.start);
+    if (cameraVideo) await seekSafely(cameraVideo, trim.start).catch(() => {});
+    previewTime = trim.start;
+    syncScrub();
+    queueFrame();
+  }
+
+  async function play(): Promise<void> {
+    if (!video || !recording || playing || cropping) return;
+    if (previewTime >= trim.end - 1e-3 || previewTime < trim.start) previewTime = trim.start;
+
+    await seekSafely(video, Math.min(recording.duration - 1e-3, previewTime));
+    if (cameraVideo) {
+      await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), previewTime)).catch(() => {});
+    }
+
+    // Muted for scrubbing, unmuted to play. Without this you cannot hear your
+    // own narration while editing, which is most of what there is to check.
+    video.muted = muted || !recording.hasAudio;
+    video.volume = Number(volInput.value);
+
+    playing = true;
+    renderTransport();
+    try {
+      await video.play();
+      if (cameraVideo) await cameraVideo.play().catch(() => {});
+    } catch {
+      playing = false;
+      renderTransport();
+      setStatus('The browser would not start playback.', 'bad');
+      return;
+    }
+    queueFrame();
+  }
+
+  function pause(): void {
+    if (!playing) return;
+    playing = false;
+    stopFrames();
+    video?.pause();
+    cameraVideo?.pause();
+    if (video) video.muted = true;
+    renderTransport();
+  }
+
+  function togglePlay(): void {
+    if (playing) pause();
+    else void play();
+  }
+
+  /** Reflects playback state onto the transport. */
+  function renderTransport(): void {
+    playButton.textContent = playing ? '⏸' : '▶';
+    playButton.title = playing ? 'Pause' : 'Play';
+    playButton.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    playButton.dataset.playing = String(playing);
+    playButton.disabled = !recording || cropping;
+    loopButton.setAttribute('aria-pressed', String(looping));
+    muteButton.textContent = muted ? '\u{1F507}' : '\u{1F50A}';
+    muteButton.title = muted ? 'Unmute' : 'Mute';
+    muteButton.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+    muteButton.setAttribute('aria-pressed', String(muted));
+    // Nothing to hear on a silent recording, so the control does not appear.
+    volWrap.hidden = !recording?.hasAudio;
+    for (const id of ['ll-to-start', 'll-step-back', 'll-step-fwd', 'll-to-end']) {
+      $<HTMLButtonElement>(id).disabled = !recording;
+    }
+  }
+
+  /** Moves the playhead, stopping playback first, and repaints. */
+  function seekTo(time: number): void {
+    if (!recording) return;
+    if (playing) pause();
+    previewTime = Math.max(0, Math.min(recording.duration, time));
+    syncScrub();
+    void drawPreview();
+  }
+
+  playButton.addEventListener('click', togglePlay);
+  $<HTMLButtonElement>('ll-to-start').addEventListener('click', () => seekTo(trim.start));
+  $<HTMLButtonElement>('ll-to-end').addEventListener('click', () => seekTo(trim.end));
+  $<HTMLButtonElement>('ll-step-back').addEventListener('click', () => {
+    seekTo(previewTime - 1 / Math.max(1, settings.frameRate));
+  });
+  $<HTMLButtonElement>('ll-step-fwd').addEventListener('click', () => {
+    seekTo(previewTime + 1 / Math.max(1, settings.frameRate));
+  });
+
+  loopButton.addEventListener('click', () => {
+    looping = !looping;
+    renderTransport();
+  });
+
+  muteButton.addEventListener('click', () => {
+    muted = !muted;
+    if (video && playing) video.muted = muted;
+    renderTransport();
+  });
+
+  volInput.addEventListener('input', () => {
+    const level = Number(volInput.value);
+    if (video) video.volume = level;
+    // Reaching for the volume when muted plainly means "let me hear it".
+    if (level > 0 && muted) {
+      muted = false;
+      if (video && playing) video.muted = false;
+      renderTransport();
+    }
+  });
 
   // ------------------------------------------------------------------ export
 
@@ -1988,8 +2502,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   window.addEventListener('pagehide', () => { session?.cancel(); release(); });
 
   renderControls();
+  renderTransport();
   await describeFormat();
   await renderProjects();
+  await renderDevices();
 
   // Reopen whatever was last worked on, so a reload picks up where it left off.
   const last = loadCurrentId();

@@ -46,6 +46,15 @@ export type Settings = {
   countdownSound: boolean;
   /** Ask the platform to blur behind the camera, where it can. */
   cameraBlur: boolean;
+  /**
+   * Chosen capture devices, or 'default' to let the browser pick.
+   *
+   * Ids are stable per origin but not across browsers, and they go stale when a
+   * device is unplugged, so these are a preference the capture falls back from
+   * rather than a requirement.
+   */
+  microphoneId: string;
+  cameraId: string;
   format: 'webm' | 'mp4' | 'gif';
   quality: 'low' | 'medium' | 'high';
 };
@@ -62,6 +71,8 @@ export const defaultSettings: Settings = {
   countdown: 3,
   countdownSound: true,
   cameraBlur: false,
+  microphoneId: 'default',
+  cameraId: 'default',
   format: 'webm',
   quality: 'high',
 };
@@ -125,6 +136,8 @@ export function reviveSettings(value: unknown): Settings {
     keepAudio: flag('keepAudio'),
     countdownSound: flag('countdownSound'),
     cameraBlur: flag('cameraBlur'),
+    microphoneId: typeof stored.microphoneId === 'string' ? stored.microphoneId : 'default',
+    cameraId: typeof stored.cameraId === 'string' ? stored.cameraId : 'default',
     countdown: typeof stored.countdown === 'number' ? Math.max(0, Math.min(10, Math.round(stored.countdown))) : 3,
     format: stored.format === 'mp4' || stored.format === 'gif' ? stored.format : 'webm',
     quality: stored.quality === 'low' || stored.quality === 'medium' ? stored.quality : 'high',
