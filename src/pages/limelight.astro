@@ -238,6 +238,30 @@ const app = getApp('limelight');
           <div class="ll-presets" id="ll-destinations"></div>
         </section>
 
+        <section class="card ll-card">
+          <h2 class="ll-subhead">Transcript</h2>
+          <p class="ll-note">
+            Bring in an SRT or VTT file and the words become subtitles you can burn in.
+            Selecting lines and pressing Cut removes those seconds from the video, which is
+            the quickest way to take out a sentence you did not mean to say.
+          </p>
+          <div class="ll-scrubrow">
+            <button class="btn btn--sm" id="ll-captions-open">Open a transcript</button>
+            <button class="btn btn--sm" id="ll-captions-add">Add a line here</button>
+            <button class="btn btn--sm btn--ghost" id="ll-captions-srt">Save SRT</button>
+            <button class="btn btn--sm btn--ghost" id="ll-captions-vtt">Save VTT</button>
+            <input type="file" id="ll-captions-file" accept=".srt,.vtt,text/plain" hidden />
+          </div>
+          <label class="ll-check"><input type="checkbox" id="ll-captions-burn" /><span>Burn the subtitles into the video</span></label>
+          <label class="ll-slider"><span>Subtitle size</span><input type="range" id="ll-caption-size" min="0.02" max="0.12" step="0.005" /><em id="ll-caption-size-out"></em></label>
+          <ol class="ll-cues" id="ll-cues"></ol>
+          <div class="ll-scrubrow" id="ll-cues-actions" hidden>
+            <button class="btn btn--sm" id="ll-cues-cut">Cut the selected lines</button>
+            <button class="btn btn--sm btn--ghost" id="ll-cues-clear">Clear the selection</button>
+            <span class="ll-time" id="ll-cues-label"></span>
+          </div>
+        </section>
+
         <section class="card ll-card" id="ll-chapters-card" hidden>
           <h2 class="ll-subhead">Chapters</h2>
           <p class="ll-note">Press <kbd>M</kbd> while recording to mark a moment. These are what you paste under a video.</p>
@@ -466,6 +490,13 @@ const app = getApp('limelight');
   .ll-vol { display: inline-flex; align-items: center; gap: 0.3rem; }
   .ll-vol input { width: 5rem; }
   .ll-vol[hidden] { display: none; }
+  .ll-cues { list-style: none; margin: 0.7rem 0; padding: 0; display: grid; gap: 0.3rem; max-height: 22rem; overflow-y: auto; }
+  .ll-cue { display: grid; grid-template-columns: auto auto 1fr; gap: 0.5rem; align-items: start;
+    padding: 0.35rem 0.5rem; border: 1px solid var(--rule); border-radius: 7px; background: var(--surface); }
+  .ll-cue.is-picked { border-color: var(--accent); background: var(--accent-soft); }
+  .ll-cue.is-now { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); }
+  .ll-cue .ll-time { min-width: 3.2rem; cursor: pointer; }
+  .ll-cue textarea { width: 100%; resize: vertical; min-height: 2.2rem; }
   .ll-chapters { list-style: none; margin: 0 0 0.7rem; padding: 0; display: grid; gap: 0.35rem; }
   .ll-chapters li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
   .ll-chapters .ll-time { min-width: 3.4rem; }

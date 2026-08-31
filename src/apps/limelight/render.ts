@@ -14,6 +14,7 @@ import {
   cornersBounds, hasTilt, plateMotion, tiltCorners, type MotionSettings, type Point, type Tilt,
 } from './plate';
 import { textsAt, wrapText, type TextBlock } from './text';
+import { cuesAt, type Cue } from './captions';
 import { type Span } from './waveform';
 import { editedDuration, segmentsOf, sourceAt, type SpeedRegion } from './timeline';
 import { rectAt, redactionsAt, type RedactBlock } from './redact';
@@ -67,6 +68,10 @@ export type Project = {
   /** Draws the shortcuts that were pressed. */
   showKeys?: boolean;
   keys?: { time: number; label: string }[];
+  /** Subtitles, already aligned to the finished video's own clock. */
+  captions?: Cue[];
+  /** Height of a caption as a fraction of the frame. */
+  captionSize?: number;
   /** What to write. */
   format: OutputFormat;
   gifColours: number;
@@ -365,10 +370,13 @@ export function drawFrame(
     context.restore();
   }
 
-  // ------------------------------------------------------------- captions
-  // Last, so a caption is never half hidden behind the camera bubble.
+  // ------------------------------------------------------------- overlays
+  // Last, so nothing laid on top is half hidden behind the camera bubble.
   if (project.texts && project.texts.length > 0) {
     drawTexts(context, project.texts, time, width, height);
+  }
+  if (project.captions?.length) {
+    drawCaptions(context, project.captions, time, width, height, project.captionSize ?? 0.045);
   }
 }
 
@@ -526,6 +534,55 @@ export function drawTexts(
  * most recent is nearest the bottom, which is where the eye already is when
  * somebody is watching hands rather than reading.
  */
+/**
+ * Draws the subtitle showing at a moment.
+ *
+ * Centred near the bottom on a plate, which is what makes text readable over a
+ * screen recording where the background underneath is arbitrary. Wrapped to the
+ * frame rather than trusting the cue's own line breaks, since a caption written
+ * for a wide video would run off a tall one.
+ */
+function drawCaptions(
+  context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
+  cues: Cue[], time: number, width: number, height: number, size: number,
+): void {
+  const showing = cuesAt(cues, time);
+  if (showing.length === 0) return;
+
+  const fontSize = Math.max(12, Math.round(height * Math.max(0.02, Math.min(0.12, size))));
+  context.save();
+  context.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+  context.textBaseline = 'middle';
+  context.textAlign = 'center';
+
+  const maxWidth = width * 0.82;
+  const measure = (line: string) => context.measureText(line).width;
+  const lines: string[] = [];
+  for (const cue of showing) lines.push(...wrapText(cue.text, maxWidth, measure));
+
+  const lineHeight = fontSize * 1.28;
+  const padding = fontSize * 0.5;
+  const blockHeight = lines.length * lineHeight + padding * 2;
+  const bottom = height - height * 0.06;
+  const top = bottom - blockHeight;
+
+  let widest = 0;
+  for (const line of lines) widest = Math.max(widest, context.measureText(line).width);
+  const boxWidth = Math.min(width * 0.94, widest + padding * 2.4);
+
+  context.fillStyle = 'rgba(10, 10, 12, 0.72)';
+  context.fill(roundedPath(
+    { x: width / 2 - boxWidth / 2, y: top, width: boxWidth, height: blockHeight },
+    fontSize * 0.28,
+  ));
+
+  context.fillStyle = '#f6f4ef';
+  for (const [index, line] of lines.entries()) {
+    context.fillText(line, width / 2, top + padding + lineHeight * (index + 0.5));
+  }
+  context.restore();
+}
+
 function drawKeys(
   context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
   keys: { time: number; label: string }[],

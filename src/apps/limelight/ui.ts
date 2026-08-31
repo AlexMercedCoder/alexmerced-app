@@ -35,12 +35,16 @@ import {
   analyseAudio, findSilences, keptDuration, mergeSpans, type Peak, type Span,
 } from './waveform';
 import {
-  addSpeed, clampSpeed, editedDuration, removeSpeed, segmentsOf, sortSpeeds, type SpeedRegion,
+  addSpeed, clampSpeed, editedAt, editedDuration, removeSpeed, segmentsOf, sortSpeeds,
+  type SpeedRegion,
 } from './timeline';
 import {
   addRedaction, rectAt, redactionsAt, removeRedaction, REDACT_STYLES, setPoint, sortRedactions,
   type RedactBlock, type RedactStyle,
 } from './redact';
+import {
+  alignToEdit, parseCaptions, sortCues, spansOf, toSrt, toVtt, type Cue,
+} from './captions';
 import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
@@ -108,6 +112,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let selectedSpeed: string | null = null;
   /** Rectangles covered over, and the one being edited. */
   let redactions: RedactBlock[] = [];
+  /** Subtitles, and which lines are selected for cutting. */
+  let captions: Cue[] = [];
+  const pickedCues = new Set<string>();
   let selectedRedaction: string | null = null;
   let draggingRedaction = false;
   let wave: { peaks: Peak[]; loudness: Float32Array; duration: number } | null = null;
@@ -121,13 +128,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     cuts: Span[];
     speeds: SpeedRegion[];
     redactions: RedactBlock[];
+    captions: Cue[];
     crop: Crop;
     trim: { start: number; end: number };
     wallpaper: Uint8Array | null;
     wallpaperMime: string;
   };
   const history = new History<EditorState>({
-    settings, zooms, texts, cuts: [], speeds: [], redactions: [],
+    settings, zooms, texts, cuts: [], speeds: [], redactions: [], captions: [],
     crop, trim, wallpaper: null, wallpaperMime: 'image/png',
   });
   /** Set while a state is being put back, so restoring does not record itself. */
@@ -161,6 +169,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       stored.cuts = cuts;
       stored.speeds = speeds;
       stored.redactions = redactions;
+      stored.captions = captions;
       // Derived from the blocks, and stored alongside them so a reopened
       // project renders exactly as it did.
       stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
@@ -172,7 +181,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function snapshot(): EditorState {
     return {
-      settings, zooms, texts, cuts, speeds, redactions,
+      settings, zooms, texts, cuts, speeds, redactions, captions,
       crop, trim, wallpaper: wallpaperBytes, wallpaperMime,
     };
   }
@@ -198,6 +207,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       cuts = state.cuts;
       speeds = state.speeds;
       redactions = state.redactions;
+      captions = state.captions;
       crop = state.crop;
       trim = { ...state.trim };
       // The picture is held as bytes in the snapshot, so an undo across a
@@ -232,6 +242,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderCuts();
     renderSpeeds();
     renderRedactions();
+    renderCues();
     renderHistory();
     await drawPreview();
   }
@@ -289,6 +300,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       spotlight: recording.pointer.length > 0 ? settings.spotlight : 0,
       showKeys: settings.showKeys,
       keys: recording.keys,
+      // Aligned to the finished video, since a cut moves every later line.
+      captions: settings.burnCaptions ? alignedCaptions() : [],
+      captionSize: settings.captionSize,
       format: settings.format,
       gifColours: 128,
       keepAudio: settings.keepAudio && recording.hasAudio,
@@ -522,6 +536,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     cuts = project.cuts;
     speeds = project.speeds;
     redactions = project.redactions;
+    captions = project.captions;
     crop = project.crop;
     dropWallpaper();
     if (project.wallpaper) await useWallpaper(project.wallpaper, project.wallpaperMime);
@@ -574,7 +589,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
 
     if (!stored) {
-      crop = { ...FULL_CROP }; texts = []; cuts = []; speeds = []; redactions = [];
+      crop = { ...FULL_CROP }; texts = []; cuts = []; speeds = []; redactions = []; captions = [];
       dropWallpaper();
     }
 
@@ -603,6 +618,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderSpeeds();
     renderRedactions();
     renderChapters();
+    renderCues();
     renderDestinations();
     await loadWaveform();
     // A reopened project already has its zooms, so it does not analyse again.
@@ -2830,6 +2846,152 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderWallpaper();
     void drawPreview();
     void renderProjects();
+  });
+
+  // ------------------------------------------------------------------ transcript
+
+  const cuesEl = $<HTMLOListElement>('ll-cues');
+  const cueFile = $<HTMLInputElement>('ll-captions-file');
+
+  function renderCues(): void {
+    cuesEl.innerHTML = '';
+    for (const cue of captions) {
+      const row = document.createElement('li');
+      row.className = 'll-cue';
+      row.dataset.id = cue.id;
+      if (pickedCues.has(cue.id)) row.classList.add('is-picked');
+      if (previewTime >= cue.start && previewTime <= cue.end) row.classList.add('is-now');
+
+      const pick = document.createElement('input');
+      pick.type = 'checkbox';
+      pick.checked = pickedCues.has(cue.id);
+      pick.setAttribute('aria-label', `Select the line at ${formatClock(cue.start)}`);
+      pick.addEventListener('change', () => {
+        if (pick.checked) pickedCues.add(cue.id);
+        else pickedCues.delete(cue.id);
+        renderCues();
+      });
+
+      const at = document.createElement('span');
+      at.className = 'll-time';
+      at.textContent = formatClock(cue.start);
+      at.title = 'Go to this line';
+      at.addEventListener('click', () => seekTo(cue.start));
+
+      const words = document.createElement('textarea');
+      words.className = 'field';
+      words.rows = 1;
+      words.value = cue.text;
+      words.setAttribute('aria-label', `Words of the line at ${formatClock(cue.start)}`);
+      words.addEventListener('input', () => {
+        captions = captions.map((entry) => (entry.id === cue.id ? { ...entry, text: words.value } : entry));
+        remember(`cue:${cue.id}`);
+        void drawPreview();
+      });
+
+      row.append(pick, at, words);
+      cuesEl.append(row);
+    }
+
+    const picked = captions.filter((cue) => pickedCues.has(cue.id));
+    $<HTMLDivElement>('ll-cues-actions').hidden = picked.length === 0;
+    const seconds = picked.reduce((total, cue) => total + (cue.end - cue.start), 0);
+    $<HTMLSpanElement>('ll-cues-label').textContent = picked.length
+      ? `${picked.length} line${picked.length === 1 ? '' : 's'}, ${seconds.toFixed(1)}s`
+      : '';
+    $<HTMLInputElement>('ll-captions-burn').checked = settings.burnCaptions;
+    $<HTMLInputElement>('ll-caption-size').value = String(settings.captionSize);
+    $<HTMLSpanElement>('ll-caption-size-out').textContent = `${Math.round(settings.captionSize * 100)}%`;
+  }
+
+  $<HTMLButtonElement>('ll-captions-open').addEventListener('click', () => cueFile.click());
+  cueFile.addEventListener('change', async () => {
+    const [file] = Array.from(cueFile.files ?? []);
+    cueFile.value = '';
+    if (!file) return;
+    const parsed = parseCaptions(await file.text(), () => createId('cue'));
+    if (parsed.length === 0) {
+      setStatus('No subtitles could be read out of that file.', 'bad');
+      return;
+    }
+    captions = parsed;
+    pickedCues.clear();
+    remember('captions');
+    renderCues();
+    void drawPreview();
+    toast(`Read ${parsed.length} lines.`);
+  });
+
+  $<HTMLButtonElement>('ll-captions-add').addEventListener('click', () => {
+    if (!recording) return;
+    const end = Math.min(recording.duration, previewTime + 2.5);
+    if (end - previewTime < 0.2) return;
+    captions = sortCues([...captions, { id: createId('cue'), start: previewTime, end, text: 'New line' }]);
+    remember('cue-add');
+    renderCues();
+    void drawPreview();
+  });
+
+  $<HTMLButtonElement>('ll-captions-srt').addEventListener('click', () => {
+    if (!captions.length) return;
+    downloadBlob(`${projectName()}.srt`, new Blob([toSrt(alignedCaptions())], { type: 'text/plain' }));
+  });
+  $<HTMLButtonElement>('ll-captions-vtt').addEventListener('click', () => {
+    if (!captions.length) return;
+    downloadBlob(`${projectName()}.vtt`, new Blob([toVtt(alignedCaptions())], { type: 'text/vtt' }));
+  });
+
+  function projectName(): string {
+    return (stored?.name ?? 'recording').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  }
+
+  /**
+   * The subtitles as they line up with the finished video.
+   *
+   * A transcript is written against the recording, but it is shown against the
+   * export, and those stop agreeing the moment anything is cut or sped up.
+   */
+  function alignedCaptions(): Cue[] {
+    if (!recording) return captions;
+    const segments = segmentsOf(trim, cuts, speeds);
+    return alignToEdit(
+      captions,
+      (source) => editedAt(segments, source),
+      (source) => !segments.some((part) => source >= part.start && source < part.end),
+    );
+  }
+
+  $<HTMLButtonElement>('ll-cues-cut').addEventListener('click', () => {
+    const spans = spansOf(captions, [...pickedCues]);
+    if (spans.length === 0) return;
+    const removed = spans.reduce((total, span) => total + (span.end - span.start), 0);
+    cuts = mergeSpans([...cuts, ...spans]);
+    // The lines themselves go too: their seconds are no longer in the video, so
+    // leaving them would put a subtitle on a moment that does not exist.
+    captions = captions.filter((cue) => !pickedCues.has(cue.id));
+    pickedCues.clear();
+    remember('cut-transcript');
+    renderCues();
+    renderCuts();
+    void drawPreview();
+    toast(`Cut ${spans.length} line${spans.length === 1 ? '' : 's'}, ${removed.toFixed(1)}s shorter.`);
+  });
+
+  $<HTMLButtonElement>('ll-cues-clear').addEventListener('click', () => {
+    pickedCues.clear();
+    renderCues();
+  });
+
+  $<HTMLInputElement>('ll-captions-burn').addEventListener('change', (event) => {
+    settings.burnCaptions = (event.target as HTMLInputElement).checked;
+    remember();
+    void drawPreview();
+  });
+  $<HTMLInputElement>('ll-caption-size').addEventListener('input', (event) => {
+    settings.captionSize = Number((event.target as HTMLInputElement).value);
+    remember('caption-size');
+    renderCues();
+    void drawPreview();
   });
 
   // ------------------------------------------------------------------ chapters

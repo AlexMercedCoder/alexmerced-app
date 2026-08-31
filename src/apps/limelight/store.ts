@@ -17,6 +17,7 @@ import { mergeSpans, type Span } from './waveform';
 import { Scratch, type ScratchChunk, type ScratchSession } from './scratch';
 import { reviveSpeeds, type SpeedRegion } from './timeline';
 import { reviveRedactions, type RedactBlock } from './redact';
+import { reviveCues, type Cue } from './captions';
 
 export type { ScratchSession } from './scratch';
 
@@ -62,6 +63,10 @@ export type Settings = {
   motion: MotionSettings;
   frameRate: number;
   showClicks: boolean;
+  /** How large a subtitle is drawn, as a fraction of the frame height. */
+  captionSize: number;
+  /** Whether the subtitles are drawn into the exported picture. */
+  burnCaptions: boolean;
   showCursor: boolean;
   /** How large the drawn cursor is, as a multiple of the default. */
   cursorSize: number;
@@ -95,6 +100,8 @@ export const defaultSettings: Settings = {
   motion: defaultMotion,
   frameRate: 30,
   showClicks: true,
+  captionSize: 0.045,
+  burnCaptions: false,
   showCursor: true,
   cursorSize: 1,
   spotlight: 0,
@@ -154,6 +161,8 @@ export type Project = {
   speeds: SpeedRegion[];
   /** Rectangles covered over, burnt into the exported picture. */
   redactions: RedactBlock[];
+  /** Subtitles, written against the recording's own clock. */
+  captions: Cue[];
   /** The derived camera move, kept so a reopened project renders identically. */
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
@@ -164,7 +173,7 @@ export type Project = {
 export function reviveSettings(value: unknown): Settings {
   if (typeof value !== 'object' || value === null) return { ...defaultSettings };
   const stored = value as Partial<Settings>;
-  const flag = (key: 'showClicks' | 'showCursor' | 'showKeys' | 'keepAudio' | 'countdownSound' | 'cameraBlur') =>
+  const flag = (key: 'showClicks' | 'showCursor' | 'showKeys' | 'burnCaptions' | 'keepAudio' | 'countdownSound' | 'cameraBlur') =>
     typeof stored[key] === 'boolean' ? (stored[key] as boolean) : defaultSettings[key];
 
   return {
@@ -182,6 +191,8 @@ export function reviveSettings(value: unknown): Settings {
     showClicks: flag('showClicks'),
     showCursor: flag('showCursor'),
     showKeys: flag('showKeys'),
+    burnCaptions: flag('burnCaptions'),
+    captionSize: typeof stored.captionSize === 'number' ? Math.max(0.02, Math.min(0.12, stored.captionSize)) : 0.045,
     cursorSize: typeof stored.cursorSize === 'number' ? Math.max(0.5, Math.min(4, stored.cursorSize)) : 1,
     spotlight: typeof stored.spotlight === 'number' ? Math.max(0, Math.min(1, stored.spotlight)) : 0,
     keepAudio: flag('keepAudio'),
@@ -276,6 +287,7 @@ export function reviveProject(value: unknown): Project | null {
     cuts: reviveCuts(project.cuts),
     speeds: reviveSpeeds(project.speeds, () => createId('speed')),
     redactions: reviveRedactions(project.redactions, () => createId('redact')),
+    captions: reviveCues(project.captions, () => createId('cue')),
     keys: Array.isArray(project.keys) ? (project.keys as KeySample[]) : [],
     marks: Array.isArray(project.marks) ? (project.marks as MarkSample[]) : [],
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
@@ -287,9 +299,9 @@ export function reviveProject(value: unknown): Project | null {
 
 export function createProject(
   name: string,
-  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>
+  detail: Omit<Project, 'id' | 'name' | 'createdAt' | 'updatedAt' | 'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'captions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>
     & Partial<Pick<Project,
-      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
+      'settings' | 'keyframes' | 'start' | 'end' | 'zooms' | 'texts' | 'cuts' | 'speeds' | 'redactions' | 'captions' | 'keys' | 'marks' | 'crop' | 'wallpaper' | 'wallpaperMime'>>,
   now: Date = new Date(),
 ): Project {
   const stamp = now.toISOString();
@@ -301,6 +313,7 @@ export function createProject(
     cuts: [],
     speeds: [],
     redactions: [],
+    captions: [],
     keys: [],
     marks: [],
     keyframes: null,
