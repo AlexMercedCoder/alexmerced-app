@@ -764,9 +764,14 @@ export async function render(
    * fetched by seeking the element instead. That is the old behaviour and it
    * still produces the same picture, just far more slowly.
    */
+  // Read once and share. The video path and the audio path both want the whole
+  // file, and reading it twice meant two full copies of the recording live at
+  // the same time for the length of the export.
+  let sourceBytes: ArrayBuffer | null = null;
   let source: FrameSource | null = null;
   if (project.source instanceof Blob) {
-    source = await openFrameSource(project.source);
+    sourceBytes = await project.source.arrayBuffer().catch(() => null);
+    source = await openFrameSource(project.source, sourceBytes ?? undefined);
   }
 
   try {
@@ -912,7 +917,7 @@ export async function render(
       // The kept pieces, so the sound skips exactly what the picture skips.
       // The kept pieces with their speeds, so the sound skips and hurries exactly
     // where the picture does.
-    audio = await encodeOpus(project.source, { start: from, end: to, track: 2, spans: segments });
+    audio = await encodeOpus(sourceBytes ?? project.source, { start: from, end: to, track: 2, spans: segments });
       if (!audio) note = 'No sound was found in the recording, so this is silent.';
     }
 
@@ -976,6 +981,9 @@ export async function render(
     // A VideoFrame holds a hardware buffer until it is closed, and the
     // decoder holds more, so this matters even on the paths that threw.
     source?.close();
+    // Dropping the reference lets the whole recording be collected as soon as
+    // the export is done rather than at the next natural scope exit.
+    sourceBytes = null;
   }
 }
 

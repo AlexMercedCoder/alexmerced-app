@@ -32,12 +32,17 @@ export function canDecodeSequentially(): boolean {
  * Returning null rather than throwing is deliberate: every reason this can fail
  * is a reason to use the slower path, not a reason to refuse the export.
  */
-export async function openFrameSource(blob: Blob): Promise<FrameSource | null> {
+export async function openFrameSource(
+  blob: Blob, shared?: ArrayBuffer,
+): Promise<FrameSource | null> {
   if (!canDecodeSequentially()) return null;
 
   let parsed;
   try {
-    parsed = demuxWebmVideo(new Uint8Array(await blob.arrayBuffer()));
+    // The caller may already have read the file, in which case reading it again
+    // would hold a second full copy of the recording for no reason. Export does
+    // exactly that: it needs the bytes for the video and again for the sound.
+    parsed = demuxWebmVideo(new Uint8Array(shared ?? await blob.arrayBuffer()));
   } catch {
     return null;
   }
