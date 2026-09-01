@@ -7,6 +7,7 @@ const app = getApp('limelight');
 <Base title="Limelight, record your screen and make it look deliberate" description={app.description} app="limelight" chrome="app" keywords={app.keywords}>
   <div class="app-frame" id="limelight-root">
     <AppBar app="limelight">
+      <button class="btn btn--sm" id="ll-help-open" aria-haspopup="dialog">What can I do here?</button>
       <button class="btn btn--sm" id="ll-open">Open a video</button>
       <button class="btn btn--sm" id="ll-save-raw">Save the raw file</button>
       <button class="btn btn--sm btn--primary" id="ll-export">Export</button>
@@ -78,11 +79,11 @@ const app = getApp('limelight');
       <div class="ll-stage" id="ll-stage" hidden>
         <canvas id="ll-preview" class="ll-preview"></canvas>
         <div class="ll-transport">
-          <button class="ll-icon" id="ll-to-start" title="Back to the start" aria-label="Back to the start">&#9198;</button>
-          <button class="ll-icon" id="ll-step-back" title="Back one frame" aria-label="Back one frame">&#9666;</button>
-          <button class="ll-icon ll-icon--play" id="ll-play" title="Play" aria-label="Play">&#9654;</button>
-          <button class="ll-icon" id="ll-step-fwd" title="Forward one frame" aria-label="Forward one frame">&#9656;</button>
-          <button class="ll-icon" id="ll-to-end" title="Skip to the end" aria-label="Skip to the end">&#9197;</button>
+          <button class="ll-icon" id="ll-to-start" title="Back to the start of the trim (Home)" aria-label="Back to the start">&#9198;</button>
+          <button class="ll-icon" id="ll-step-back" title="Back one frame, or a second with Shift (←)" aria-label="Back one frame">&#8592;</button>
+          <button class="ll-icon ll-icon--play" id="ll-play" title="Play or pause (Space)" aria-label="Play">&#9654;</button>
+          <button class="ll-icon" id="ll-step-fwd" title="Forward one frame, or a second with Shift (→)" aria-label="Forward one frame">&#8594;</button>
+          <button class="ll-icon" id="ll-to-end" title="Skip to the end of the trim (End)" aria-label="Skip to the end">&#9197;</button>
           <input type="range" id="ll-scrub" class="ll-scrub" min="0" max="10" step="0.04" value="0" aria-label="Preview position" />
           <span class="ll-time" id="ll-time">0:00</span>
           <span class="ll-time ll-time--total" id="ll-total"></span>
@@ -101,15 +102,15 @@ const app = getApp('limelight');
           <button class="btn btn--sm" id="ll-crop">Crop</button>
           <button class="btn btn--sm" id="ll-trim-start">Start here</button>
           <button class="btn btn--sm" id="ll-trim-end">End here</button>
-          <button class="btn btn--sm btn--ghost" id="ll-trim-reset">Whole recording</button>
+          <button class="btn btn--sm btn--ghost" id="ll-trim-reset">Reset the trim</button>
           <span class="ll-time" id="ll-trim-label"></span>
         </div>
 
         <div class="ll-croprow" id="ll-croprow" hidden>
           <span class="ll-tracklabel">Shape</span>
           <div class="ll-cropaspects" id="ll-crop-aspects"></div>
-          <button class="btn btn--sm btn--ghost" id="ll-crop-reset">Whole picture</button>
-          <button class="btn btn--sm btn--primary" id="ll-crop-done">Done</button>
+          <button class="btn btn--sm btn--ghost" id="ll-crop-reset">Reset the crop</button>
+          <button class="btn btn--sm btn--primary" id="ll-crop-done">Done cropping</button>
           <span class="ll-time" id="ll-crop-label"></span>
         </div>
 
@@ -118,6 +119,10 @@ const app = getApp('limelight');
              as a thin strip, so nothing is forgotten, while only the one being
              worked on is full height with its controls. -->
         <div class="ll-picker" id="ll-picker" role="tablist" aria-label="What to edit"></div>
+        <p class="ll-firsttime" id="ll-firsttime" hidden>
+          <span id="ll-firsttime-text"></span>
+          <button class="btn btn--sm btn--ghost" id="ll-firsttime-got">Got it</button>
+        </p>
 
         <div class="ll-track" data-track="sound" id="ll-track-sound" hidden>
           <div class="ll-zoomrow">
@@ -155,7 +160,7 @@ const app = getApp('limelight');
               <div class="ll-zoom-head">
                 <span class="ll-tracklabel">This zoom</span>
                 <button class="btn btn--sm" id="ll-zoom-aim" aria-pressed="false">Aim it</button>
-                <button class="btn btn--sm btn--ghost" id="ll-zoom-delete">Delete</button>
+                <button class="btn btn--sm btn--ghost" id="ll-zoom-delete">Delete this zoom</button>
               </div>
               <div class="ll-text-fields">
                 <label class="ll-slider"><span>How far in</span><input type="range" id="ll-zoom-amount" min="1" max="4" step="0.1" /><em id="ll-zoom-amount-out"></em></label>
@@ -200,8 +205,8 @@ const app = getApp('limelight');
                 <label class="field-row"><span>Style</span><select class="field" id="ll-redact-style"></select></label>
                 <label class="ll-slider"><span>Width</span><input type="range" id="ll-redact-w" min="0.02" max="1" step="0.01" /><em id="ll-redact-w-out"></em></label>
                 <label class="ll-slider"><span>Height</span><input type="range" id="ll-redact-h" min="0.02" max="1" step="0.01" /><em id="ll-redact-h-out"></em></label>
-                <button class="btn btn--sm" id="ll-redact-point">Follow from here</button>
-                <button class="btn btn--sm btn--ghost" id="ll-redact-delete">Delete</button>
+                <button class="btn btn--sm" id="ll-redact-point">Make it follow from here</button>
+                <button class="btn btn--sm btn--ghost" id="ll-redact-delete">Delete this box</button>
               </div>
               <span class="ll-time" id="ll-redact-label"></span>
             </div>
@@ -220,12 +225,12 @@ const app = getApp('limelight');
           <div class="ll-trackpanel">
             <div class="ll-scrubrow">
               <select class="field ll-shapekind" id="ll-shape-kind"></select>
-              <button class="btn btn--sm" id="ll-shape-add">Add it here</button>
+              <button class="btn btn--sm" id="ll-shape-add">Add it at the playhead</button>
               <div class="ll-redact-fields" id="ll-shape-selected" hidden>
                 <div class="ll-swatches" id="ll-shape-colours"></div>
                 <label class="ll-slider"><span>Weight</span><input type="range" id="ll-shape-weight" min="0.001" max="0.03" step="0.001" /><em id="ll-shape-weight-out"></em></label>
                 <label class="ll-slider"><span>Fade</span><input type="range" id="ll-shape-fade" min="0" max="1.5" step="0.05" /><em id="ll-shape-fade-out"></em></label>
-                <button class="btn btn--sm btn--ghost" id="ll-shape-delete">Delete</button>
+                <button class="btn btn--sm btn--ghost" id="ll-shape-delete">Delete this shape</button>
               </div>
               <span class="ll-time" id="ll-shape-label"></span>
             </div>
@@ -262,23 +267,12 @@ const app = getApp('limelight');
           </div>
         </div>
 
-        <p class="ll-keys">
-          <span><kbd>Space</kbd> play</span>
-          <span><kbd>←</kbd> <kbd>→</kbd> step a frame</span>
-          <span><kbd>Z</kbd> add a zoom</span>
-          <span><kbd>T</kbd> add text</span>
-          <span><kbd>C</kbd> crop</span>
-          <span><kbd>I</kbd> start here</span>
-          <span><kbd>O</kbd> end here</span>
-          <span><kbd>Delete</kbd> remove the selected block</span>
-          <span>Right-click a block to duplicate or split it</span>
-          <span><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo</span>
-        </p>
+        <div class="ll-keys" id="ll-keys"></div>
 
         <div class="ll-scrubrow">
           <button class="btn btn--sm" id="ll-undo" disabled>Undo</button>
           <button class="btn btn--sm" id="ll-redo" disabled>Redo</button>
-          <button class="btn btn--sm btn--danger" id="ll-discard">Discard</button>
+          <button class="btn btn--sm btn--danger" id="ll-discard">Discard this recording</button>
         </div>
       </div>
 
@@ -286,7 +280,7 @@ const app = getApp('limelight');
         <details class="ll-group" open>
           <summary class="ll-group__head"><span>Look</span><span class="ll-group__hint">shape, background, angle, saved looks</span></summary>
         <section class="card ll-card">
-          <h2 class="ll-subhead">For</h2>
+          <h2 class="ll-subhead">Where it is going</h2>
           <p class="ll-note">Sets the shape and the output size together, and shows what will be cut off.</p>
           <div class="ll-presets" id="ll-destinations"></div>
         </section>
@@ -299,7 +293,7 @@ const app = getApp('limelight');
           <label class="ll-slider"><span>Shadow</span><input type="range" id="ll-shadow" min="0" max="1" step="0.05" /><em id="ll-shadow-out"></em></label>
           <div class="ll-scrubrow">
             <button class="btn btn--sm" id="ll-wallpaper-pick">Use a picture</button>
-            <button class="btn btn--sm btn--ghost" id="ll-wallpaper-clear" hidden>Remove it</button>
+            <button class="btn btn--sm btn--ghost" id="ll-wallpaper-clear" hidden>Remove the picture</button>
             <input type="file" id="ll-wallpaper-file" accept="image/*" hidden />
           </div>
           <p class="ll-note" id="ll-wallpaper-note" hidden></p>
@@ -310,7 +304,7 @@ const app = getApp('limelight');
           <label class="ll-slider"><span>Turn</span><input type="range" id="ll-tilt-y" min="-45" max="45" step="1" /><em id="ll-tilt-y-out"></em></label>
           <label class="ll-slider"><span>Rotate</span><input type="range" id="ll-tilt-rotate" min="-30" max="30" step="1" /><em id="ll-tilt-rotate-out"></em></label>
           <label class="ll-slider"><span>Depth</span><input type="range" id="ll-tilt-depth" min="0" max="1" step="0.05" /><em id="ll-tilt-depth-out"></em></label>
-          <button class="btn btn--sm btn--ghost" id="ll-tilt-reset">Lay it flat</button>
+          <button class="btn btn--sm btn--ghost" id="ll-tilt-reset">Reset the angle</button>
           <label class="field-row"><span>How it arrives</span><select class="field" id="ll-motion-in"></select></label>
           <label class="field-row"><span>How it leaves</span><select class="field" id="ll-motion-out"></select></label>
           <label class="ll-slider"><span>How long</span><input type="range" id="ll-motion-seconds" min="0.1" max="3" step="0.05" /><em id="ll-motion-seconds-out"></em></label>
@@ -325,7 +319,7 @@ const app = getApp('limelight');
           <div class="ll-looks" id="ll-looks"></div>
           <div class="ll-scrubrow">
             <input class="field ll-lookname" id="ll-look-name" type="text" placeholder="Name this look" maxlength="40" />
-            <button class="btn btn--sm" id="ll-look-save">Save</button>
+            <button class="btn btn--sm" id="ll-look-save">Save this look</button>
           </div>
         </section>
         </details>
@@ -340,7 +334,7 @@ const app = getApp('limelight');
             the quickest way to take out a sentence you did not mean to say.
           </p>
           <div class="ll-scrubrow ll-listen" id="ll-listen-row">
-            <button class="btn btn--sm btn--primary" id="ll-listen">Write it out for me</button>
+            <button class="btn btn--sm btn--primary" id="ll-listen">Transcribe the speech</button>
             <select class="field ll-listen-size" id="ll-listen-size"></select>
             <span class="ll-time" id="ll-listen-note"></span>
           </div>
@@ -417,7 +411,7 @@ const app = getApp('limelight');
           <label class="ll-slider"><span>Quiet the gaps</span><input type="range" id="ll-voice-gate" min="0" max="0.4" step="0.01" /><em id="ll-voice-gate-out"></em></label>
           <div class="ll-scrubrow">
             <button class="btn btn--sm" id="ll-music-open">Music underneath</button>
-            <button class="btn btn--sm btn--ghost" id="ll-music-drop" hidden>Remove</button>
+            <button class="btn btn--sm btn--ghost" id="ll-music-drop" hidden>Remove the music</button>
             <span class="ll-time" id="ll-music-name"></span>
             <input type="file" id="ll-music-file" accept="audio/*" hidden />
           </div>
@@ -458,7 +452,6 @@ const app = getApp('limelight');
 </script>
 
 <style is:global>
-
   .ll-zoomrow { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); align-items: center; gap: 0.5rem; }
   .ll-tracklabel { font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-soft); }
   .ll-zoomtrack { position: relative; height: 2.4rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--paper-raised); touch-action: none; overflow: hidden; }
@@ -534,7 +527,6 @@ const app = getApp('limelight');
   }
   .ll-menu button:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 10%, transparent); }
   .ll-menu button:disabled { opacity: 0.45; cursor: default; }
-  .ll-keys { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.82rem; color: var(--muted); }
   .ll-keys kbd { font: inherit; font-weight: 600; padding: 0.05rem 0.35rem; border: 1px solid var(--rule); border-radius: 0.3rem; background: var(--surface); color: var(--ink); }
   .ll-preview.is-cropping { cursor: crosshair; }
   .ll-croprow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
@@ -579,6 +571,36 @@ const app = getApp('limelight');
   .ll-chapters li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
   .ll-chapters .ll-time { min-width: 3.4rem; }
   .ll-chapters input { min-width: 0; }
+  /* The help sheet. A dialog so Escape and the backdrop work for free. */
+  .ll-sheet { border: 0; padding: 0; max-width: 46rem; width: calc(100vw - 2rem); border-radius: 12px;
+    background: var(--surface); color: var(--ink); box-shadow: 0 20px 60px -20px rgba(0,0,0,0.5); }
+  .ll-sheet::backdrop { background: rgba(10, 10, 12, 0.55); }
+  .ll-sheet__head { display: flex; align-items: baseline; gap: 0.8rem; padding: 1.1rem 1.3rem 0.6rem; }
+  .ll-sheet__head h2 { margin: 0; font-size: 1.15rem; }
+  .ll-sheet__head .btn { margin-left: auto; }
+  .ll-sheet__body { padding: 0 1.3rem 1.3rem; max-height: min(70vh, 40rem); overflow-y: auto; display: grid; gap: 1.2rem; }
+  .ll-sheet h3 { margin: 0 0 0.35rem; font-size: 0.95rem; }
+  .ll-sheet h3 em { font-style: normal; font-weight: 400; color: var(--ink-faint); font-size: 0.85rem; }
+  .ll-sheet ul { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.2rem; }
+  .ll-sheet li { font-size: 0.9rem; color: var(--ink-soft); }
+  .ll-keygrid { display: grid; gap: 0.3rem; }
+  .ll-keyrow { display: grid; grid-template-columns: 7.5rem 1fr; gap: 0.7rem; align-items: baseline; font-size: 0.88rem; }
+  .ll-keyrow .ll-keycap { display: flex; gap: 0.2rem; }
+  .ll-keyrow span:last-child { color: var(--ink-soft); }
+
+  /* The shortcut strip under the timeline, generated from the same list. */
+  .ll-keys { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; margin: 0.9rem 0; font-size: 0.76rem; color: var(--ink-faint); }
+  .ll-keys > span { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+  /* Shown once per track, the first time it is opened. */
+  .ll-firsttime {
+    display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+    margin: 0 0 0.6rem; padding: 0.55rem 0.8rem; border-radius: 8px;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    font-size: 0.85rem;
+  }
+  .ll-firsttime[hidden] { display: none; }
+
   /* Settings, in three groups rather than nine cards down the page. Only the
      first is open, because most recordings never need the rest. */
   .ll-group { border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 0.7rem; background: var(--surface); }

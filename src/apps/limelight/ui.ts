@@ -1,5 +1,6 @@
 import { formatBytes } from '../../lib/bytes';
 import { createId } from '../../lib/id';
+import { readPref, writePref } from '../../lib/prefs';
 import { downloadBlob } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { registerTools } from '../../lib/webmcp';
@@ -51,6 +52,10 @@ import {
 } from './shapes';
 import { canTranscribe, transcribe, WHISPER_MODELS, type WhisperSize } from './transcribe';
 import { mountBlockTrack } from './blockTrack';
+import {
+  GENERAL_HELP, SHORTCUT_GROUPS, SHORTCUTS, shortcutFor, TRACK_HELP, trackHelp,
+  type ShortcutId, type TrackName,
+} from './help';
 import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
@@ -268,18 +273,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLButtonElement>('ll-redo').disabled = !history.canRedo;
   }
 
-  async function stepBack(): Promise<void> {
+  async function undoEdit(): Promise<void> {
     const state = history.undo();
     if (state) await restore(state);
   }
 
-  async function stepForward(): Promise<void> {
+  async function redoEdit(): Promise<void> {
     const state = history.redo();
     if (state) await restore(state);
   }
 
-  $<HTMLButtonElement>('ll-undo').addEventListener('click', () => { void stepBack(); });
-  $<HTMLButtonElement>('ll-redo').addEventListener('click', () => { void stepForward(); });
+  $<HTMLButtonElement>('ll-undo').addEventListener('click', () => { void undoEdit(); });
+  $<HTMLButtonElement>('ll-redo').addEventListener('click', () => { void redoEdit(); });
 
   /** Writing tens of megabytes on every slider nudge would make this stutter. */
   function queueSave(): void {
@@ -645,6 +650,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderMusic();
     renderDestinations();
     renderPicker();
+    showFirstTime(activeTrack);
     await loadWaveform();
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
@@ -1097,6 +1103,149 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
   }
 
+  // ------------------------------------------------------------------ help
+
+  /**
+   * The sheet that says what everything does.
+   *
+   * Built from the same list the shortcut handler dispatches from and the same
+   * one the tabs are labelled from, so what a person is told and what the app
+   * does cannot drift apart.
+   */
+  const keycap = (keys: string[]): HTMLElement => {
+    const holder = document.createElement('span');
+    holder.className = 'll-keycap';
+    for (const [index, key] of keys.entries()) {
+      if (index > 0) holder.append(document.createTextNode('+'));
+      const kbd = document.createElement('kbd');
+      kbd.textContent = key;
+      holder.append(kbd);
+    }
+    return holder;
+  };
+
+  function buildHelpSheet(): HTMLDialogElement {
+    const sheet = document.createElement('dialog');
+    sheet.className = 'll-sheet';
+    sheet.id = 'll-sheet';
+
+    const head = document.createElement('div');
+    head.className = 'll-sheet__head';
+    const title = document.createElement('h2');
+    title.textContent = 'What you can do here';
+    const close = document.createElement('button');
+    close.className = 'btn btn--sm';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => sheet.close());
+    head.append(title, close);
+
+    const body = document.createElement('div');
+    body.className = 'll-sheet__body';
+
+    for (const track of TRACK_HELP) {
+      const section = document.createElement('section');
+      const heading = document.createElement('h3');
+      heading.textContent = track.label;
+      const what = document.createElement('em');
+      what.textContent = `: ${track.what.toLowerCase()}`;
+      heading.append(what);
+      const list = document.createElement('ul');
+      for (const gesture of track.gestures) {
+        const item = document.createElement('li');
+        item.textContent = gesture;
+        list.append(item);
+      }
+      section.append(heading, list);
+      body.append(section);
+    }
+
+    for (const group of GENERAL_HELP) {
+      const section = document.createElement('section');
+      const heading = document.createElement('h3');
+      heading.textContent = group.heading;
+      const list = document.createElement('ul');
+      for (const point of group.points) {
+        const item = document.createElement('li');
+        item.textContent = point;
+        list.append(item);
+      }
+      section.append(heading, list);
+      body.append(section);
+    }
+
+    for (const group of SHORTCUT_GROUPS) {
+      const section = document.createElement('section');
+      const heading = document.createElement('h3');
+      heading.textContent = `${group} from the keyboard`;
+      const grid = document.createElement('div');
+      grid.className = 'll-keygrid';
+      for (const entry of SHORTCUTS.filter((shortcut) => shortcut.group === group)) {
+        const row = document.createElement('div');
+        row.className = 'll-keyrow';
+        const says = document.createElement('span');
+        says.textContent = entry.does;
+        row.append(keycap(entry.keys), says);
+        grid.append(row);
+      }
+      section.append(heading, grid);
+      body.append(section);
+    }
+
+    sheet.append(head, body);
+    root.append(sheet);
+    return sheet;
+  }
+
+  const helpSheet = buildHelpSheet();
+  $<HTMLButtonElement>('ll-help-open').addEventListener('click', () => {
+    if (typeof helpSheet.showModal === 'function') helpSheet.showModal();
+    else helpSheet.setAttribute('open', '');
+  });
+
+  /** The strip under the timeline, from the same list as the sheet. */
+  function renderKeyStrip(): void {
+    const strip = $<HTMLDivElement>('ll-keys');
+    strip.innerHTML = '';
+    for (const entry of SHORTCUTS) {
+      const item = document.createElement('span');
+      item.append(keycap(entry.keys), document.createTextNode(entry.does.toLowerCase()));
+      strip.append(item);
+    }
+    const more = document.createElement('span');
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'btn btn--sm btn--ghost';
+    link.textContent = 'Everything else';
+    link.addEventListener('click', () => $<HTMLButtonElement>('ll-help-open').click());
+    more.append(link);
+    strip.append(more);
+  }
+
+  /**
+   * The line shown the first time a track is opened.
+   *
+   * Once each, remembered, and dismissible. The hints that existed before this
+   * lived inside panels that only appear once something is selected, which put
+   * the instruction behind the discovery it was meant to enable.
+   */
+  const SEEN_KEY = 'limelight:tracks-seen';
+  let tracksSeen: string[] = readPref<string[]>(SEEN_KEY, []);
+
+  function showFirstTime(name: TrackName): void {
+    const holder = $<HTMLParagraphElement>('ll-firsttime');
+    if (tracksSeen.includes(name)) { holder.hidden = true; return; }
+    $<HTMLSpanElement>('ll-firsttime-text').textContent = trackHelp(name).firstTime;
+    holder.hidden = false;
+  }
+
+  $<HTMLButtonElement>('ll-firsttime-got').addEventListener('click', () => {
+    if (!tracksSeen.includes(activeTrack)) {
+      tracksSeen = [...tracksSeen, activeTrack];
+      writePref(SEEN_KEY, tracksSeen);
+    }
+    $<HTMLParagraphElement>('ll-firsttime').hidden = true;
+  });
+
   // ------------------------------------------------------------------ track picker
 
   /**
@@ -1107,15 +1256,17 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * a thin strip, so a redaction set ten minutes ago is never out of sight, but
    * only the chosen one is full height with its controls.
    */
-  type TrackName = 'sound' | 'zoom' | 'speed' | 'hide' | 'shapes' | 'text';
-  const TRACKS: { id: TrackName; label: string; count: () => number }[] = [
-    { id: 'zoom', label: 'Zoom', count: () => zooms.length },
-    { id: 'sound', label: 'Sound', count: () => cuts.length },
-    { id: 'speed', label: 'Speed', count: () => speeds.length },
-    { id: 'hide', label: 'Hide', count: () => redactions.length },
-    { id: 'shapes', label: 'Shapes', count: () => shapes.length },
-    { id: 'text', label: 'Text', count: () => texts.length },
-  ];
+  // Order and labels come from the help, so a track cannot be named one thing
+  // on its tab and another in the sheet that explains it.
+  const COUNTS: Record<TrackName, () => number> = {
+    zoom: () => zooms.length,
+    sound: () => cuts.length,
+    speed: () => speeds.length,
+    hide: () => redactions.length,
+    shapes: () => shapes.length,
+    text: () => texts.length,
+  };
+  const TRACKS = TRACK_HELP.map((entry) => ({ ...entry, count: COUNTS[entry.id] }));
   let activeTrack: TrackName = 'zoom';
 
   function showTrack(name: TrackName): void {
@@ -1128,6 +1279,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (name !== 'text') selectedText = null;
     if (name !== 'speed') selectedSpeed = null;
     renderPicker();
+    showFirstTime(name);
     if (recording) {
       renderZooms();
       renderSpeeds();
@@ -1151,6 +1303,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       tab.className = 'll-pick';
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-selected', String(activeTrack === track.id));
+      // Says what the track is for before it has been opened, which the label
+      // alone does not: "Speed" and "Cover up" mean nothing on their own.
+      tab.title = track.what;
       tab.textContent = track.label;
 
       // The count is what stops an inactive track being forgotten entirely.
@@ -1169,6 +1324,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       const holder = root.querySelector<HTMLDivElement>(`#ll-track-${track.id}`);
       if (!holder) continue;
       holder.classList.toggle('is-active', activeTrack === track.id);
+      // The label beside the timeline row comes from the same place as the tab,
+      // so renaming a track renames it everywhere rather than in one of two.
+      const label = holder.querySelector<HTMLElement>('.ll-tracklabel');
+      if (label) {
+        label.textContent = track.label;
+        label.title = track.what;
+      }
       if (track.id === 'sound') holder.hidden = !recording?.hasAudio;
     }
   }
@@ -3334,17 +3496,31 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * name should get the letter rather than a zoom. Space is the exception worth
    * naming: it would otherwise scroll the page.
    */
-  root.addEventListener('keydown', (event) => {
+  /**
+   * The shortcuts, listened for on the window rather than the app's own div.
+   *
+   * A keydown listener on an element only hears the key when focus is already
+   * inside it, and nothing inside takes focus on load. So on a freshly opened
+   * page every shortcut did nothing until you had clicked something, which is
+   * the worst possible moment for them to be silent: it is exactly when the
+   * key strip on screen has just told you they work. The guards below are what
+   * make listening this widely safe.
+   */
+  window.addEventListener('keydown', (event) => {
+    // A sheet or menu that is open owns the keyboard, and Escape especially:
+    // preventing it here would stop a dialog closing.
+    if (root.querySelector('dialog[open]')) return;
+
     // Undo is the one shortcut that keeps its modifier, and the one that has
     // to work while a field has focus.
     if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === 'z' || event.key === 'Z')) {
       event.preventDefault();
-      void (event.shiftKey ? stepForward() : stepBack());
+      void (event.shiftKey ? redoEdit() : undoEdit());
       return;
     }
     if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === 'y' || event.key === 'Y')) {
       event.preventDefault();
-      void stepForward();
+      void redoEdit();
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -3365,100 +3541,71 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       void drawPreview();
     };
 
-    switch (event.key) {
-      case ' ':
-        event.preventDefault();
-        togglePlay();
-        break;
-      case 'ArrowLeft':
-        if (typing) return;
-        event.preventDefault();
-        seek(previewTime - step);
-        break;
-      case 'ArrowRight':
-        if (typing) return;
-        event.preventDefault();
-        seek(previewTime + step);
-        break;
-      case 'Home':
-        event.preventDefault();
-        seek(trim.start);
-        break;
-      case 'End':
-        event.preventDefault();
-        seek(trim.end);
-        break;
-      case 'z': case 'Z':
-        event.preventDefault();
-        // Switch to the track first, or the block lands somewhere the person
-        // cannot see and reads as nothing having happened.
-        showTrack('zoom');
-        $<HTMLButtonElement>('ll-zoom-add').click();
-        break;
-      case 't': case 'T':
-        event.preventDefault();
-        showTrack('text');
-        $<HTMLButtonElement>('ll-text-add').click();
-        break;
-      case 'c': case 'C':
-        event.preventDefault();
-        cropButton.click();
-        break;
-      case 'i': case 'I':
-        event.preventDefault();
-        $<HTMLButtonElement>('ll-trim-start').click();
-        break;
-      case 'o': case 'O':
-        event.preventDefault();
-        $<HTMLButtonElement>('ll-trim-end').click();
-        break;
-      case 'Delete': case 'Backspace':
-        // The visible track is the one this removes from. Selections in other
-        // tracks are cleared when the track changes, so at most one is live.
-        if (selectedText) {
-          event.preventDefault();
-          texts = removeText(texts, selectedText);
-          selectedText = null;
-          renderTexts();
-          persistTexts();
-          void drawPreview();
-          return;
-        }
-        if (selectedRedaction) {
-          event.preventDefault();
-          redactions = removeRedaction(redactions, selectedRedaction);
-          selectedRedaction = null;
-          persistRedactions();
-          return;
-        }
-        if (selectedShape) {
-          event.preventDefault();
-          shapes = removeShape(shapes, selectedShape);
-          selectedShape = null;
-          persistShapes();
-          return;
-        }
-        if (selectedSpeed) {
-          event.preventDefault();
-          speeds = removeSpeed(speeds, selectedSpeed);
-          selectedSpeed = null;
-          persistSpeeds();
-          return;
-        }
-        if (!selected) return;
-        event.preventDefault();
-        zooms = removeBlock(zooms, selected);
-        selected = null;
-        renderZooms();
-        persistZooms();
-        void drawPreview();
-        break;
-      case 'Escape':
-        if (cropping) { event.preventDefault(); cropButton.click(); }
-        break;
-      default:
-    }
+    const shortcut = shortcutFor(event.key);
+    if (!shortcut) return;
+    // The arrow keys belong to a focused range control, which is a control
+    // rather than a field and so was let through the typing guard above.
+    if (typing && (shortcut.id === 'stepBack' || shortcut.id === 'stepForward')) return;
+
+    const actions: Record<ShortcutId, () => void> = {
+      play: () => togglePlay(),
+      stepBack: () => seek(previewTime - step),
+      stepForward: () => seek(previewTime + step),
+      toStart: () => seek(trim.start),
+      toEnd: () => seek(trim.end),
+      crop: () => cropButton.click(),
+      trimStart: () => $<HTMLButtonElement>('ll-trim-start').click(),
+      trimEnd: () => $<HTMLButtonElement>('ll-trim-end').click(),
+      // Switch to the track first, or the block lands somewhere the person
+      // cannot see and reads as nothing having happened.
+      addZoom: () => { showTrack('zoom'); $<HTMLButtonElement>('ll-zoom-add').click(); },
+      addText: () => { showTrack('text'); $<HTMLButtonElement>('ll-text-add').click(); },
+      cancel: () => { if (cropping) cropButton.click(); else if (focusTarget) stopAiming(); },
+      remove: () => removeSelected(),
+      // Both are handled before the modifier guard, so they never reach here.
+      undo: () => {},
+      redo: () => {},
+    };
+
+    event.preventDefault();
+    actions[shortcut.id]();
   });
+
+  /**
+   * Removes whatever is selected on the visible track.
+   *
+   * Selections in other tracks are cleared when the track changes, so at most
+   * one is ever live and the order below is a formality rather than a guess.
+   */
+  function removeSelected(): void {
+    if (selectedText) {
+      texts = removeText(texts, selectedText);
+      selectedText = null;
+      renderTexts();
+      persistTexts();
+      void drawPreview();
+      return;
+    }
+    if (selectedRedaction) {
+      redactions = removeRedaction(redactions, selectedRedaction);
+      selectedRedaction = null;
+      persistRedactions();
+      return;
+    }
+    if (selectedShape) {
+      shapes = removeShape(shapes, selectedShape);
+      selectedShape = null;
+      persistShapes();
+      return;
+    }
+    if (selectedSpeed) {
+      speeds = removeSpeed(speeds, selectedSpeed);
+      selectedSpeed = null;
+      persistSpeeds();
+      return;
+    }
+    if (selected) deleteZoom(selected);
+  }
 
   /**
    * Playback, driven by the video element rather than by seeking it.
@@ -3579,7 +3726,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** Reflects playback state onto the transport. */
   function renderTransport(): void {
     playButton.textContent = playing ? '⏸' : '▶';
-    playButton.title = playing ? 'Pause' : 'Play';
+    playButton.title = playing ? 'Pause (Space)' : 'Play (Space)';
     playButton.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     playButton.dataset.playing = String(playing);
     playButton.disabled = !recording || cropping;
@@ -3803,6 +3950,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   renderControls();
   renderTransport();
+  renderKeyStrip();
   renderDestinations();
   await describeFormat();
   await renderProjects();

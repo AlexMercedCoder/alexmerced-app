@@ -37,6 +37,25 @@
   --shadow-1: 0 1px 2px rgba(20, 22, 28, .06), 0 2px 8px rgba(20, 22, 28, .05);
   --shadow-2: 0 4px 12px rgba(20, 22, 28, .09), 0 12px 32px rgba(20, 22, 28, .08);
   --header-h: 3.75rem;
+
+  /*
+   * Older names several app pages were written against, which were never
+   * declared anywhere.
+   *
+   * An undefined custom property is not an error: `background: var(--surface)`
+   * simply comes out transparent and `color: var(--ink-soft)` falls back to
+   * whatever it inherits. So six pages were quietly losing their panel
+   * backgrounds and their soft greys, and the one place it became impossible to
+   * miss was Limelight's help sheet, a dialog that sat see-through over the
+   * editor with both sets of text on top of each other. Aliases rather than
+   * copies, so there is still one set of colours.
+   */
+  --ink: var(--text);
+  --ink-soft: var(--text-soft);
+  --ink-faint: var(--text-faint);
+  --surface: var(--paper-raised);
+  --muted: var(--text-soft);
+  --body: var(--sans);
 }
 
 /* Per-app accents. Set data-theme on <html> and the shell follows. */
