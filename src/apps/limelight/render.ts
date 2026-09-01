@@ -51,13 +51,36 @@ import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings 
  * recording and a two second one come out with the same fidelity.
  */
 
+/**
+ * Thrown when an export can only be finished with a video element.
+ *
+ * A decoder handles almost every recording. When one refuses, the seeking path
+ * takes over, and that needs an element, which a worker does not have. This
+ * says so precisely so the caller can start again on the main thread rather
+ * than reporting a failure to somebody who did nothing wrong.
+ */
+export class NeedsElementError extends Error {
+  constructor(message = 'This recording has to be exported on the main thread.') {
+    super(message);
+    this.name = 'NeedsElementError';
+  }
+}
+
 export class RenderError extends Error {}
 
 export type Progress = { stage: string; done: number; total: number };
 
 export type Project = {
-  video: HTMLVideoElement;
-  camera: HTMLVideoElement | null;
+  /**
+   * The recording as an element, for seeking when a decoder cannot be used.
+   *
+   * Absent in a worker, where there is no DOM to hold one. Everything the
+   * export needs beyond it comes from the decoder, so the only thing missing
+   * is the fallback, and an export that would have needed it fails with
+   * `NeedsElementError` for the caller to run here instead.
+   */
+  video?: HTMLVideoElement | null;
+  camera?: HTMLVideoElement | null;
   /** The recording itself, which is where the audio still lives. */
   source: Blob | null;
   /**
@@ -192,6 +215,7 @@ export async function findInterest(
   for (let index = 0; index < total; index += 1) {
     if (signal.aborted) throw new RenderError('Cancelled.');
     const time = (index / samplesPerSecond);
+    if (!project.video) throw new NeedsElementError();
     await seekTo(project.video, Math.min(project.duration - 1e-3, time));
     context.drawImage(project.video, 0, 0, width, height);
     const current = context.getImageData(0, 0, width, height).data;
@@ -945,6 +969,7 @@ export async function render(
         if (!decoded) { source.close(); source = null; }
       }
       if (!decoded) {
+        if (!element) throw new NeedsElementError();
         // Clamped against the element's own length, which on a reel is this
         // clip's recording rather than the whole timeline.
         const limit = Number.isFinite(element.duration) && element.duration > 0
@@ -1225,7 +1250,8 @@ function blurPatch(width: number, height: number): OffscreenCanvas {
  * its target through a crop or a change of output size.
  */
 function redact(project: Project, time: number): CanvasImageSource {
-  const source = project.frame ?? project.video;
+  const source = project.frame ?? project.video ?? null;
+  if (!source) throw new NeedsElementError();
   const blocks = project.redactions?.length ? redactionsAt(project.redactions, time) : [];
   if (blocks.length === 0) return source;
 

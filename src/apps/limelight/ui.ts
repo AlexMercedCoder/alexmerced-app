@@ -19,8 +19,10 @@ import { History } from './history';
 import { defaultTilt, MOTIONS, type Motion } from './plate';
 import { limelightTools } from './mcp';
 import {
-  capabilities, drawFrame, findInterest, render, RenderError, type OutputFormat, type Project,
+  capabilities, drawFrame, findInterest, render, RenderError,
+  type ExportResult, type OutputFormat, type Progress, type Project,
 } from './render';
+import { canExportInWorker, renderInWorker } from './offload';
 import {
   applyLook, createProject, deleteLook, deleteProject, loadCurrentId, loadLooks, loadProject,
   loadProjects, loadSettings, lookFrom, oldestProjects, openScratch, saveCurrentId, saveLook,
@@ -54,6 +56,9 @@ import {
 import { canTranscribe, transcribe, WHISPER_MODELS, type WhisperSize } from './transcribe';
 import { mountBlockTrack } from './blockTrack';
 import { mountSpeaker } from './announce';
+import { mountHelp } from './helpSheet';
+import { mountPopout } from './popout';
+import { mountChapters } from './chapters';
 import { mountFilmstrip } from './filmstrip';
 import {
   applySidecar, readSidecar, sidecarFilename, sidecarMismatch, sidecarSize, sidecarVideo,
@@ -1619,145 +1624,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // ------------------------------------------------------------------ help
 
   /**
-   * The sheet that says what everything does.
+   * Everything the editor says about itself, built from the one list.
    *
-   * Built from the same list the shortcut handler dispatches from and the same
-   * one the tabs are labelled from, so what a person is told and what the app
-   * does cannot drift apart.
+   * The words, the keys and the track labels all come from help.ts, and the
+   * markup for them is its own module because it needs nothing from the editor
+   * but a place to put itself.
    */
-  const keycap = (keys: string[]): HTMLElement => {
-    const holder = document.createElement('span');
-    holder.className = 'll-keycap';
-    for (const [index, key] of keys.entries()) {
-      if (index > 0) holder.append(document.createTextNode('+'));
-      const kbd = document.createElement('kbd');
-      kbd.textContent = key;
-      holder.append(kbd);
-    }
-    return holder;
-  };
-
-  function buildHelpSheet(): HTMLDialogElement {
-    const sheet = document.createElement('dialog');
-    sheet.className = 'll-sheet';
-    sheet.id = 'll-sheet';
-
-    const head = document.createElement('div');
-    head.className = 'll-sheet__head';
-    const title = document.createElement('h2');
-    title.textContent = 'What you can do here';
-    const close = document.createElement('button');
-    close.className = 'btn btn--sm';
-    close.textContent = 'Close';
-    close.addEventListener('click', () => sheet.close());
-    head.append(title, close);
-
-    const body = document.createElement('div');
-    body.className = 'll-sheet__body';
-
-    for (const track of TRACK_HELP) {
-      const section = document.createElement('section');
-      const heading = document.createElement('h3');
-      heading.textContent = track.label;
-      const what = document.createElement('em');
-      what.textContent = `: ${track.what.toLowerCase()}`;
-      heading.append(what);
-      const list = document.createElement('ul');
-      for (const gesture of track.gestures) {
-        const item = document.createElement('li');
-        item.textContent = gesture;
-        list.append(item);
-      }
-      section.append(heading, list);
-      body.append(section);
-    }
-
-    for (const group of GENERAL_HELP) {
-      const section = document.createElement('section');
-      const heading = document.createElement('h3');
-      heading.textContent = group.heading;
-      const list = document.createElement('ul');
-      for (const point of group.points) {
-        const item = document.createElement('li');
-        item.textContent = point;
-        list.append(item);
-      }
-      section.append(heading, list);
-      body.append(section);
-    }
-
-    for (const group of SHORTCUT_GROUPS) {
-      const section = document.createElement('section');
-      const heading = document.createElement('h3');
-      heading.textContent = `${group} from the keyboard`;
-      const grid = document.createElement('div');
-      grid.className = 'll-keygrid';
-      for (const entry of SHORTCUTS.filter((shortcut) => shortcut.group === group)) {
-        const row = document.createElement('div');
-        row.className = 'll-keyrow';
-        const says = document.createElement('span');
-        says.textContent = entry.does;
-        row.append(keycap(entry.keys), says);
-        grid.append(row);
-      }
-      section.append(heading, grid);
-      body.append(section);
-    }
-
-    sheet.append(head, body);
-    root.append(sheet);
-    return sheet;
-  }
-
-  const helpSheet = buildHelpSheet();
-  $<HTMLButtonElement>('ll-help-open').addEventListener('click', () => {
-    if (typeof helpSheet.showModal === 'function') helpSheet.showModal();
-    else helpSheet.setAttribute('open', '');
-  });
-
-  /** The strip under the timeline, from the same list as the sheet. */
-  function renderKeyStrip(): void {
-    const strip = $<HTMLDivElement>('ll-keys');
-    strip.innerHTML = '';
-    for (const entry of SHORTCUTS) {
-      const item = document.createElement('span');
-      item.append(keycap(entry.keys), document.createTextNode(entry.does.toLowerCase()));
-      strip.append(item);
-    }
-    const more = document.createElement('span');
-    const link = document.createElement('button');
-    link.type = 'button';
-    link.className = 'btn btn--sm btn--ghost';
-    link.textContent = 'Everything else';
-    link.addEventListener('click', () => $<HTMLButtonElement>('ll-help-open').click());
-    more.append(link);
-    strip.append(more);
-  }
-
-  /**
-   * The line shown the first time a track is opened.
-   *
-   * Once each, remembered, and dismissible. The hints that existed before this
-   * lived inside panels that only appear once something is selected, which put
-   * the instruction behind the discovery it was meant to enable.
-   */
-  const SEEN_KEY = 'limelight:tracks-seen';
-  let tracksSeen: string[] = readPref<string[]>(SEEN_KEY, []);
-
-  function showFirstTime(name: TrackName): void {
-    const holder = $<HTMLParagraphElement>('ll-firsttime');
-    if (tracksSeen.includes(name)) { holder.hidden = true; return; }
-    $<HTMLSpanElement>('ll-firsttime-text').textContent = trackHelp(name).firstTime;
-    holder.hidden = false;
-  }
-
-  $<HTMLButtonElement>('ll-firsttime-got').addEventListener('click', () => {
-    if (!tracksSeen.includes(activeTrack)) {
-      tracksSeen = [...tracksSeen, activeTrack];
-      writePref(SEEN_KEY, tracksSeen);
-    }
-    $<HTMLParagraphElement>('ll-firsttime').hidden = true;
-  });
+  const help = mountHelp(root, $);
+  const showFirstTime = (track: TrackName) => help.showFirstTime(track);
+  $<HTMLButtonElement>('ll-firsttime-got')
+    .addEventListener('click', () => help.dismissFirstTime(activeTrack));
 
   // ------------------------------------------------------------------ track picker
 
@@ -3085,53 +2961,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ pop out
 
-  /**
-   * Floats the preview in a window of its own.
-   *
-   * The preview is a canvas, and picture in picture only accepts a video, so
-   * the canvas is streamed into one. What floats is exactly what the editor is
-   * drawing, which means it follows the scrubber and every setting rather than
-   * being a second, slightly different renderer.
-   */
-  const popoutButton = $<HTMLButtonElement>('ll-popout');
-  let popout: HTMLVideoElement | null = null;
-
-  const canPopOut = typeof document !== 'undefined'
-    && 'pictureInPictureEnabled' in document
-    && document.pictureInPictureEnabled
-    && typeof (canvas as HTMLCanvasElement).captureStream === 'function';
-
-  popoutButton.hidden = !canPopOut;
-
-  popoutButton.addEventListener('click', async () => {
-    if (!canPopOut) return;
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-        return;
-      }
-
-      if (!popout) {
-        popout = document.createElement('video');
-        popout.muted = true;
-        popout.playsInline = true;
-        popout.addEventListener('leavepictureinpicture', () => {
-          popoutButton.textContent = 'Pop out';
-        });
-      }
-      // A fresh stream each time, since the canvas is resized when the output
-      // size changes and a stream captured from the old size would be stale.
-      popout.srcObject = (canvas as HTMLCanvasElement).captureStream(30);
-      await popout.play();
-      await popout.requestPictureInPicture();
-      popoutButton.textContent = 'Put back';
-      // The stream only carries frames the canvas actually draws, so an idle
-      // editor would show a still. Redrawing once gives it something to start on.
-      await drawPreview();
-    } catch {
-      toast('This browser would not open a floating preview.');
-    }
-  });
+  mountPopout($<HTMLButtonElement>('ll-popout'), canvas, drawPreview);
 
   // ------------------------------------------------------------------ controls
 
@@ -3827,63 +3657,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ chapters
 
-  /**
-   * The moments marked during recording, as something to paste under a video.
-   *
-   * Marks are recorded as times; the names are added afterwards, because
-   * nobody types a chapter title while demonstrating something. YouTube wants
-   * the first one at zero, so one is added if the recording did not start with
-   * a mark.
-   */
-  function renderChapters(): void {
-    const card = $<HTMLElement>('ll-chapters-card');
-    const list = $<HTMLOListElement>('ll-chapters');
-    const marks = recording?.marks ?? [];
-    card.hidden = marks.length === 0;
-    list.innerHTML = '';
-
-    for (const [index, mark] of marks.entries()) {
-      const row = document.createElement('li');
-      const time = document.createElement('span');
-      time.className = 'll-time';
-      time.textContent = formatClock(mark.time);
-
-      const name = document.createElement('input');
-      name.type = 'text';
-      name.className = 'field';
-      name.value = mark.label;
-      name.setAttribute('aria-label', `Name of the chapter at ${formatClock(mark.time)}`);
-      name.addEventListener('input', () => {
-        if (!recording) return;
-        recording.marks[index] = { ...mark, label: name.value };
-        if (stored) { stored.marks = recording.marks; queueSave(); }
-      });
-
-      const go = document.createElement('button');
-      go.type = 'button';
-      go.className = 'btn btn--sm btn--ghost';
-      go.textContent = 'Go';
-      go.addEventListener('click', () => seekTo(mark.time));
-
-      row.append(time, name, go);
-      list.append(row);
-    }
-  }
-
-  $<HTMLButtonElement>('ll-chapters-copy').addEventListener('click', async () => {
-    const marks = recording?.marks ?? [];
-    if (marks.length === 0) return;
-    const lines = marks.some((mark) => mark.time < 0.5)
-      ? []
-      : ['0:00 Start'];
-    for (const mark of marks) lines.push(`${formatClock(mark.time)} ${mark.label}`);
-    try {
-      await navigator.clipboard.writeText(lines.join('\n'));
-      toast('Chapter list copied.');
-    } catch {
-      setStatus('The browser would not give access to the clipboard.', 'bad');
-    }
+  const chapters = mountChapters($, {
+    marks: () => recording?.marks ?? [],
+    onRename: (marks) => {
+      if (!recording) return;
+      recording.marks = marks;
+      if (stored) { stored.marks = marks; queueSave(); }
+    },
+    goTo: (time) => seekTo(time),
+    formatClock,
+    onError: (message) => setStatus(message, 'bad'),
   });
+  const renderChapters = () => chapters.render();
 
   // ------------------------------------------------------------------ destinations
 
@@ -4471,7 +4256,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const started = performance.now();
 
     try {
-      const result = await render({ ...current, keyframes: trackFromBlocks(zooms, current.duration, settings.zoom) }, points, onProgress, controller.signal);
+      const ready = { ...current, keyframes: trackFromBlocks(zooms, current.duration, settings.zoom) };
+      // The worker first, so the page stays usable. Anything it cannot finish
+      // comes back here rather than failing.
+      const offloaded = canExportInWorker(ready)
+        ? await renderInWorker(ready, onProgress, controller.signal)
+        : null;
+      const result = offloaded
+        ?? await render(ready, points, onProgress, controller.signal);
       const stem = (stored?.name ?? 'limelight').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'limelight';
       downloadBlob(`${stem}.${result.extension}`, result.blob);
       setStatus(
@@ -4775,7 +4567,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   renderControls();
   renderTransport();
-  renderKeyStrip();
   renderDestinations();
   await describeFormat();
   await renderProjects();
