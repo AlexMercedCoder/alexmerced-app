@@ -18,6 +18,7 @@ import {
   defaultSilence, findSilences, keptDuration, mergeSpans, type Span,
 } from './waveform';
 import type { Look } from './store';
+import { joins, layout, reelDuration, type Clip } from './reel';
 import {
   CAMERA_SHAPES, CROP_ASPECTS, cropToAspect, FULL_CROP, isFullCrop, normaliseCrop, OUTPUT_SIZES, PRESETS,
   type CameraCorner, type CameraShape, type Composition, type Crop,
@@ -45,6 +46,8 @@ type State = {
   looks: Look[];
   previewTime: number;
   playing: boolean;
+  /** The reel, when the timeline holds more than one recording. */
+  clips: Clip[];
 };
 
 /** Changes an agent is allowed to make. Everything is local and reversible. */
@@ -60,6 +63,8 @@ type Edit = (change: {
   seek?: number;
   play?: boolean;
   applyLook?: string;
+  /** Run the first pass: cut the quiet gaps and add the zooms. */
+  tidy?: true;
 }) => void;
 
 /**
@@ -743,6 +748,52 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
             text: block.text,
             opacity: Number(opacity.toFixed(3)),
           })),
+        });
+      },
+    },
+    {
+      name: 'limelight_describe_reel',
+      description:
+        'Report whether this timeline is one recording or several, where each clip sits, and where the joins between them fall. Everything else in these tools is addressed in timeline seconds, and this is what those seconds are made of.',
+      inputSchema: { type: 'object', properties: {} },
+      execute: () => {
+        const state = read();
+        if (!state.recording) return textResult({ clips: [], note: 'Nothing has been recorded or opened yet.' });
+        if (state.clips.length <= 1) {
+          return textResult({
+            clips: 1,
+            duration: Number(state.recording.duration.toFixed(2)),
+            joins: [],
+            note: 'One recording. Timeline seconds are this recording\u2019s own seconds.',
+          });
+        }
+        const placed = layout(state.clips);
+        return textResult({
+          clips: placed.map((clip) => ({
+            id: clip.id,
+            source: clip.source,
+            startsAt: Number(clip.at.toFixed(2)),
+            runsFor: Number(clip.length.toFixed(2)),
+            fromItsOwn: [Number(clip.in.toFixed(2)), Number(clip.out.toFixed(2))],
+          })),
+          duration: Number(reelDuration(state.clips).toFixed(2)),
+          joins: joins(placed).map((at) => Number(at.toFixed(2))),
+          note: 'Timeline seconds run across every clip. A retake or an added clip moves everything after it.',
+        });
+      },
+    },
+    {
+      name: 'limelight_tidy',
+      description:
+        'Do the first pass over a recording: cut the quiet gaps out and put zooms where the action was. Safe to run at any point, since a zoom placed by hand is never moved. One undo reverses the whole thing.',
+      inputSchema: { type: 'object', properties: {} },
+      execute: () => {
+        const state = read();
+        if (!state.recording) return errorResult('There is nothing to tidy yet.');
+        edit({ tidy: true });
+        return textResult({
+          done: true,
+          note: 'Read limelight_describe_recording again to see what changed.',
         });
       },
     },

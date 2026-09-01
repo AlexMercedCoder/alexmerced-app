@@ -4,7 +4,8 @@ import { FULL_CROP } from './layout';
 import { defaultSettings, type Project } from './store';
 import {
   applySidecar, readSidecar, reviveSidecar, sidecarCounts, sidecarFilename,
-  sidecarMismatch, sidecarSize, sidecarVideo, toSidecar, writeSidecar,
+  sidecarLoses, sidecarMismatch, sidecarSize, sidecarTakes, sidecarVideo,
+  toSidecar, writeSidecar,
 } from './sidecar';
 
 const bytes = new Uint8Array([26, 69, 223, 163, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -218,5 +219,62 @@ describe('the file it writes', () => {
 
   it('counts what is in it for the summary line', () => {
     expect(sidecarCounts(toSidecar(project(), false))).toMatchObject({ zooms: 1, cuts: 1, shapes: 0 });
+  });
+});
+
+describe('a timeline made of several recordings', () => {
+  const reel = (): Project => project({
+    clips: [
+      { id: 'c1', source: 'take-1', in: 0, out: 6 },
+      { id: 'c2', source: 'take-2', in: 0, out: 4 },
+    ],
+    takes: [{ id: 'take-2', bytes: new Uint8Array([7, 7, 7, 7]), mime: 'video/webm' }],
+    duration: 10,
+  });
+
+  it('carries the reel and its recordings in a file that holds everything', () => {
+    const back = readSidecar(writeSidecar(reel(), true)).data;
+    expect(back.clips).toHaveLength(2);
+    expect(sidecarTakes(back)).toEqual([
+      { id: 'take-2', bytes: new Uint8Array([7, 7, 7, 7]), mime: 'video/webm' },
+    ]);
+  });
+
+  it('leaves the reel out of a file that holds only edits', () => {
+    // Clips naming recordings that are not in the file would place every edit
+    // against a timeline nothing can reconstruct.
+    const back = readSidecar(writeSidecar(reel(), false)).data;
+    expect(back.clips).toBeUndefined();
+    expect(back.takes).toBeUndefined();
+  });
+
+  it('says what an edits-only file would lose, and only then', () => {
+    expect(sidecarLoses(reel(), false)).toMatch(/2 recordings/);
+    expect(sidecarLoses(reel(), true)).toBeNull();
+    expect(sidecarLoses(project(), false)).toBeNull();
+  });
+
+  it('counts the further recordings in what the file will weigh', () => {
+    const big = reel();
+    big.takes = [{ id: 'take-2', bytes: new Uint8Array(3_000_000), mime: 'video/webm' }];
+    expect(sidecarSize(big, true)).toBeGreaterThan(4_000_000);
+  });
+
+  it('drops a clip whose recording did not survive the file', () => {
+    const written = JSON.parse(writeSidecar(reel(), true));
+    written.data.takes = [];
+    const back = reviveSidecar(written.data);
+    expect(back.clips).toBeUndefined();
+  });
+
+  it('keeps the rest when one recording will not decode', () => {
+    const written = JSON.parse(writeSidecar(reel(), true));
+    written.data.takes.push({ id: 'take-3', mime: 'video/webm', bytes: 4, base64: '!!!' });
+    expect(sidecarTakes(reviveSidecar(written.data)).map((take) => take.id)).toEqual(['take-2']);
+  });
+
+  it('puts the reel back onto the project when the edits are applied', () => {
+    const back = readSidecar(writeSidecar(reel(), true)).data;
+    expect(applySidecar(project(), back).clips).toHaveLength(2);
   });
 });

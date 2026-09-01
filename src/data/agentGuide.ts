@@ -216,6 +216,8 @@ export const AGENT_TOOLS: AppTools[] = [
       { name: 'limelight_add_text', summary: 'Put a caption on the recording.' },
       { name: 'limelight_remove_text', summary: 'Take a caption off again.' },
       { name: 'limelight_text_at', summary: 'Which captions are showing at a moment.' },
+      { name: 'limelight_describe_reel', summary: 'Whether the timeline is one recording or several, and where the joins fall.' },
+      { name: 'limelight_tidy', summary: 'Cut the quiet gaps and put zooms where the action was, as one undoable pass.' },
     ],
   },
 ];

@@ -61,8 +61,8 @@ import { mountPopout } from './popout';
 import { mountChapters } from './chapters';
 import { mountFilmstrip } from './filmstrip';
 import {
-  applySidecar, readSidecar, sidecarFilename, sidecarMismatch, sidecarSize, sidecarVideo,
-  writeSidecar,
+  applySidecar, readSidecar, sidecarFilename, sidecarLoses, sidecarMismatch, sidecarSize,
+  sidecarTakes, sidecarVideo, writeSidecar,
 } from './sidecar';
 import { describeTidy, planTidy, tidyChangesAnything } from './tidy';
 import {
@@ -192,10 +192,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     trim: { start: number; end: number };
     wallpaper: Uint8Array | null;
     wallpaperMime: string;
+    /**
+     * The reel, because adding a clip or taking one again is an edit.
+     *
+     * Leaving it out was worse than an undo that did nothing: the blocks moved
+     * back to where they were before the splice while the timeline stayed the
+     * new length, so everything landed in the wrong place.
+     */
+    clips: Clip[];
   };
   const history = new History<EditorState>({
     settings, zooms, texts, cuts: [], speeds: [], redactions: [], captions: [], shapes: [],
-    crop, trim, wallpaper: null, wallpaperMime: 'image/png',
+    crop, trim, wallpaper: null, wallpaperMime: 'image/png', clips: [],
   });
   /** Set while a state is being put back, so restoring does not record itself. */
   let restoring = false;
@@ -263,7 +271,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function snapshot(): EditorState {
     return {
       settings, zooms, texts, cuts, speeds, redactions, captions, shapes,
-      crop, trim, wallpaper: wallpaperBytes, wallpaperMime,
+      crop, trim, wallpaper: wallpaperBytes, wallpaperMime, clips,
     };
   }
 
@@ -281,6 +289,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   async function restore(state: EditorState): Promise<void> {
     restoring = true;
+    // Set when an undo changes the length of the reel, which the waveform, the
+    // filmstrip and the joins are all measured against.
+    let reelChanged = false;
     try {
       settings = state.settings;
       zooms = state.zooms;
@@ -292,6 +303,22 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       shapes = state.shapes;
       crop = state.crop;
       trim = { ...state.trim };
+
+      // The reel comes back with everything else. Its length is what the
+      // scrubber, the trim bar and every track measure against, so restoring
+      // the blocks without it puts them all in the wrong place.
+      if (state.clips.length > 0 && recording) {
+        const wasLength = recording.duration;
+        clips = state.clips;
+        recording.duration = reelDuration(clips);
+        recording.hasAudio = [...takes.values()].some((take) => take.hasAudio);
+        if (Math.abs(wasLength - recording.duration) > 0.001) {
+          scrubber.max = String(Math.max(0.1, recording.duration));
+          $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
+          previewTime = Math.min(previewTime, recording.duration);
+          reelChanged = true;
+        }
+      }
       // The picture is held as bytes in the snapshot, so an undo across a
       // change of background has to decode it again rather than assume the
       // one already loaded is the right one.
@@ -327,6 +354,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderShapes();
     renderCues();
     renderHistory();
+    syncScrub();
+    if (reelChanged) {
+      await rebuildWave();
+      drawStrip();
+    }
     await drawPreview();
   }
 
@@ -762,6 +794,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     await rebuildWave();
     await drawPreview();
     drawStrip();
+
+    // `load` reset the history before the reel was put back, so its baseline
+    // was a project of one recording. Left alone, the first undo of the session
+    // would throw the whole reel away, which is not an edit anybody made.
+    history.reset(snapshot());
+    renderHistory();
   }
 
   async function load(result: Recording, range?: { start: number; end: number }): Promise<void> {
@@ -4331,6 +4369,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       shapes,
       music: stored?.music ?? null,
       musicName: stored?.musicName ?? '',
+      clips: clips.length > 1 ? clips : [],
+      takes: [...takes].flatMap(([id, take]) => (id === FIRST_TAKE || !take.bytes?.byteLength
+        ? []
+        : [{ id, bytes: take.bytes, mime: take.blob.type || 'video/webm' }])),
       keyframes: trackFromBlocks(zooms, recording.duration, settings.zoom),
       settings,
       createdAt: stored?.createdAt ?? now,
@@ -4353,6 +4395,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       setStatus('There is nothing to carry: the recording could not be read.', 'bad');
       return;
     }
+
+    // A reel written without its recordings is a file whose edits describe a
+    // timeline nothing in it can reconstruct, so it is worth interrupting over.
+    const losing = sidecarLoses(carrying, withVideo);
+    if (losing && !confirm(`${losing}\n\nSave the edits anyway?`)) return;
 
     const text = writeSidecar(carrying, withVideo);
     downloadFile(sidecarFilename(carrying.name, withVideo), text);
@@ -4417,6 +4464,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         height: video?.videoHeight ?? recording.height,
       });
       if (wrong && !confirm(`${wrong}\n\nUse them anyway?`)) return;
+    }
+
+    // Any further recordings the file carried, before the clips that name them
+    // mean anything.
+    const carriedTakes = sidecarTakes(sidecar);
+    if (carriedTakes.length > 0 && sidecar.clips) {
+      await restoreReel(carriedTakes, sidecar.clips, {
+        start: sidecar.start,
+        end: sidecar.end > sidecar.start ? sidecar.end : sidecar.source.duration,
+      });
     }
 
     const onto = forExport();
@@ -4595,8 +4652,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       looks: knownLooks,
       previewTime,
       playing,
+      clips,
     }),
     (change) => {
+      // Tidying is a whole pass rather than a value to set, and it renders and
+      // records itself, so it returns rather than falling through to the
+      // single `remember` below and recording a second, empty step.
+      if (change.tidy) { void tidyUp(); return; }
       if (change.crop) { crop = change.crop; cropAspect = 'free'; }
       if (change.trim) trim = { ...change.trim };
       if (change.texts) { texts = change.texts; selectedText = null; }

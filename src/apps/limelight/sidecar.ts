@@ -2,6 +2,7 @@ import { createId } from '../../lib/id';
 import { base64Size, fromBase64, toBase64 } from '../../lib/bytes';
 import { createEnvelope, ImportError, parseEnvelope, type Envelope } from '../../lib/portable';
 import { reviveCrop, type Crop } from './layout';
+import { reviveClips, type Clip } from './reel';
 import { APP_ID, APP_VERSION, reviveSettings, type Project, type Settings } from './store';
 import { reviveTexts, type TextBlock } from './text';
 import { reviveBlocks, type ZoomBlock } from './zooms';
@@ -56,8 +57,18 @@ export type Sidecar = {
   shapes: Shape[];
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
+  /**
+   * The reel, when the timeline holds more than one recording.
+   *
+   * Only ever written alongside the recordings it names, since clips pointing
+   * at takes that are not in the file would place every edit against a
+   * timeline that does not exist.
+   */
+  clips?: Clip[];
   /** Present only when the recording was carried along. */
   video?: SidecarVideo;
+  /** The further recordings the clips name, when they were carried too. */
+  takes?: { id: string; mime: string; bytes: number; base64: string }[];
 };
 
 /** How far the durations may differ before the two are treated as unrelated. */
@@ -71,7 +82,25 @@ export function sidecarFilename(name: string, withVideo: boolean, now: Date = ne
 
 /** What a file will roughly weigh, for saying so before writing it. */
 export function sidecarSize(project: Project, withVideo: boolean): number {
-  return withVideo ? base64Size(project.bytes.byteLength) : 8_000;
+  if (!withVideo) return 8_000;
+  const extra = reelTravels(project, withVideo)
+    ? (project.takes ?? []).reduce((sum, take) => sum + base64Size(take.bytes.byteLength), 0)
+    : 0;
+  return base64Size(project.bytes.byteLength) + extra;
+}
+
+/** Whether a project's reel can be written into a file of this kind. */
+export function reelTravels(project: Project, withVideo: boolean): boolean {
+  return withVideo && (project.clips?.length ?? 0) > 1;
+}
+
+/** What is lost by writing this file, in words, or nothing. */
+export function sidecarLoses(project: Project, withVideo: boolean): string | null {
+  const extra = (project.clips?.length ?? 0) > 1;
+  if (!extra || reelTravels(project, withVideo)) return null;
+  const takes = (project.takes?.length ?? 0) + 1;
+  return `This timeline is made of ${takes} recordings, and only edits are being saved. `
+    + 'Use Save everything to keep them, or the edits will not line up with anything.';
 }
 
 export function toSidecar(project: Project, withVideo: boolean): Sidecar {
@@ -103,6 +132,17 @@ export function toSidecar(project: Project, withVideo: boolean): Sidecar {
       bytes: project.bytes.byteLength,
       base64: toBase64(project.bytes),
     };
+    // The reel travels only with the recordings it names, so a file can never
+    // describe a timeline it does not carry.
+    if (reelTravels(project, withVideo)) {
+      sidecar.clips = project.clips;
+      sidecar.takes = (project.takes ?? []).map((take) => ({
+        id: take.id,
+        mime: take.mime,
+        bytes: take.bytes.byteLength,
+        base64: toBase64(take.bytes),
+      }));
+    }
   }
   return sidecar;
 }
@@ -158,6 +198,23 @@ export function reviveSidecar(value: unknown): Sidecar {
     }
     : undefined;
 
+  const takes = Array.isArray(raw.takes)
+    ? raw.takes.flatMap((entry) => {
+      const take = entry as Partial<NonNullable<Sidecar['takes']>[number]>;
+      if (typeof take.id !== 'string' || typeof take.base64 !== 'string' || !take.base64) return [];
+      return [{
+        id: take.id,
+        mime: typeof take.mime === 'string' && take.mime ? take.mime : 'video/webm',
+        bytes: numberOr(take.bytes, 0),
+        base64: take.base64,
+      }];
+    })
+    : [];
+  const clips = reviveClips(raw.clips, () => createId('clip'))
+    // A clip naming a recording that is not in the file is dropped, and if that
+    // leaves fewer than two the reel is not one.
+    .filter((clip) => clip.source === 'take-1' || takes.some((take) => take.id === clip.source));
+
   return {
     name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : 'Imported recording',
     source: {
@@ -184,12 +241,30 @@ export function reviveSidecar(value: unknown): Sidecar {
     keyframes: Array.isArray(raw.keyframes) ? raw.keyframes as ZoomKeyframe[] : null,
     settings: reviveSettings(raw.settings),
     ...(video ? { video } : {}),
+    ...(takes.length > 0 ? { takes } : {}),
+    // Clips are kept only when the recordings they name came too. A reel
+    // pointing at nothing would put every edit against a timeline that is not
+    // there, which is worse than falling back to the one recording.
+    ...(takes.length > 0 && clips.length > 1 ? { clips } : {}),
   };
 }
 
 export function readSidecar(text: string): Envelope<Sidecar> {
   const envelope = parseEnvelope<unknown>(text, APP_ID);
   return { ...envelope, data: reviveSidecar(envelope.data) };
+}
+
+/** The further recordings inside a file, decoded. */
+export function sidecarTakes(sidecar: Sidecar): { id: string; bytes: Uint8Array; mime: string }[] {
+  return (sidecar.takes ?? []).flatMap((take) => {
+    try {
+      return [{ id: take.id, bytes: fromBase64(take.base64), mime: take.mime }];
+    } catch {
+      // One unreadable take should not lose the rest, and the clips that name
+      // it are dropped by the caller.
+      return [];
+    }
+  });
 }
 
 /** The recording carried inside a file, or null when it only holds edits. */
@@ -246,6 +321,7 @@ export function applySidecar(project: Project, sidecar: Sidecar): Project {
     shapes: sidecar.shapes,
     keyframes: sidecar.keyframes,
     settings: sidecar.settings,
+    ...(sidecar.clips && sidecar.clips.length > 1 ? { clips: sidecar.clips } : {}),
     updatedAt: new Date().toISOString(),
   };
 }
