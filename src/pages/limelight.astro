@@ -113,117 +113,153 @@ const app = getApp('limelight');
           <span class="ll-time" id="ll-crop-label"></span>
         </div>
 
-        <div class="ll-zoomrow" id="ll-soundrow" hidden>
-          <span class="ll-tracklabel">Sound</span>
-          <div class="ll-wavewrap" id="ll-wavewrap" aria-label="Waveform, drag to select a stretch">
-            <canvas class="ll-wave" id="ll-wave"></canvas>
-            <div class="ll-cutbands" id="ll-cutbands"></div>
-            <div class="ll-waveselect" id="ll-waveselect" hidden></div>
-            <div class="ll-wavehead" id="ll-wavehead"></div>
+        <!-- One track at a time. Six of them open at once was the original
+             confusion at a larger scale: the picker keeps every track visible
+             as a thin strip, so nothing is forgotten, while only the one being
+             worked on is full height with its controls. -->
+        <div class="ll-picker" id="ll-picker" role="tablist" aria-label="What to edit"></div>
+
+        <div class="ll-track" data-track="sound" id="ll-track-sound" hidden>
+          <div class="ll-zoomrow">
+            <span class="ll-tracklabel">Sound</span>
+            <div class="ll-wavewrap" id="ll-wavewrap" aria-label="Waveform, drag to select a stretch">
+              <canvas class="ll-wave" id="ll-wave"></canvas>
+              <div class="ll-cutbands" id="ll-cutbands"></div>
+              <div class="ll-waveselect" id="ll-waveselect" hidden></div>
+              <div class="ll-wavehead" id="ll-wavehead"></div>
+            </div>
           </div>
-        </div>
-        <div class="ll-scrubrow" id="ll-cutrow" hidden>
-          <button class="btn btn--sm" id="ll-cut-selection" disabled>Cut the selection</button>
-          <button class="btn btn--sm" id="ll-cut-silences">Remove silences</button>
-          <button class="btn btn--sm btn--ghost" id="ll-cut-clear" disabled>Keep everything</button>
-          <span class="ll-time" id="ll-cut-label"></span>
-        </div>
-
-        <div class="ll-zoomrow">
-          <span class="ll-tracklabel">Zoom</span>
-          <div class="ll-zoomtrack" id="ll-zoomtrack" aria-label="Zoom track"></div>
-        </div>
-        <p class="ll-note" id="ll-zoom-hint"></p>
-
-        <div class="ll-zoomrow">
-          <span class="ll-tracklabel">Speed</span>
-          <div class="ll-zoomtrack ll-speedtrack" id="ll-speedtrack" aria-label="Speed track"></div>
-        </div>
-        <div class="ll-scrubrow">
-          <button class="btn btn--sm" id="ll-speed-add">Speed up from here</button>
-          <label class="ll-slider ll-speed-pick" id="ll-speed-selected" hidden>
-            <span>Pace</span>
-            <input type="range" id="ll-speed-amount" min="0.25" max="8" step="0.25" />
-            <em id="ll-speed-amount-out"></em>
-          </label>
-          <button class="btn btn--sm btn--ghost" id="ll-speed-delete" hidden>Back to normal</button>
-          <span class="ll-time" id="ll-speed-label"></span>
-        </div>
-
-        <div class="ll-zoomrow">
-          <span class="ll-tracklabel">Hide</span>
-          <div class="ll-zoomtrack ll-redacttrack" id="ll-redacttrack" aria-label="Redaction track"></div>
-        </div>
-        <div class="ll-scrubrow">
-          <button class="btn btn--sm" id="ll-redact-add">Hide something</button>
-          <div class="ll-redact-fields" id="ll-redact-selected" hidden>
-            <label class="field-row"><span>Style</span><select class="field" id="ll-redact-style"></select></label>
-            <label class="ll-slider"><span>Width</span><input type="range" id="ll-redact-w" min="0.02" max="1" step="0.01" /><em id="ll-redact-w-out"></em></label>
-            <label class="ll-slider"><span>Height</span><input type="range" id="ll-redact-h" min="0.02" max="1" step="0.01" /><em id="ll-redact-h-out"></em></label>
-            <button class="btn btn--sm" id="ll-redact-point">Follow from here</button>
-            <button class="btn btn--sm btn--ghost" id="ll-redact-delete">Delete</button>
-          </div>
-          <span class="ll-time" id="ll-redact-label"></span>
-        </div>
-        <p class="ll-note" id="ll-redact-note" hidden>
-          Drag on the picture to place what is hidden. It is burnt into the exported video,
-          not laid over it.
-        </p>
-
-        <div class="ll-zoomrow">
-          <span class="ll-tracklabel">Shapes</span>
-          <div class="ll-zoomtrack ll-shapetrack" id="ll-shapetrack" aria-label="Shape track"></div>
-        </div>
-        <div class="ll-scrubrow">
-          <select class="field ll-shapekind" id="ll-shape-kind"></select>
-          <button class="btn btn--sm" id="ll-shape-add">Add it here</button>
-          <div class="ll-redact-fields" id="ll-shape-selected" hidden>
-            <div class="ll-swatches" id="ll-shape-colours"></div>
-            <label class="ll-slider"><span>Weight</span><input type="range" id="ll-shape-weight" min="0.001" max="0.03" step="0.001" /><em id="ll-shape-weight-out"></em></label>
-            <label class="ll-slider"><span>Fade</span><input type="range" id="ll-shape-fade" min="0" max="1.5" step="0.05" /><em id="ll-shape-fade-out"></em></label>
-            <button class="btn btn--sm btn--ghost" id="ll-shape-delete">Delete</button>
-          </div>
-          <span class="ll-time" id="ll-shape-label"></span>
-        </div>
-        <p class="ll-note" id="ll-shape-note" hidden>
-          Drag on the picture to place it. An arrow runs from where you press to where you let go.
-        </p>
-
-        <div class="ll-zoomrow">
-          <span class="ll-tracklabel">Text</span>
-          <div class="ll-zoomtrack ll-texttrack" id="ll-texttrack" aria-label="Text track"></div>
-        </div>
-
-        <div class="ll-text-selected" id="ll-text-selected" hidden>
-          <label class="field-row ll-text-words">
-            <span>Words</span>
-            <textarea class="field" id="ll-text-words" rows="2"></textarea>
-          </label>
-          <div class="ll-text-fields">
-            <label class="ll-slider"><span>Size</span><input type="range" id="ll-text-size" min="0.02" max="0.2" step="0.005" /><em id="ll-text-size-out"></em></label>
-            <label class="ll-slider"><span>Across</span><input type="range" id="ll-text-x" min="0" max="1" step="0.01" /><em id="ll-text-x-out"></em></label>
-            <label class="ll-slider"><span>Down</span><input type="range" id="ll-text-y" min="0" max="1" step="0.01" /><em id="ll-text-y-out"></em></label>
-            <label class="ll-slider"><span>Plate</span><input type="range" id="ll-text-plate" min="0" max="1" step="0.05" /><em id="ll-text-plate-out"></em></label>
-            <label class="ll-slider"><span>Fade</span><input type="range" id="ll-text-fade" min="0" max="1.5" step="0.05" /><em id="ll-text-fade-out"></em></label>
-            <label class="field-row"><span>Align</span><select class="field" id="ll-text-align"><option value="left">Left</option><option value="centre">Centre</option><option value="right">Right</option></select></label>
-            <label class="field-row"><span>Colour</span><input type="color" class="field ll-text-colour" id="ll-text-colour" /></label>
+          <div class="ll-trackpanel">
+            <div class="ll-scrubrow" id="ll-cutrow" hidden>
+              <button class="btn btn--sm" id="ll-cut-selection" disabled>Cut the selection</button>
+              <button class="btn btn--sm" id="ll-cut-silences">Remove silences</button>
+              <button class="btn btn--sm btn--ghost" id="ll-cut-clear" disabled>Keep everything</button>
+              <span class="ll-time" id="ll-cut-label"></span>
+            </div>
           </div>
         </div>
 
-        <div class="ll-zoom-selected" id="ll-zoom-selected" hidden>
-          <div class="ll-zoom-head">
-            <span class="ll-tracklabel">This zoom</span>
-            <button class="btn btn--sm" id="ll-zoom-aim" aria-pressed="false">Aim it</button>
-            <button class="btn btn--sm btn--ghost" id="ll-zoom-delete">Delete</button>
+        <div class="ll-track" data-track="zoom" id="ll-track-zoom">
+          <div class="ll-zoomrow">
+            <span class="ll-tracklabel">Zoom</span>
+            <div class="ll-zoomtrack" id="ll-zoomtrack" aria-label="Zoom track"></div>
           </div>
-          <div class="ll-text-fields">
-            <label class="ll-slider"><span>How far in</span><input type="range" id="ll-zoom-amount" min="1" max="4" step="0.1" /><em id="ll-zoom-amount-out"></em></label>
-            <label class="ll-slider"><span>Across</span><input type="range" id="ll-zoom-x" min="0" max="1" step="0.01" /><em id="ll-zoom-x-out"></em></label>
-            <label class="ll-slider"><span>Down</span><input type="range" id="ll-zoom-y" min="0" max="1" step="0.01" /><em id="ll-zoom-y-out"></em></label>
+          <div class="ll-trackpanel">
+            <p class="ll-note" id="ll-zoom-hint"></p>
+            <div class="ll-scrubrow">
+              <button class="btn btn--sm btn--primary" id="ll-zoom-add">Add a zoom</button>
+              <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
+              <button class="btn btn--sm btn--ghost" id="ll-zoom-clear">Clear zooms</button>
+            </div>
+            <div class="ll-zoom-selected" id="ll-zoom-selected" hidden>
+              <div class="ll-zoom-head">
+                <span class="ll-tracklabel">This zoom</span>
+                <button class="btn btn--sm" id="ll-zoom-aim" aria-pressed="false">Aim it</button>
+                <button class="btn btn--sm btn--ghost" id="ll-zoom-delete">Delete</button>
+              </div>
+              <div class="ll-text-fields">
+                <label class="ll-slider"><span>How far in</span><input type="range" id="ll-zoom-amount" min="1" max="4" step="0.1" /><em id="ll-zoom-amount-out"></em></label>
+                <label class="ll-slider"><span>Across</span><input type="range" id="ll-zoom-x" min="0" max="1" step="0.01" /><em id="ll-zoom-x-out"></em></label>
+                <label class="ll-slider"><span>Down</span><input type="range" id="ll-zoom-y" min="0" max="1" step="0.01" /><em id="ll-zoom-y-out"></em></label>
+              </div>
+              <p class="ll-note" id="ll-aim-note" hidden>
+                Drag on the picture to say what this zoom should look at. The bright rectangle is what it will show.
+              </p>
+            </div>
           </div>
-          <p class="ll-note" id="ll-aim-note" hidden>
-            Drag on the picture to say what this zoom should look at. The bright rectangle is what it will show.
-          </p>
+        </div>
+
+        <div class="ll-track" data-track="speed" id="ll-track-speed">
+          <div class="ll-zoomrow">
+            <span class="ll-tracklabel">Speed</span>
+            <div class="ll-zoomtrack ll-speedtrack" id="ll-speedtrack" aria-label="Speed track"></div>
+          </div>
+          <div class="ll-trackpanel">
+            <div class="ll-scrubrow">
+              <button class="btn btn--sm" id="ll-speed-add">Speed up from here</button>
+              <label class="ll-slider ll-speed-pick" id="ll-speed-selected" hidden>
+                <span>Pace</span>
+                <input type="range" id="ll-speed-amount" min="0.25" max="8" step="0.25" />
+                <em id="ll-speed-amount-out"></em>
+              </label>
+              <button class="btn btn--sm btn--ghost" id="ll-speed-delete" hidden>Back to normal</button>
+              <span class="ll-time" id="ll-speed-label"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ll-track" data-track="hide" id="ll-track-hide">
+          <div class="ll-zoomrow">
+            <span class="ll-tracklabel">Hide</span>
+            <div class="ll-zoomtrack ll-redacttrack" id="ll-redacttrack" aria-label="Redaction track"></div>
+          </div>
+          <div class="ll-trackpanel">
+            <div class="ll-scrubrow">
+              <button class="btn btn--sm" id="ll-redact-add">Hide something</button>
+              <div class="ll-redact-fields" id="ll-redact-selected" hidden>
+                <label class="field-row"><span>Style</span><select class="field" id="ll-redact-style"></select></label>
+                <label class="ll-slider"><span>Width</span><input type="range" id="ll-redact-w" min="0.02" max="1" step="0.01" /><em id="ll-redact-w-out"></em></label>
+                <label class="ll-slider"><span>Height</span><input type="range" id="ll-redact-h" min="0.02" max="1" step="0.01" /><em id="ll-redact-h-out"></em></label>
+                <button class="btn btn--sm" id="ll-redact-point">Follow from here</button>
+                <button class="btn btn--sm btn--ghost" id="ll-redact-delete">Delete</button>
+              </div>
+              <span class="ll-time" id="ll-redact-label"></span>
+            </div>
+            <p class="ll-note" id="ll-redact-note" hidden>
+              Drag on the picture to place what is hidden. It is burnt into the exported video,
+              not laid over it.
+            </p>
+          </div>
+        </div>
+
+        <div class="ll-track" data-track="shapes" id="ll-track-shapes">
+          <div class="ll-zoomrow">
+            <span class="ll-tracklabel">Shapes</span>
+            <div class="ll-zoomtrack ll-shapetrack" id="ll-shapetrack" aria-label="Shape track"></div>
+          </div>
+          <div class="ll-trackpanel">
+            <div class="ll-scrubrow">
+              <select class="field ll-shapekind" id="ll-shape-kind"></select>
+              <button class="btn btn--sm" id="ll-shape-add">Add it here</button>
+              <div class="ll-redact-fields" id="ll-shape-selected" hidden>
+                <div class="ll-swatches" id="ll-shape-colours"></div>
+                <label class="ll-slider"><span>Weight</span><input type="range" id="ll-shape-weight" min="0.001" max="0.03" step="0.001" /><em id="ll-shape-weight-out"></em></label>
+                <label class="ll-slider"><span>Fade</span><input type="range" id="ll-shape-fade" min="0" max="1.5" step="0.05" /><em id="ll-shape-fade-out"></em></label>
+                <button class="btn btn--sm btn--ghost" id="ll-shape-delete">Delete</button>
+              </div>
+              <span class="ll-time" id="ll-shape-label"></span>
+            </div>
+            <p class="ll-note" id="ll-shape-note" hidden>
+              Drag on the picture to place it. An arrow runs from where you press to where you let go.
+            </p>
+          </div>
+        </div>
+
+        <div class="ll-track" data-track="text" id="ll-track-text">
+          <div class="ll-zoomrow">
+            <span class="ll-tracklabel">Text</span>
+            <div class="ll-zoomtrack ll-texttrack" id="ll-texttrack" aria-label="Text track"></div>
+          </div>
+          <div class="ll-trackpanel">
+            <div class="ll-scrubrow">
+              <button class="btn btn--sm btn--primary" id="ll-text-add">Add text</button>
+            </div>
+            <div class="ll-text-selected" id="ll-text-selected" hidden>
+              <label class="field-row ll-text-words">
+                <span>Words</span>
+                <textarea class="field" id="ll-text-words" rows="2"></textarea>
+              </label>
+              <div class="ll-text-fields">
+                <label class="ll-slider"><span>Size</span><input type="range" id="ll-text-size" min="0.02" max="0.2" step="0.005" /><em id="ll-text-size-out"></em></label>
+                <label class="ll-slider"><span>Across</span><input type="range" id="ll-text-x" min="0" max="1" step="0.01" /><em id="ll-text-x-out"></em></label>
+                <label class="ll-slider"><span>Down</span><input type="range" id="ll-text-y" min="0" max="1" step="0.01" /><em id="ll-text-y-out"></em></label>
+                <label class="ll-slider"><span>Plate</span><input type="range" id="ll-text-plate" min="0" max="1" step="0.05" /><em id="ll-text-plate-out"></em></label>
+                <label class="ll-slider"><span>Fade</span><input type="range" id="ll-text-fade" min="0" max="1.5" step="0.05" /><em id="ll-text-fade-out"></em></label>
+                <label class="field-row"><span>Align</span><select class="field" id="ll-text-align"><option value="left">Left</option><option value="centre">Centre</option><option value="right">Right</option></select></label>
+                <label class="field-row"><span>Colour</span><input type="color" class="field ll-text-colour" id="ll-text-colour" /></label>
+              </div>
+            </div>
+          </div>
         </div>
 
         <p class="ll-keys">
@@ -240,10 +276,6 @@ const app = getApp('limelight');
         </p>
 
         <div class="ll-scrubrow">
-          <button class="btn btn--sm btn--primary" id="ll-zoom-add">Add a zoom</button>
-          <button class="btn btn--sm btn--primary" id="ll-text-add">Add text</button>
-          <button class="btn btn--sm" id="ll-reanalyse">Find the action again</button>
-          <button class="btn btn--sm btn--ghost" id="ll-zoom-clear">Clear zooms</button>
           <button class="btn btn--sm" id="ll-undo" disabled>Undo</button>
           <button class="btn btn--sm" id="ll-redo" disabled>Redo</button>
           <button class="btn btn--sm btn--danger" id="ll-discard">Discard</button>
@@ -251,12 +283,55 @@ const app = getApp('limelight');
       </div>
 
       <div class="ll-editor" id="ll-editor" hidden>
+        <details class="ll-group" open>
+          <summary class="ll-group__head"><span>Look</span><span class="ll-group__hint">shape, background, angle, saved looks</span></summary>
         <section class="card ll-card">
           <h2 class="ll-subhead">For</h2>
           <p class="ll-note">Sets the shape and the output size together, and shows what will be cut off.</p>
           <div class="ll-presets" id="ll-destinations"></div>
         </section>
+        <section class="card ll-card">
+          <h2 class="ll-subhead">Background</h2>
+          <div class="ll-presets" id="ll-presets"></div>
+          <label class="field-row"><span>Output size</span><select class="field" id="ll-size"></select></label>
+          <label class="ll-slider"><span>Padding</span><input type="range" id="ll-padding" min="0" max="0.2" step="0.005" /><em id="ll-padding-out"></em></label>
+          <label class="ll-slider"><span>Corners</span><input type="range" id="ll-radius" min="0" max="0.1" step="0.002" /><em id="ll-radius-out"></em></label>
+          <label class="ll-slider"><span>Shadow</span><input type="range" id="ll-shadow" min="0" max="1" step="0.05" /><em id="ll-shadow-out"></em></label>
+          <div class="ll-scrubrow">
+            <button class="btn btn--sm" id="ll-wallpaper-pick">Use a picture</button>
+            <button class="btn btn--sm btn--ghost" id="ll-wallpaper-clear" hidden>Remove it</button>
+            <input type="file" id="ll-wallpaper-file" accept="image/*" hidden />
+          </div>
+          <p class="ll-note" id="ll-wallpaper-note" hidden></p>
+        </section>
+        <section class="card ll-card">
+          <h2 class="ll-subhead">Angle and arrival</h2>
+          <label class="ll-slider"><span>Lean back</span><input type="range" id="ll-tilt-x" min="-45" max="45" step="1" /><em id="ll-tilt-x-out"></em></label>
+          <label class="ll-slider"><span>Turn</span><input type="range" id="ll-tilt-y" min="-45" max="45" step="1" /><em id="ll-tilt-y-out"></em></label>
+          <label class="ll-slider"><span>Rotate</span><input type="range" id="ll-tilt-rotate" min="-30" max="30" step="1" /><em id="ll-tilt-rotate-out"></em></label>
+          <label class="ll-slider"><span>Depth</span><input type="range" id="ll-tilt-depth" min="0" max="1" step="0.05" /><em id="ll-tilt-depth-out"></em></label>
+          <button class="btn btn--sm btn--ghost" id="ll-tilt-reset">Lay it flat</button>
+          <label class="field-row"><span>How it arrives</span><select class="field" id="ll-motion-in"></select></label>
+          <label class="field-row"><span>How it leaves</span><select class="field" id="ll-motion-out"></select></label>
+          <label class="ll-slider"><span>How long</span><input type="range" id="ll-motion-seconds" min="0.1" max="3" step="0.05" /><em id="ll-motion-seconds-out"></em></label>
+          <p class="ll-note">The arrival is measured from where the export begins, not from the start of the recording.</p>
+        </section>
+        <section class="card ll-card">
+          <h2 class="ll-subhead">Looks</h2>
+          <p class="ll-note">
+            The background, padding, shadow, tilt, entrance and zoom defaults, saved under
+            a name so the next recording can match this one.
+          </p>
+          <div class="ll-looks" id="ll-looks"></div>
+          <div class="ll-scrubrow">
+            <input class="field ll-lookname" id="ll-look-name" type="text" placeholder="Name this look" maxlength="40" />
+            <button class="btn btn--sm" id="ll-look-save">Save</button>
+          </div>
+        </section>
+        </details>
 
+        <details class="ll-group">
+          <summary class="ll-group__head"><span>Words</span><span class="ll-group__hint">transcript and chapters</span></summary>
         <section class="card ll-card">
           <h2 class="ll-subhead">Transcript</h2>
           <p class="ll-note">
@@ -291,7 +366,6 @@ const app = getApp('limelight');
             <span class="ll-time" id="ll-cues-label"></span>
           </div>
         </section>
-
         <section class="card ll-card" id="ll-chapters-card" hidden>
           <h2 class="ll-subhead">Chapters</h2>
           <p class="ll-note">Press <kbd>M</kbd> while recording to mark a moment. These are what you paste under a video.</p>
@@ -300,48 +374,10 @@ const app = getApp('limelight');
             <button class="btn btn--sm" id="ll-chapters-copy">Copy the list</button>
           </div>
         </section>
+        </details>
 
-        <section class="card ll-card">
-          <h2 class="ll-subhead">Looks</h2>
-          <p class="ll-note">
-            The background, padding, shadow, tilt, entrance and zoom defaults, saved under
-            a name so the next recording can match this one.
-          </p>
-          <div class="ll-looks" id="ll-looks"></div>
-          <div class="ll-scrubrow">
-            <input class="field ll-lookname" id="ll-look-name" type="text" placeholder="Name this look" maxlength="40" />
-            <button class="btn btn--sm" id="ll-look-save">Save</button>
-          </div>
-        </section>
-
-        <section class="card ll-card">
-          <h2 class="ll-subhead">Background</h2>
-          <div class="ll-presets" id="ll-presets"></div>
-          <label class="field-row"><span>Output size</span><select class="field" id="ll-size"></select></label>
-          <label class="ll-slider"><span>Padding</span><input type="range" id="ll-padding" min="0" max="0.2" step="0.005" /><em id="ll-padding-out"></em></label>
-          <label class="ll-slider"><span>Corners</span><input type="range" id="ll-radius" min="0" max="0.1" step="0.002" /><em id="ll-radius-out"></em></label>
-          <label class="ll-slider"><span>Shadow</span><input type="range" id="ll-shadow" min="0" max="1" step="0.05" /><em id="ll-shadow-out"></em></label>
-          <div class="ll-scrubrow">
-            <button class="btn btn--sm" id="ll-wallpaper-pick">Use a picture</button>
-            <button class="btn btn--sm btn--ghost" id="ll-wallpaper-clear" hidden>Remove it</button>
-            <input type="file" id="ll-wallpaper-file" accept="image/*" hidden />
-          </div>
-          <p class="ll-note" id="ll-wallpaper-note" hidden></p>
-        </section>
-
-        <section class="card ll-card">
-          <h2 class="ll-subhead">Angle and arrival</h2>
-          <label class="ll-slider"><span>Lean back</span><input type="range" id="ll-tilt-x" min="-45" max="45" step="1" /><em id="ll-tilt-x-out"></em></label>
-          <label class="ll-slider"><span>Turn</span><input type="range" id="ll-tilt-y" min="-45" max="45" step="1" /><em id="ll-tilt-y-out"></em></label>
-          <label class="ll-slider"><span>Rotate</span><input type="range" id="ll-tilt-rotate" min="-30" max="30" step="1" /><em id="ll-tilt-rotate-out"></em></label>
-          <label class="ll-slider"><span>Depth</span><input type="range" id="ll-tilt-depth" min="0" max="1" step="0.05" /><em id="ll-tilt-depth-out"></em></label>
-          <button class="btn btn--sm btn--ghost" id="ll-tilt-reset">Lay it flat</button>
-          <label class="field-row"><span>How it arrives</span><select class="field" id="ll-motion-in"></select></label>
-          <label class="field-row"><span>How it leaves</span><select class="field" id="ll-motion-out"></select></label>
-          <label class="ll-slider"><span>How long</span><input type="range" id="ll-motion-seconds" min="0.1" max="3" step="0.05" /><em id="ll-motion-seconds-out"></em></label>
-          <p class="ll-note">The arrival is measured from where the export begins, not from the start of the recording.</p>
-        </section>
-
+        <details class="ll-group">
+          <summary class="ll-group__head"><span>Motion, sound and output</span><span class="ll-group__hint">automatic zoom, camera, audio, format</span></summary>
         <section class="card ll-card">
           <h2 class="ll-subhead">Automatic zoom</h2>
           <p class="ll-note">
@@ -359,7 +395,6 @@ const app = getApp('limelight');
           <label class="ll-check"><input type="checkbox" id="ll-keys" /><span>Show the keys I pressed</span></label>
           <p class="ll-note">The cursor and the ripples need a pointer track, so they only appear when you recorded this tab.</p>
         </section>
-
         <section class="card ll-card">
           <h2 class="ll-subhead">Camera and output</h2>
           <label class="ll-check"><input type="checkbox" id="ll-camera-on" /><span>Show the camera bubble</span></label>
@@ -410,6 +445,7 @@ const app = getApp('limelight');
           </label>
           <p class="ll-note">Roughly <span id="ll-bitrate-out"></span>. Every frame is drawn and encoded one at a time, so a long recording takes a while and comes out exactly as the preview shows it.</p>
         </section>
+        </details>
       </div>
     </div>
   </div>
@@ -543,6 +579,50 @@ const app = getApp('limelight');
   .ll-chapters li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
   .ll-chapters .ll-time { min-width: 3.4rem; }
   .ll-chapters input { min-width: 0; }
+  /* Settings, in three groups rather than nine cards down the page. Only the
+     first is open, because most recordings never need the rest. */
+  .ll-group { border: 1px solid var(--rule); border-radius: 10px; margin-bottom: 0.7rem; background: var(--surface); }
+  .ll-group__head {
+    display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+    padding: 0.75rem 1rem; cursor: pointer; list-style: none;
+    font-weight: 600; font-size: 0.95rem;
+  }
+  .ll-group__head::-webkit-details-marker { display: none; }
+  .ll-group__head::before { content: '\25B8'; color: var(--ink-faint); transition: transform 0.15s; }
+  .ll-group[open] > .ll-group__head::before { transform: rotate(90deg); }
+  .ll-group__hint { font-weight: 400; font-size: 0.8rem; color: var(--ink-faint); }
+  .ll-group > .ll-card { border: 0; border-top: 1px solid var(--rule); border-radius: 0; margin: 0; }
+  .ll-group > .ll-card:last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
+
+  /* The picker, and the tracks it switches between. */
+  .ll-picker { display: flex; gap: 0.3rem; flex-wrap: wrap; margin: 0.9rem 0 0.5rem; }
+  .ll-pick {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.4rem 0.7rem; border: 1px solid var(--rule); border-radius: 999px;
+    background: transparent; color: var(--ink-soft); cursor: pointer;
+    font: 500 0.78rem/1 var(--body);
+  }
+  .ll-pick:hover { color: var(--ink); border-color: var(--ink-faint); }
+  .ll-pick[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+  .ll-pick__count {
+    font-variant-numeric: tabular-nums; font-size: 0.7rem;
+    padding: 0.05rem 0.32rem; border-radius: 999px;
+    background: color-mix(in srgb, currentColor 20%, transparent);
+  }
+  .ll-pick__count[hidden] { display: none; }
+
+  /* An inactive track stays visible, so a redaction you set earlier is never
+     out of sight, but shrinks and stops taking the pointer. */
+  .ll-track { margin-bottom: 0.35rem; }
+  .ll-track:not(.is-active) .ll-trackpanel { display: none; }
+  .ll-track:not(.is-active) .ll-tracklabel { opacity: 0.55; }
+  .ll-track:not(.is-active) .ll-zoomtrack,
+  .ll-track:not(.is-active) .ll-wavewrap { height: 0.85rem; opacity: 0.65; pointer-events: none; }
+  .ll-track:not(.is-active) .ll-zoom__label,
+  .ll-track:not(.is-active) .ll-zoom__grip { display: none; }
+  .ll-track.is-active { margin-bottom: 0.9rem; }
+  .ll-trackpanel { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
+
   .ll-shapetrack .ll-zoom { background: color-mix(in srgb, #6b4bc4 30%, transparent); border-color: #6b4bc4; }
   .ll-shapekind { max-width: 9rem; }
   .ll-swatches { display: flex; gap: 0.25rem; }

@@ -641,6 +641,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderCues();
     renderMusic();
     renderDestinations();
+    renderPicker();
     await loadWaveform();
     // A reopened project already has its zooms, so it does not analyse again.
     if (zooms.length === 0) await analyse();
@@ -1093,6 +1094,82 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
   }
 
+  // ------------------------------------------------------------------ track picker
+
+  /**
+   * Which track is being worked on.
+   *
+   * Six of them open at once was the problem: the app grew from one confusing
+   * feature into six competing for the same eye. Every track stays on screen as
+   * a thin strip, so a redaction set ten minutes ago is never out of sight, but
+   * only the chosen one is full height with its controls.
+   */
+  type TrackName = 'sound' | 'zoom' | 'speed' | 'hide' | 'shapes' | 'text';
+  const TRACKS: { id: TrackName; label: string; count: () => number }[] = [
+    { id: 'zoom', label: 'Zoom', count: () => zooms.length },
+    { id: 'sound', label: 'Sound', count: () => cuts.length },
+    { id: 'speed', label: 'Speed', count: () => speeds.length },
+    { id: 'hide', label: 'Hide', count: () => redactions.length },
+    { id: 'shapes', label: 'Shapes', count: () => shapes.length },
+    { id: 'text', label: 'Text', count: () => texts.length },
+  ];
+  let activeTrack: TrackName = 'zoom';
+
+  function showTrack(name: TrackName): void {
+    activeTrack = name;
+    // Selections in other tracks are dropped, because a panel you cannot see
+    // should not still be taking the picture's pointer or the Delete key.
+    if (name !== 'zoom') { selected = null; stopAiming(); }
+    if (name !== 'hide') selectedRedaction = null;
+    if (name !== 'shapes') selectedShape = null;
+    if (name !== 'text') selectedText = null;
+    if (name !== 'speed') selectedSpeed = null;
+    renderPicker();
+    if (recording) {
+      renderZooms();
+      renderSpeeds();
+      renderRedactions();
+      renderShapes();
+      renderTexts();
+      renderCuts();
+    }
+    void drawPreview();
+  }
+
+  function renderPicker(): void {
+    const picker = $<HTMLDivElement>('ll-picker');
+    picker.innerHTML = '';
+    for (const track of TRACKS) {
+      // The sound track only means anything when there is sound.
+      if (track.id === 'sound' && !recording?.hasAudio) continue;
+
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'll-pick';
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(activeTrack === track.id));
+      tab.textContent = track.label;
+
+      // The count is what stops an inactive track being forgotten entirely.
+      const count = document.createElement('span');
+      count.className = 'll-pick__count';
+      const total = track.count();
+      count.textContent = String(total);
+      count.hidden = total === 0;
+      tab.append(count);
+
+      tab.addEventListener('click', () => showTrack(track.id));
+      picker.append(tab);
+    }
+
+    for (const track of TRACKS) {
+      const holder = root.querySelector<HTMLDivElement>(`#ll-track-${track.id}`);
+      if (!holder) continue;
+      holder.classList.toggle('is-active', activeTrack === track.id);
+      if (track.id === 'sound') holder.hidden = !recording?.hasAudio;
+    }
+  }
+
   // ------------------------------------------------------------------ sound and cuts
 
   const waveWrap = $<HTMLDivElement>('ll-wavewrap');
@@ -1112,17 +1189,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     wave = null;
     selection = null;
     const hasSound = recording?.hasAudio ?? false;
-    $<HTMLDivElement>('ll-soundrow').hidden = !hasSound;
     $<HTMLDivElement>('ll-cutrow').hidden = !hasSound;
-    if (!hasSound || !recording) { renderCuts(); return; }
+    if (!hasSound || !recording) { renderPicker(); renderCuts(); return; }
 
     wave = await analyseAudio(recording.blob);
     // A recording whose audio the decoder will not read still edits perfectly
-    // well, so the row simply goes away rather than showing an error.
-    if (!wave) {
-      $<HTMLDivElement>('ll-soundrow').hidden = true;
-      $<HTMLDivElement>('ll-cutrow').hidden = true;
-    }
+    // well, so the track simply goes away rather than showing an error.
+    if (!wave) $<HTMLDivElement>('ll-cutrow').hidden = true;
+    renderPicker();
     drawWave();
     renderCuts();
   }
@@ -1183,6 +1257,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       || Math.abs(selection.end - selection.start) < 0.05;
     $<HTMLButtonElement>('ll-cut-clear').disabled = cuts.length === 0;
 
+    renderPicker();
     const removed = trim.end - trim.start - keptDuration(cuts, trim.start, trim.end);
     $<HTMLSpanElement>('ll-cut-label').textContent = cuts.length
       ? `${cuts.length} cut${cuts.length === 1 ? '' : 's'}, ${formatClock(removed)} removed, ${formatClock(keptDuration(cuts, trim.start, trim.end))} left`
@@ -1341,6 +1416,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const tenth = (value: number) => `${value.toFixed(1)}s`;
     $<HTMLSpanElement>('ll-speed-label').textContent =
       Math.abs(finished - raw) < 0.05 ? '' : `${tenth(raw)} becomes ${tenth(finished)}`;
+    renderPicker();
   }
 
   let speedDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
@@ -1480,6 +1556,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
     renderSwatches(shape?.colour);
     $<HTMLSpanElement>('ll-shape-label').textContent = shapes.length ? `${shapes.length} on screen` : '';
+    renderPicker();
   }
 
   function renderSwatches(current?: string): void {
@@ -1646,6 +1723,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLSpanElement>('ll-redact-label').textContent = redactions.length
       ? `${redactions.length} hidden`
       : '';
+    renderPicker();
   }
 
   let redactDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
@@ -1934,6 +2012,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       ? 'Drag a zoom to move it, or its edges to resize. Click one to edit it, double click to aim it at something.'
       : 'No zooms yet. Press Add a zoom to put one at the playhead.';
     renderSelected();
+    renderPicker();
   }
 
   let dragging: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
@@ -3650,10 +3729,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         break;
       case 'z': case 'Z':
         event.preventDefault();
+        // Switch to the track first, or the block lands somewhere the person
+        // cannot see and reads as nothing having happened.
+        showTrack('zoom');
         $<HTMLButtonElement>('ll-zoom-add').click();
         break;
       case 't': case 'T':
         event.preventDefault();
+        showTrack('text');
         $<HTMLButtonElement>('ll-text-add').click();
         break;
       case 'c': case 'C':
@@ -3669,7 +3752,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         $<HTMLButtonElement>('ll-trim-end').click();
         break;
       case 'Delete': case 'Backspace':
-        // Whichever track was last touched is the one this removes from.
+        // The visible track is the one this removes from. Selections in other
+        // tracks are cleared when the track changes, so at most one is live.
         if (selectedText) {
           event.preventDefault();
           texts = removeText(texts, selectedText);
@@ -3677,6 +3761,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
           renderTexts();
           persistTexts();
           void drawPreview();
+          return;
+        }
+        if (selectedRedaction) {
+          event.preventDefault();
+          redactions = removeRedaction(redactions, selectedRedaction);
+          selectedRedaction = null;
+          persistRedactions();
+          return;
+        }
+        if (selectedShape) {
+          event.preventDefault();
+          shapes = removeShape(shapes, selectedShape);
+          selectedShape = null;
+          persistShapes();
+          return;
+        }
+        if (selectedSpeed) {
+          event.preventDefault();
+          speeds = removeSpeed(speeds, selectedSpeed);
+          selectedSpeed = null;
+          persistSpeeds();
           return;
         }
         if (!selected) return;
