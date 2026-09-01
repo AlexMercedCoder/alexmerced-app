@@ -50,6 +50,7 @@ import {
   type Shape, type ShapeKind,
 } from './shapes';
 import { canTranscribe, transcribe, WHISPER_MODELS, type WhisperSize } from './transcribe';
+import { mountBlockTrack } from './blockTrack';
 import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
@@ -112,6 +113,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let draggingFocus = false;
   /** Stretches removed from the middle, and the decoded sound they came from. */
   let cuts: Span[] = [];
+  /** The zoom being edited, if any. */
+  let selected: string | null = null;
   /** Stretches that run at a different pace, and the one being edited. */
   let speeds: SpeedRegion[] = [];
   let selectedSpeed: string | null = null;
@@ -1364,41 +1367,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   const speedTrackEl = $<HTMLDivElement>('ll-speedtrack');
   const speedPanel = $<HTMLLabelElement>('ll-speed-selected');
 
+  const speedTrack = mountBlockTrack<SpeedRegion>({
+    element: speedTrackEl,
+    blocks: () => speeds,
+    onChange: (next) => { speeds = sortSpeeds(next); },
+    duration: () => recording?.duration ?? 0,
+    selected: () => selectedSpeed,
+    onSelect: (id, region) => {
+      selectedSpeed = id;
+      renderSpeeds();
+      showBlock(region.start, region.end);
+    },
+    constrain: (next) => sortSpeeds(next),
+    label: (region) => `${region.speed}x`,
+    title: (region) => `${region.speed}x, ${formatClock(region.start)} to ${formatClock(region.end)}`,
+    barClass: () => 'is-pinned',
+    onCommit: () => persistSpeeds(),
+  });
+
   function renderSpeeds(): void {
     if (!recording) return;
-    const duration = Math.max(0.001, recording.duration);
-    speedTrackEl.innerHTML = '';
-
-    for (const region of speeds) {
-      const bar = document.createElement('div');
-      bar.className = 'll-zoom is-pinned';
-      bar.style.left = `${(region.start / duration) * 100}%`;
-      bar.style.width = `${((region.end - region.start) / duration) * 100}%`;
-      bar.dataset.id = region.id;
-      bar.title = `${region.speed}x, ${formatClock(region.start)} to ${formatClock(region.end)}`;
-      const label = document.createElement('span');
-      label.className = 'll-zoom__label';
-      label.textContent = `${region.speed}x`;
-      bar.append(label);
-
-      for (const edge of ['start', 'end'] as const) {
-        const grip = document.createElement('button');
-        grip.type = 'button';
-        grip.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
-        grip.setAttribute('aria-label', `Move the ${edge} of this speed change`);
-        grip.addEventListener('pointerdown', (event) => {
-          event.stopPropagation();
-          beginSpeedDrag(event, region.id, edge);
-        });
-        bar.append(grip);
-      }
-      bar.addEventListener('pointerdown', (event) => beginSpeedDrag(event, region.id, 'move'));
-      speedTrackEl.append(bar);
-    }
-
-    for (const bar of speedTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
-      bar.classList.toggle('is-selected', bar.dataset.id === selectedSpeed);
-    }
+    speedTrack.render();
 
     const region = speeds.find((entry) => entry.id === selectedSpeed);
     speedPanel.hidden = !region;
@@ -1417,49 +1406,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLSpanElement>('ll-speed-label').textContent =
       Math.abs(finished - raw) < 0.05 ? '' : `${tenth(raw)} becomes ${tenth(finished)}`;
     renderPicker();
-  }
-
-  let speedDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
-
-  function speedTimeAt(event: PointerEvent): number {
-    if (!recording) return 0;
-    const box = speedTrackEl.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
-  }
-
-  function beginSpeedDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
-    const region = speeds.find((entry) => entry.id === id);
-    if (!region) return;
-    const changed = selectedSpeed !== id;
-    selectedSpeed = id;
-    speedDrag = { id, edge, from: speedTimeAt(event), start: region.start, end: region.end };
-    try { speedTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
-    renderSpeeds();
-    if (changed) showBlock(region.start, region.end);
-  }
-
-  speedTrackEl.addEventListener('pointermove', (event) => {
-    if (!speedDrag || !recording) return;
-    const shift = speedTimeAt(event) - speedDrag.from;
-    speeds = speeds.map((region) => {
-      if (region.id !== speedDrag!.id) return region;
-      if (speedDrag!.edge === 'move') {
-        const width = speedDrag!.end - speedDrag!.start;
-        return { ...region, start: speedDrag!.start + shift, end: speedDrag!.start + shift + width };
-      }
-      if (speedDrag!.edge === 'start') return { ...region, start: speedDrag!.start + shift };
-      return { ...region, end: speedDrag!.end + shift };
-    });
-    speeds = sortSpeeds(speeds);
-    renderSpeeds();
-  });
-
-  for (const done of ['pointerup', 'pointercancel'] as const) {
-    speedTrackEl.addEventListener(done, () => {
-      if (!speedDrag) return;
-      speedDrag = null;
-      persistSpeeds();
-    });
   }
 
   function persistSpeeds(label = ''): void {
@@ -1509,41 +1455,30 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLSelectElement>('ll-shape-kind').append(option);
   }
 
+  const shapeTrack = mountBlockTrack<Shape>({
+    element: shapeTrackEl,
+    blocks: () => shapes,
+    onChange: (next) => { shapes = sortShapes(next); },
+    duration: () => recording?.duration ?? 0,
+    selected: () => selectedShape,
+    onSelect: (id, shape) => {
+      selectedShape = id;
+      selectedRedaction = null;
+      renderShapes();
+      renderRedactions();
+      showBlock(shape.start, shape.end);
+      void drawPreview();
+    },
+    constrain: (next) => sortShapes(next),
+    label: (shape) => shape.kind,
+    title: (shape) => `${shape.kind}, ${formatClock(shape.start)} to ${formatClock(shape.end)}`,
+    barClass: () => 'is-pinned',
+    onCommit: () => persistShapes(),
+  });
+
   function renderShapes(): void {
     if (!recording) return;
-    const duration = Math.max(0.001, recording.duration);
-    shapeTrackEl.innerHTML = '';
-
-    for (const shape of shapes) {
-      const bar = document.createElement('div');
-      bar.className = 'll-zoom is-pinned';
-      bar.style.left = `${(shape.start / duration) * 100}%`;
-      bar.style.width = `${((shape.end - shape.start) / duration) * 100}%`;
-      bar.dataset.id = shape.id;
-      bar.title = `${shape.kind}, ${formatClock(shape.start)} to ${formatClock(shape.end)}`;
-      const label = document.createElement('span');
-      label.className = 'll-zoom__label';
-      label.textContent = shape.kind;
-      bar.append(label);
-
-      for (const edge of ['start', 'end'] as const) {
-        const grip = document.createElement('button');
-        grip.type = 'button';
-        grip.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
-        grip.setAttribute('aria-label', `Move the ${edge} of this shape`);
-        grip.addEventListener('pointerdown', (event) => {
-          event.stopPropagation();
-          beginShapeDrag(event, shape.id, edge);
-        });
-        bar.append(grip);
-      }
-      bar.addEventListener('pointerdown', (event) => beginShapeDrag(event, shape.id, 'move'));
-      shapeTrackEl.append(bar);
-    }
-
-    for (const bar of shapeTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
-      bar.classList.toggle('is-selected', bar.dataset.id === selectedShape);
-    }
+    shapeTrack.render();
 
     const shape = shapes.find((entry) => entry.id === selectedShape);
     shapePanel.hidden = !shape;
@@ -1576,52 +1511,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       });
       holder.append(swatch);
     }
-  }
-
-  let shapeDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
-
-  function shapeTimeAt(event: PointerEvent): number {
-    if (!recording) return 0;
-    const box = shapeTrackEl.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
-  }
-
-  function beginShapeDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
-    const shape = shapes.find((entry) => entry.id === id);
-    if (!shape) return;
-    const changed = selectedShape !== id;
-    selectedShape = id;
-    selectedRedaction = null;
-    shapeDrag = { id, edge, from: shapeTimeAt(event), start: shape.start, end: shape.end };
-    try { shapeTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
-    renderShapes();
-    renderRedactions();
-    if (changed) showBlock(shape.start, shape.end);
-    void drawPreview();
-  }
-
-  shapeTrackEl.addEventListener('pointermove', (event) => {
-    if (!shapeDrag || !recording) return;
-    const shift = shapeTimeAt(event) - shapeDrag.from;
-    shapes = shapes.map((shape) => {
-      if (shape.id !== shapeDrag!.id) return shape;
-      if (shapeDrag!.edge === 'move') {
-        const width = shapeDrag!.end - shapeDrag!.start;
-        return { ...shape, start: shapeDrag!.start + shift, end: shapeDrag!.start + shift + width };
-      }
-      if (shapeDrag!.edge === 'start') return { ...shape, start: shapeDrag!.start + shift };
-      return { ...shape, end: shapeDrag!.end + shift };
-    });
-    shapes = sortShapes(shapes);
-    renderShapes();
-  });
-
-  for (const done of ['pointerup', 'pointercancel'] as const) {
-    shapeTrackEl.addEventListener(done, () => {
-      if (!shapeDrag) return;
-      shapeDrag = null;
-      persistShapes();
-    });
   }
 
   function persistShapes(label = ''): void {
@@ -1672,43 +1561,32 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLSelectElement>('ll-redact-style').append(option);
   }
 
+  const redactTrack = mountBlockTrack<RedactBlock>({
+    element: redactTrackEl,
+    blocks: () => redactions,
+    onChange: (next) => { redactions = sortRedactions(next); },
+    duration: () => recording?.duration ?? 0,
+    selected: () => selectedRedaction,
+    onSelect: (id, block) => {
+      selectedRedaction = id;
+      selectedShape = null;
+      renderRedactions();
+      renderShapes();
+      showBlock(block.start, block.end);
+      void drawPreview();
+    },
+    constrain: (next) => sortRedactions(next),
+    // The number of following points, because a box that follows is the thing
+    // people forget they set up.
+    label: (block) => (block.points.length > 1 ? `${block.style} \u00d7${block.points.length}` : block.style),
+    title: (block) => `${block.style}, ${formatClock(block.start)} to ${formatClock(block.end)}`,
+    barClass: () => 'is-pinned',
+    onCommit: () => persistRedactions(),
+  });
+
   function renderRedactions(): void {
     if (!recording) return;
-    const duration = Math.max(0.001, recording.duration);
-    redactTrackEl.innerHTML = '';
-
-    for (const block of redactions) {
-      const bar = document.createElement('div');
-      bar.className = 'll-zoom is-pinned';
-      bar.style.left = `${(block.start / duration) * 100}%`;
-      bar.style.width = `${((block.end - block.start) / duration) * 100}%`;
-      bar.dataset.id = block.id;
-      bar.title = `${block.style}, ${formatClock(block.start)} to ${formatClock(block.end)}`;
-      const label = document.createElement('span');
-      label.className = 'll-zoom__label';
-      // The number of following points, because a box that follows is the
-      // thing people forget they set up.
-      label.textContent = block.points.length > 1 ? `${block.style} ×${block.points.length}` : block.style;
-      bar.append(label);
-
-      for (const edge of ['start', 'end'] as const) {
-        const grip = document.createElement('button');
-        grip.type = 'button';
-        grip.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
-        grip.setAttribute('aria-label', `Move the ${edge} of this redaction`);
-        grip.addEventListener('pointerdown', (event) => {
-          event.stopPropagation();
-          beginRedactDrag(event, block.id, edge);
-        });
-        bar.append(grip);
-      }
-      bar.addEventListener('pointerdown', (event) => beginRedactDrag(event, block.id, 'move'));
-      redactTrackEl.append(bar);
-    }
-
-    for (const bar of redactTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
-      bar.classList.toggle('is-selected', bar.dataset.id === selectedRedaction);
-    }
+    redactTrack.render();
 
     const block = redactions.find((entry) => entry.id === selectedRedaction);
     redactPanel.hidden = !block;
@@ -1724,50 +1602,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       ? `${redactions.length} hidden`
       : '';
     renderPicker();
-  }
-
-  let redactDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
-
-  function redactTimeAt(event: PointerEvent): number {
-    if (!recording) return 0;
-    const box = redactTrackEl.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
-  }
-
-  function beginRedactDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
-    const block = redactions.find((entry) => entry.id === id);
-    if (!block) return;
-    const changed = selectedRedaction !== id;
-    selectedRedaction = id;
-    redactDrag = { id, edge, from: redactTimeAt(event), start: block.start, end: block.end };
-    try { redactTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
-    renderRedactions();
-    if (changed) showBlock(block.start, block.end);
-    void drawPreview();
-  }
-
-  redactTrackEl.addEventListener('pointermove', (event) => {
-    if (!redactDrag || !recording) return;
-    const shift = redactTimeAt(event) - redactDrag.from;
-    redactions = redactions.map((block) => {
-      if (block.id !== redactDrag!.id) return block;
-      if (redactDrag!.edge === 'move') {
-        const width = redactDrag!.end - redactDrag!.start;
-        return { ...block, start: redactDrag!.start + shift, end: redactDrag!.start + shift + width };
-      }
-      if (redactDrag!.edge === 'start') return { ...block, start: redactDrag!.start + shift };
-      return { ...block, end: redactDrag!.end + shift };
-    });
-    redactions = sortRedactions(redactions);
-    renderRedactions();
-  });
-
-  for (const done of ['pointerup', 'pointercancel'] as const) {
-    redactTrackEl.addEventListener(done, () => {
-      if (!redactDrag) return;
-      redactDrag = null;
-      persistRedactions();
-    });
   }
 
   function persistRedactions(label = ''): void {
@@ -1962,51 +1796,38 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function persistZooms(label = ''): void { remember(label); }
 
+  const zoomBlocks = mountBlockTrack<ZoomBlock>({
+    element: zoomTrackEl,
+    blocks: () => zooms,
+    onChange: (next) => { zooms = next.map((zoom) => ({ ...zoom, pinned: true })); },
+    duration: () => recording?.duration ?? 0,
+    selected: () => selected,
+    onSelect: (id, zoom) => {
+      selected = id;
+      selectedText = null;
+      renderTextSelected();
+      renderZooms();
+      // Selecting a block puts the playhead inside it. Without this you can
+      // edit a zoom at 0:40 while looking at 0:05 and see nothing change,
+      // which reads as a broken control rather than a preview pointed
+      // elsewhere.
+      showBlock(zoom.start, zoom.end);
+    },
+    constrain: (next, id) => constrain(next, id, recording?.duration ?? 0),
+    label: (zoom) => `${zoom.scale.toFixed(1)}x`,
+    title: (zoom) => `${zoom.scale.toFixed(1)}x, ${formatClock(zoom.start)} to ${formatClock(zoom.end)}`,
+    barClass: (zoom) => (zoom.pinned ? 'is-pinned' : ''),
+    // Opens the zoom for aiming. It used to delete it, which is the opposite
+    // of what a double click means everywhere else.
+    onOpen: (zoom) => { selected = zoom.id; renderSelected(); startAiming(zoom.id); },
+    onContextMenu: (event, zoom) => { selected = zoom.id; zoomMenu(event, zoom.id); },
+    onCommit: () => { invalidateTrack(); renderZooms(); persistZooms(); void drawPreview(); },
+  });
+
   function renderZooms(): void {
     if (!recording) return;
     invalidateTrack();
-    const duration = Math.max(0.001, recording.duration);
-    zoomTrackEl.innerHTML = '';
-
-    for (const zoom of zooms) {
-      const bar = document.createElement('div');
-      bar.className = 'll-zoom';
-      if (zoom.pinned) bar.classList.add('is-pinned');
-      bar.style.left = `${(zoom.start / duration) * 100}%`;
-      bar.style.width = `${((zoom.end - zoom.start) / duration) * 100}%`;
-      bar.dataset.id = zoom.id;
-      bar.title = `${zoom.scale.toFixed(1)}x, ${formatClock(zoom.start)} to ${formatClock(zoom.end)}`;
-
-      const label = document.createElement('span');
-      label.className = 'll-zoom__label';
-      label.textContent = `${zoom.scale.toFixed(1)}x`;
-      bar.append(label);
-
-      for (const edge of ['start', 'end'] as const) {
-        const handle = document.createElement('button');
-        handle.type = 'button';
-        handle.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
-        handle.setAttribute('aria-label', `Move the ${edge} of this zoom`);
-        handle.addEventListener('pointerdown', (event) => {
-          event.stopPropagation();
-          beginZoomDrag(event, zoom.id, edge);
-        });
-        bar.append(handle);
-      }
-
-      bar.addEventListener('pointerdown', (event) => beginZoomDrag(event, zoom.id, 'move'));
-      bar.addEventListener('contextmenu', (event) => { selected = zoom.id; zoomMenu(event, zoom.id); });
-      // Double click opens the zoom for aiming. It used to delete it, which is
-      // the opposite of what a double click means everywhere else, and there
-      // was no confirmation and no visible undo.
-      bar.addEventListener('dblclick', () => {
-        selected = zoom.id;
-        renderSelected();
-        startAiming(zoom.id);
-      });
-
-      zoomTrackEl.append(bar);
-    }
+    zoomBlocks.render();
 
     $<HTMLParagraphElement>('ll-zoom-hint').textContent = zooms.length
       ? 'Drag a zoom to move it, or its edges to resize. Click one to edit it, double click to aim it at something.'
@@ -2014,90 +1835,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderSelected();
     renderPicker();
   }
-
-  let dragging: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
-  let selected: string | null = null;
-
-  function zoomTimeAt(event: PointerEvent): number {
-    if (!recording) return 0;
-    const box = zoomTrackEl.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
-  }
-
-  function beginZoomDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
-    const zoom = zooms.find((entry) => entry.id === id);
-    if (!zoom) return;
-    const changed = selected !== id;
-    selected = id;
-    selectedText = null;
-    renderTextSelected();
-    dragging = { id, edge, from: zoomTimeAt(event), start: zoom.start, end: zoom.end };
-    try { zoomTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
-    renderSelected();
-    // Selecting a block puts the playhead inside it. Without this you can edit
-    // a zoom at 0:40 while looking at 0:05 and see nothing change, which reads
-    // as a broken control rather than a preview pointed elsewhere.
-    if (changed) showBlock(zoom.start, zoom.end);
-  }
-
-  /** Moves the playhead into a block so its edits are visible in the preview. */
-  function showBlock(start: number, end: number): void {
-    if (!recording) return;
-    if (previewTime >= start && previewTime <= end) return;
-    if (playing) pause();
-    previewTime = Math.min(Math.max((start + end) / 2, 0), recording.duration);
-    syncScrub();
-    void drawPreview();
-  }
-
-  zoomTrackEl.addEventListener('pointermove', (event) => {
-    if (!dragging || !recording) return;
-    const shift = zoomTimeAt(event) - dragging.from;
-
-    zooms = zooms.map((zoom) => {
-      if (zoom.id !== dragging!.id) return zoom;
-      if (dragging!.edge === 'move') {
-        const width = dragging!.end - dragging!.start;
-        return { ...zoom, start: dragging!.start + shift, end: dragging!.start + shift + width, pinned: true };
-      }
-      if (dragging!.edge === 'start') return { ...zoom, start: dragging!.start + shift, pinned: true };
-      return { ...zoom, end: dragging!.end + shift, pinned: true };
-    });
-
-    zooms = constrain(zooms, dragging.id, recording.duration);
-    invalidateTrack();
-    // Only the bar that moved is touched. Rebuilding the whole track meant
-    // discarding and recreating every bar, its label, its two grips and four
-    // listeners at pointer rate, which is a lot of garbage for a drag.
-    positionBars();
-  });
-
-  /** Moves the existing bars to match the blocks, without rebuilding them. */
-  function positionBars(): void {
-    if (!recording) return;
-    const duration = Math.max(0.001, recording.duration);
-    const byId = new Map(zooms.map((zoom) => [zoom.id, zoom]));
-    for (const bar of zoomTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
-      const zoom = byId.get(bar.dataset.id ?? '');
-      // A constrained drag can squeeze a block out of existence entirely, and
-      // its bar has to go with it rather than sit there pointing at nothing.
-      if (!zoom) { bar.remove(); continue; }
-      bar.style.left = `${(zoom.start / duration) * 100}%`;
-      bar.style.width = `${((zoom.end - zoom.start) / duration) * 100}%`;
-      bar.title = `${zoom.scale.toFixed(1)}x, ${formatClock(zoom.start)} to ${formatClock(zoom.end)}`;
-    }
-  }
-
-  const endZoomDrag = () => {
-    if (!dragging) return;
-    dragging = null;
-    // The full rebuild happens once, now that the constraints have settled.
-    renderZooms();
-    persistZooms();
-    void drawPreview();
-  };
-  zoomTrackEl.addEventListener('pointerup', endZoomDrag);
-  zoomTrackEl.addEventListener('pointercancel', endZoomDrag);
 
   function renderSelected(): void {
     const panel = $<HTMLDivElement>('ll-zoom-selected');
@@ -2279,121 +2016,45 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function persistTexts(label = ''): void { remember(label); }
 
-  function renderTexts(): void {
-    if (!recording) return;
-    const duration = Math.max(0.001, recording.duration);
-    textTrackEl.innerHTML = '';
-
-    for (const text of texts) {
-      const bar = document.createElement('div');
-      bar.className = 'll-zoom is-pinned';
-      bar.style.left = `${(text.start / duration) * 100}%`;
-      bar.style.width = `${((text.end - text.start) / duration) * 100}%`;
-      bar.dataset.id = text.id;
-      // The words themselves are the label, since that is what tells one
-      // caption from another at a glance.
-      const first = text.text.split('\n')[0];
-      bar.title = `${first}, ${formatClock(text.start)} to ${formatClock(text.end)}`;
-
-      const label = document.createElement('span');
-      label.className = 'll-zoom__label';
-      label.textContent = first || 'Text';
-      bar.append(label);
-
-      for (const edge of ['start', 'end'] as const) {
-        const handle = document.createElement('button');
-        handle.type = 'button';
-        handle.className = `ll-zoom__grip ll-zoom__grip--${edge}`;
-        handle.setAttribute('aria-label', `Move the ${edge} of this text`);
-        handle.addEventListener('pointerdown', (event) => {
-          event.stopPropagation();
-          beginTextDrag(event, text.id, edge);
-        });
-        bar.append(handle);
-      }
-
-      bar.addEventListener('pointerdown', (event) => beginTextDrag(event, text.id, 'move'));
-      bar.addEventListener('contextmenu', (event) => { selectedText = text.id; textMenu(event, text.id); });
-      // Opens the words for editing. Deleting on a double click was too easy
-      // to do by accident and too quiet when it happened.
-      bar.addEventListener('dblclick', () => {
-        selectedText = text.id;
-        selected = null;
-        renderSelected();
-        renderTexts();
-        showBlock(text.start, text.end);
-        $<HTMLTextAreaElement>('ll-text-words').focus();
-      });
-
-      textTrackEl.append(bar);
-    }
-    renderTextSelected();
-  }
-
-  let textDrag: { id: string; edge: 'start' | 'end' | 'move'; from: number; start: number; end: number } | null = null;
-
-  function textTimeAt(event: PointerEvent): number {
-    if (!recording) return 0;
-    const box = textTrackEl.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)) * recording.duration;
-  }
-
-  function beginTextDrag(event: PointerEvent, id: string, edge: 'start' | 'end' | 'move'): void {
-    const text = texts.find((entry) => entry.id === id);
-    if (!text) return;
-    const changed = selectedText !== id;
-    selectedText = id;
-    selected = null;
-    renderSelected();
-    textDrag = { id, edge, from: textTimeAt(event), start: text.start, end: text.end };
-    try { textTrackEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
-    renderTexts();
-    if (changed) showBlock(text.start, text.end);
-  }
-
-  textTrackEl.addEventListener('pointermove', (event) => {
-    if (!textDrag || !recording) return;
-    const shift = textTimeAt(event) - textDrag.from;
-
-    texts = texts.map((text) => {
-      if (text.id !== textDrag!.id) return text;
-      if (textDrag!.edge === 'move') {
-        const width = textDrag!.end - textDrag!.start;
-        return { ...text, start: textDrag!.start + shift, end: textDrag!.start + shift + width };
-      }
-      if (textDrag!.edge === 'start') {
-        return { ...text, start: Math.min(textDrag!.start + shift, text.end - MIN_TEXT) };
-      }
-      return { ...text, end: Math.max(textDrag!.end + shift, text.start + MIN_TEXT) };
-    });
-
-    texts = constrainText(texts, textDrag.id, recording.duration);
-    // Same reasoning as the zoom track: move the bars, rebuild once at the end.
-    positionTextBars();
+  const textTrack = mountBlockTrack<TextBlock>({
+    element: textTrackEl,
+    blocks: () => texts,
+    onChange: (next) => { texts = next; },
+    duration: () => recording?.duration ?? 0,
+    selected: () => selectedText,
+    onSelect: (id, text) => {
+      selectedText = id;
+      selected = null;
+      renderSelected();
+      renderTexts();
+      showBlock(text.start, text.end);
+    },
+    constrain: (next, id) => constrainText(next, id, recording?.duration ?? 0),
+    // The words themselves are the label, since that is what tells one caption
+    // from another at a glance.
+    label: (text) => text.text.split('\n')[0] || 'Text',
+    title: (text) => `${text.text.split('\n')[0]}, ${formatClock(text.start)} to ${formatClock(text.end)}`,
+    barClass: () => 'is-pinned',
+    // Opens the words for editing. Deleting on a double click was too easy to
+    // do by accident and too quiet when it happened.
+    onOpen: (text) => {
+      selectedText = text.id;
+      selected = null;
+      renderSelected();
+      renderTexts();
+      showBlock(text.start, text.end);
+      $<HTMLTextAreaElement>('ll-text-words').focus();
+    },
+    onContextMenu: (event, text) => { selectedText = text.id; textMenu(event, text.id); },
+    onCommit: () => { renderTexts(); persistTexts(); void drawPreview(); },
   });
 
-  /** Moves the existing text bars to match the blocks, without rebuilding them. */
-  function positionTextBars(): void {
+  function renderTexts(): void {
     if (!recording) return;
-    const duration = Math.max(0.001, recording.duration);
-    const byId = new Map(texts.map((text) => [text.id, text]));
-    for (const bar of textTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
-      const text = byId.get(bar.dataset.id ?? '');
-      if (!text) { bar.remove(); continue; }
-      bar.style.left = `${(text.start / duration) * 100}%`;
-      bar.style.width = `${((text.end - text.start) / duration) * 100}%`;
-    }
+    textTrack.render();
+    renderTextSelected();
+    renderPicker();
   }
-
-  const endTextDrag = () => {
-    if (!textDrag) return;
-    textDrag = null;
-    renderTexts();
-    persistTexts();
-    void drawPreview();
-  };
-  textTrackEl.addEventListener('pointerup', endTextDrag);
-  textTrackEl.addEventListener('pointercancel', endTextDrag);
 
   function renderTextSelected(): void {
     const panel = $<HTMLDivElement>('ll-text-selected');
@@ -3932,6 +3593,21 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     for (const id of ['ll-to-start', 'll-step-back', 'll-step-fwd', 'll-to-end']) {
       $<HTMLButtonElement>(id).disabled = !recording;
     }
+  }
+
+  /**
+   * Moves the playhead into a block so its edits are visible in the preview.
+   *
+   * Editing a zoom at 0:40 while looking at 0:05 showed nothing changing, and
+   * read as a broken control rather than a preview pointed elsewhere.
+   */
+  function showBlock(start: number, end: number): void {
+    if (!recording) return;
+    if (previewTime >= start && previewTime <= end) return;
+    if (playing) pause();
+    previewTime = Math.min(Math.max((start + end) / 2, 0), recording.duration);
+    syncScrub();
+    void drawPreview();
   }
 
   /** Moves the playhead, stopping playback first, and repaints. */
