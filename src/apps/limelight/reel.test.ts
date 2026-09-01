@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  acrossClips, clipLength, isSingle, joins, layout, reelDuration, reviveClips,
-  shiftAfter, singleClip, sourceOf, splice, splitAt, without, type Clip,
+  acrossClips, clipLength, isPlainRecording, isSingle, joins, layout, moveClip,
+  reelDuration, remapBlocks, removeClip, reviveClips, shiftAfter, singleClip, sourceOf,
+  splice, splitAt, without, type Clip,
 } from './reel';
 
 let counter = 0;
@@ -227,6 +228,13 @@ describe('the single recording case', () => {
   it('never gives a recording a negative length', () => {
     expect(singleClip('take-1', -4).out).toBe(0);
   });
+
+  it('distinguishes the untouched recording from a one-clip edited reel', () => {
+    expect(isPlainRecording([singleClip('take-1', 12.5)], 'take-1', 12.5)).toBe(true);
+    expect(isPlainRecording([], 'take-1', 12.5)).toBe(true);
+    expect(isPlainRecording([{ id: 'a', source: 'take-1', in: 2, out: 12.5 }], 'take-1', 12.5)).toBe(false);
+    expect(isPlainRecording([{ id: 'b', source: 'take-2', in: 0, out: 4 }], 'take-1', 12.5)).toBe(false);
+  });
 });
 
 describe('reviveClips', () => {
@@ -320,5 +328,97 @@ describe('acrossClips', () => {
 
   it('has nothing to rewrite without clips', () => {
     expect(acrossClips([], [{ start: 0, end: 5, speed: 1 }])).toEqual([]);
+  });
+});
+
+describe('removeClip and moveClip', () => {
+  const three = (): Clip[] => [
+    clip('a', 'take-1', 0, 4),
+    clip('b', 'take-2', 0, 6),
+    clip('c', 'take-3', 0, 2),
+  ];
+
+  it('takes a clip off', () => {
+    expect(removeClip(three(), 'b').map((entry) => entry.id)).toEqual(['a', 'c']);
+    expect(reelDuration(removeClip(three(), 'b'))).toBe(6);
+  });
+
+  it('leaves the reel alone for a clip that is not on it', () => {
+    expect(removeClip(three(), 'ghost')).toEqual(three());
+  });
+
+  it('swaps a clip with the one before or after it', () => {
+    expect(moveClip(three(), 'b', -1).map((entry) => entry.id)).toEqual(['b', 'a', 'c']);
+    expect(moveClip(three(), 'b', 1).map((entry) => entry.id)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('does nothing at either end rather than dropping the clip off it', () => {
+    expect(moveClip(three(), 'a', -1)).toEqual(three());
+    expect(moveClip(three(), 'c', 1)).toEqual(three());
+    expect(moveClip(three(), 'ghost', 1)).toEqual(three());
+  });
+
+  it('keeps the reel the same length when it only reorders', () => {
+    expect(reelDuration(moveClip(three(), 'c', -1))).toBe(reelDuration(three()));
+  });
+});
+
+describe('remapBlocks', () => {
+  const three = (): Clip[] => [
+    clip('a', 'take-1', 0, 4),
+    clip('b', 'take-2', 0, 6),
+    clip('c', 'take-3', 0, 2),
+  ];
+  const blocks = () => [
+    { id: 'onA', start: 1, end: 2 },
+    { id: 'onB', start: 5, end: 7 },
+    { id: 'onC', start: 10.5, end: 11 },
+  ];
+
+  it('carries a block with the clip it was written against', () => {
+    // The caption over the third take belongs to the third take, and follows it
+    // to the front rather than staying where something else now is.
+    const before = layout(three());
+    const after = layout(moveClip(three(), 'c', -1));
+    const out = remapBlocks(blocks(), before, after);
+    expect(out.blocks.find((block) => block.id === 'onC')).toMatchObject({ start: 4.5, end: 5 });
+    expect(out.blocks.find((block) => block.id === 'onB')).toMatchObject({ start: 7, end: 9 });
+    expect(out.blocks.find((block) => block.id === 'onA')).toMatchObject({ start: 1, end: 2 });
+  });
+
+  it('drops a block whose clip has gone', () => {
+    // It was about a passage that no longer exists, and leaving it would put
+    // words over whatever moved into the gap.
+    const out = remapBlocks(blocks(), layout(three()), layout(removeClip(three(), 'b')));
+    expect(out.dropped).toBe(1);
+    expect(out.blocks.map((block) => block.id)).toEqual(['onA', 'onC']);
+  });
+
+  it('pulls later blocks back when a clip is removed from the middle', () => {
+    const out = remapBlocks(blocks(), layout(three()), layout(removeClip(three(), 'b')));
+    expect(out.blocks.find((block) => block.id === 'onC')).toMatchObject({ start: 4.5 });
+  });
+
+  it('leaves a block that sits past every clip where it is', () => {
+    const out = remapBlocks([{ start: 99, end: 100 }], layout(three()), layout(three()));
+    expect(out.blocks[0]).toMatchObject({ start: 99, end: 100 });
+    expect(out.dropped).toBe(0);
+  });
+
+  it('changes nothing when the reel has not moved', () => {
+    const before = layout(three());
+    const out = remapBlocks(blocks(), before, before);
+    expect(out.blocks).toEqual(blocks());
+    expect(out.dropped).toBe(0);
+  });
+
+  it('keeps everything a block carries beyond its times', () => {
+    const rich = [{ id: 'z', start: 5, end: 6, scale: 2.4, pinned: true }];
+    const out = remapBlocks(rich, layout(three()), layout(moveClip(three(), 'b', -1)));
+    expect(out.blocks[0]).toMatchObject({ scale: 2.4, pinned: true });
+  });
+
+  it('has nothing to remap without blocks', () => {
+    expect(remapBlocks([], layout(three()), layout(three()))).toEqual({ blocks: [], dropped: 0 });
   });
 });

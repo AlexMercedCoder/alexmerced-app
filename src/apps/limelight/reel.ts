@@ -213,6 +213,22 @@ export function isSingle(clips: Clip[]): boolean {
   return clips.length <= 1;
 }
 
+/**
+ * Whether the reel is still exactly the untouched first recording.
+ *
+ * Counting clips is not enough: after removing from a two-clip reel, the one
+ * survivor may be a different take or only a window of the first one. That is
+ * still a reel and must keep its clip/source mapping when saved and rendered.
+ */
+export function isPlainRecording(clips: Clip[], source: string, duration: number): boolean {
+  if (clips.length === 0) return true;
+  if (clips.length !== 1) return false;
+  const [clip] = clips;
+  return clip.source === source
+    && Math.abs(clip.in) < 0.001
+    && Math.abs(clip.out - Math.max(0, duration)) < 0.001;
+}
+
 export function reviveClips(value: unknown, makeId: () => string): Clip[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -257,4 +273,59 @@ export function acrossClips(
     }
   }
   return out;
+}
+
+/** Takes a clip off the reel. */
+export function removeClip(clips: Clip[], id: string): Clip[] {
+  return clips.filter((clip) => clip.id !== id);
+}
+
+/**
+ * Swaps a clip with its neighbour.
+ *
+ * By -1 for earlier and 1 for later. At either end there is nothing to swap
+ * with, and the reel comes back unchanged rather than the clip falling off it.
+ */
+export function moveClip(clips: Clip[], id: string, by: -1 | 1): Clip[] {
+  const from = clips.findIndex((clip) => clip.id === id);
+  const to = from + by;
+  if (from < 0 || to < 0 || to >= clips.length) return clips;
+  const out = [...clips];
+  [out[from], out[to]] = [out[to], out[from]];
+  return out;
+}
+
+/**
+ * Moves everything on the timeline to follow the clips it was written against.
+ *
+ * `shiftAfter` is right for an insertion, where everything past a point moves
+ * by the same amount. Removing or reordering is not that: a caption written
+ * over the third take belongs to the third take, and if that take moves to the
+ * front the caption goes with it rather than staying at nineteen seconds where
+ * something else is now.
+ *
+ * A block whose clip is gone goes too. It was about a passage that no longer
+ * exists, and leaving it would put words over whatever moved into that gap.
+ */
+export function remapBlocks<T extends { start: number; end: number }>(
+  blocks: T[], before: Placed[], after: Placed[],
+): { blocks: T[]; dropped: number } {
+  const moved = new Map(after.map((clip) => [clip.id, clip]));
+  const out: T[] = [];
+  let dropped = 0;
+
+  for (const block of blocks) {
+    const home = before.find((clip) => block.start >= clip.at && block.start < clip.at + clip.length);
+    if (!home) {
+      // Past the end of every clip, which is where a block sits when the reel
+      // has shrunk under it. Kept where it is; the caller clamps.
+      out.push(block);
+      continue;
+    }
+    const now = moved.get(home.id);
+    if (!now) { dropped += 1; continue; }
+    const shift = now.at - home.at;
+    out.push(shift === 0 ? block : { ...block, start: block.start + shift, end: block.end + shift });
+  }
+  return { blocks: out, dropped };
 }

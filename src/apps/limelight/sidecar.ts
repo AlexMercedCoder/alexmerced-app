@@ -58,7 +58,7 @@ export type Sidecar = {
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
   /**
-   * The reel, when the timeline holds more than one recording.
+   * The reel, when the timeline differs from the untouched recording.
    *
    * Only ever written alongside the recordings it names, since clips pointing
    * at takes that are not in the file would place every edit against a
@@ -91,15 +91,15 @@ export function sidecarSize(project: Project, withVideo: boolean): number {
 
 /** Whether a project's reel can be written into a file of this kind. */
 export function reelTravels(project: Project, withVideo: boolean): boolean {
-  return withVideo && (project.clips?.length ?? 0) > 1;
+  return withVideo && (project.clips?.length ?? 0) > 0;
 }
 
 /** What is lost by writing this file, in words, or nothing. */
 export function sidecarLoses(project: Project, withVideo: boolean): string | null {
-  const extra = (project.clips?.length ?? 0) > 1;
+  const extra = (project.clips?.length ?? 0) > 0;
   if (!extra || reelTravels(project, withVideo)) return null;
   const takes = (project.takes?.length ?? 0) + 1;
-  return `This timeline is made of ${takes} recordings, and only edits are being saved. `
+  return `This timeline's clip arrangement uses ${takes} ${takes === 1 ? 'recording' : 'recordings'}, and only edits are being saved. `
     + 'Use Save everything to keep them, or the edits will not line up with anything.';
 }
 
@@ -211,8 +211,7 @@ export function reviveSidecar(value: unknown): Sidecar {
     })
     : [];
   const clips = reviveClips(raw.clips, () => createId('clip'))
-    // A clip naming a recording that is not in the file is dropped, and if that
-    // leaves fewer than two the reel is not one.
+    // A clip naming a recording that is not in the file is dropped.
     .filter((clip) => clip.source === 'take-1' || takes.some((take) => take.id === clip.source));
 
   return {
@@ -245,7 +244,7 @@ export function reviveSidecar(value: unknown): Sidecar {
     // Clips are kept only when the recordings they name came too. A reel
     // pointing at nothing would put every edit against a timeline that is not
     // there, which is worse than falling back to the one recording.
-    ...(takes.length > 0 && clips.length > 1 ? { clips } : {}),
+    ...(video && clips.length > 0 ? { clips } : {}),
   };
 }
 
@@ -321,7 +320,7 @@ export function applySidecar(project: Project, sidecar: Sidecar): Project {
     shapes: sidecar.shapes,
     keyframes: sidecar.keyframes,
     settings: sidecar.settings,
-    ...(sidecar.clips && sidecar.clips.length > 1 ? { clips: sidecar.clips } : {}),
+    ...(sidecar.clips && sidecar.clips.length > 0 ? { clips: sidecar.clips } : {}),
     updatedAt: new Date().toISOString(),
   };
 }

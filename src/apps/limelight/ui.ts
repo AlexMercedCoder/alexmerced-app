@@ -66,8 +66,8 @@ import {
 } from './sidecar';
 import { describeTidy, planTidy, tidyChangesAnything } from './tidy';
 import {
-  joins, layout, reelDuration, shiftAfter, singleClip, sourceOf, splice,
-  type Clip, type Placed,
+  isPlainRecording, joins, layout, moveClip, reelDuration, remapBlocks, removeClip,
+  shiftAfter, singleClip, sourceOf, splice, type Clip, type Placed,
 } from './reel';
 import {
   GENERAL_HELP, SHORTCUT_GROUPS, SHORTCUTS, shortcutFor, TRACK_HELP, trackHelp,
@@ -133,11 +133,25 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let recordingInto: { start: number; end: number } | null = null;
   const takes = new Map<string, {
     blob: Blob; video: HTMLVideoElement; duration: number; hasAudio: boolean;
-    /** Kept alongside so saving is synchronous, like every other edit. */
-    bytes: Uint8Array | null;
   }>();
   /** The id the first recording always has, so lookups need no special case. */
   const FIRST_TAKE = 'take-1';
+
+  /** Whether clips still describe the untouched first recording. */
+  function hasEditedReel(value: Clip[] = clips): boolean {
+    const firstDuration = takes.get(FIRST_TAKE)?.duration ?? recording?.duration ?? 0;
+    return !isPlainRecording(value, FIRST_TAKE, firstDuration);
+  }
+
+  /** Only recordings named by the current reel affect saving and sound. */
+  function activeTakeIds(value: Clip[] = clips): Set<string> {
+    return new Set(value.map((clip) => clip.source));
+  }
+
+  function reelHasAudio(value: Clip[] = clips): boolean {
+    const active = activeTakeIds(value);
+    return [...active].some((id) => takes.get(id)?.hasAudio === true);
+  }
   let urls: string[] = [];
   let points: Interest[] = [];
   let interestSource: 'pointer' | 'motion' | 'none' = 'none';
@@ -255,13 +269,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       // The reel, and the recordings it names. A project of one take writes
       // neither, so nothing changes for the ordinary case or for a file written
       // before clips existed.
-      const reel = clips.length > 1;
-      stored.clips = reel ? clips : [];
-      stored.takes = reel
-        ? [...takes].flatMap(([id, take]) => (id === FIRST_TAKE || !take.bytes?.byteLength
-          ? []
-          : [{ id, bytes: take.bytes, mime: take.blob.type || 'video/webm' }]))
-        : [];
+      // The clips are cheap and go now. The recordings they name are read from
+      // their blobs by the save itself, which is already asynchronous.
+      stored.clips = hasEditedReel() ? clips : [];
       queueSave();
     }
   };
@@ -311,7 +321,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         const wasLength = recording.duration;
         clips = state.clips;
         recording.duration = reelDuration(clips);
-        recording.hasAudio = [...takes.values()].some((take) => take.hasAudio);
+        recording.hasAudio = reelHasAudio(clips);
         if (Math.abs(wasLength - recording.duration) > 0.001) {
           scrubber.max = String(Math.max(0.1, recording.duration));
           $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
@@ -353,6 +363,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderRedactions();
     renderShapes();
     renderCues();
+    renderClips();
     renderHistory();
     syncScrub();
     if (reelChanged) {
@@ -385,17 +396,46 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   $<HTMLButtonElement>('ll-redo').addEventListener('click', () => { void redoEdit(); });
 
   /** Writing tens of megabytes on every slider nudge would make this stutter. */
+  /**
+   * The further recordings as the database wants them.
+   *
+   * Read from their blobs at the moment of writing rather than held alongside
+   * them, so a session with three retakes in it holds three recordings and not
+   * six. The read is cheap next to the write it precedes.
+   */
+  async function takeRecords(): Promise<{ id: string; bytes: Uint8Array; mime: string }[]> {
+    if (!hasEditedReel()) return [];
+    const active = activeTakeIds();
+    const out: { id: string; bytes: Uint8Array; mime: string }[] = [];
+    for (const [id, take] of takes) {
+      if (id === FIRST_TAKE || !active.has(id)) continue;
+      const bytes = await take.blob.arrayBuffer().catch(() => null);
+      // A take whose bytes cannot be read is left out rather than written as an
+      // empty record the reel would point at and find nothing behind.
+      if (bytes) out.push({ id, bytes: new Uint8Array(bytes), mime: take.blob.type || 'video/webm' });
+    }
+    return out;
+  }
+
   function queueSave(): void {
     if (!stored) return;
     window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => { if (stored) void saveProject(stored); }, 600);
+    saveTimer = window.setTimeout(() => {
+      void (async () => {
+        if (!stored) return;
+        // Filled in here rather than in `remember`, which is synchronous and
+        // runs on every slider nudge.
+        stored.takes = await takeRecords();
+        if (stored) await saveProject(stored);
+      })();
+    }, 600);
   }
 
   // ------------------------------------------------------------------ project
 
   /** The reel, laid out. Empty for the ordinary one recording case. */
   function placedClips(): Placed[] {
-    return clips.length > 1 ? layout(clips) : [];
+    return hasEditedReel() ? layout(clips) : [];
   }
 
   /**
@@ -422,15 +462,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** The takes as the renderer wants them: a blob and an element per recording. */
   function takesForRender(): Map<string, { blob: Blob; video: HTMLVideoElement }> {
     const out = new Map<string, { blob: Blob; video: HTMLVideoElement }>();
-    for (const [id, take] of takes) out.set(id, { blob: take.blob, video: take.video });
+    const active = activeTakeIds();
+    for (const [id, take] of takes) {
+      if (active.has(id)) out.set(id, { blob: take.blob, video: take.video });
+    }
     return out;
   }
 
   function project(): Project | null {
     if (!video || !recording) return null;
     return {
-      clips: clips.length > 1 ? clips : undefined,
-      takes: clips.length > 1 ? takesForRender() : undefined,
+      clips: hasEditedReel() ? clips : undefined,
+      takes: hasEditedReel() ? takesForRender() : undefined,
       video,
       camera: cameraVideo,
       source: recording.blob,
@@ -742,7 +785,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     savedClips: Clip[],
     range: { start: number; end: number },
   ): Promise<void> {
-    if (savedClips.length <= 1 || saved.length === 0 || !recording) return;
+    if (savedClips.length === 0 || !recording) return;
 
     const found = new Set<string>([FIRST_TAKE]);
     for (const take of saved) {
@@ -764,18 +807,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       }
       const duration = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : 0;
       if (duration <= 0) continue;
-      takes.set(take.id, {
-        blob, video: element, duration, hasAudio: true, bytes: take.bytes,
-      });
+      takes.set(take.id, { blob, video: element, duration, hasAudio: true });
       found.add(take.id);
     }
 
     const usable = savedClips.filter((clip) => found.has(clip.source));
-    if (usable.length <= 1) return;
+    if (usable.length === 0) return;
 
     clips = usable;
     recording.duration = reelDuration(clips);
-    recording.hasAudio = [...takes.values()].some((take) => take.hasAudio);
+    recording.hasAudio = reelHasAudio(clips);
     trim = {
       start: Math.max(0, Math.min(range.start, recording.duration)),
       end: range.end > range.start ? Math.min(range.end, recording.duration) : recording.duration,
@@ -791,6 +832,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderShapes();
     renderCues();
     renderPicker();
+    renderClips();
     await rebuildWave();
     await drawPreview();
     drawStrip();
@@ -830,9 +872,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       video,
       duration: recording.duration,
       hasAudio: result.hasAudio,
-      // The first recording's bytes are already in the project record, so they
-      // are not held twice.
-      bytes: null,
     });
     clips = [singleClip(FIRST_TAKE, recording.duration)];
 
@@ -880,6 +919,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderShapes();
     renderChapters();
     renderCues();
+    renderClips();
     renderMusic();
     renderDestinations();
     renderPicker();
@@ -1150,8 +1190,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // Nothing reads a track list off a file reliably, so this is the practical
     // test: if the sound decodes, there is sound.
     const analysed = await analyseAudio(blob).catch(() => null);
-    const bytes = new Uint8Array(await blob.arrayBuffer().catch(() => new ArrayBuffer(0)));
-    takes.set(id, { blob, video: element, duration, hasAudio: !!analysed, bytes });
+    // The blob is the only copy kept. Reading it into an array as well was a
+    // second full copy of every take resident for the whole session, which on a
+    // hundred megabyte retake is a hundred megabytes for nothing: the bytes are
+    // wanted twice, when the project is saved and when a file is written, and
+    // both of those already wait for other things.
+    takes.set(id, { blob, video: element, duration, hasAudio: !!analysed });
     takeWaves.set(id, analysed);
     return {
       id, duration, hasAudio: !!analysed,
@@ -1165,9 +1209,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** The sound track under the timeline, built across whatever is on the reel. */
   async function rebuildWave(): Promise<void> {
     if (!recording) return;
-    if (clips.length <= 1) { await loadWaveform(); return; }
+    if (!hasEditedReel()) { await loadWaveform(); return; }
 
-    for (const [id, take] of takes) {
+    for (const id of activeTakeIds()) {
+      const take = takes.get(id);
+      if (!take) continue;
       if (!takeWaves.has(id)) takeWaves.set(id, await analyseAudio(take.blob).catch(() => null));
     }
     wave = joinWaves(clips.map((clip) => ({
@@ -1208,7 +1254,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const wasWhole = Math.abs(trim.end - recording.duration) < 0.05 && trim.start < 0.05;
     clips = next;
     recording.duration = reelDuration(clips);
-    recording.hasAudio = [...takes.values()].some((take) => take.hasAudio);
+    recording.hasAudio = reelHasAudio(clips);
 
     // A trim nobody had touched follows the reel. One that was set by hand is
     // clamped instead, because moving it would throw away a deliberate choice.
@@ -1232,6 +1278,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderShapes();
     renderCues();
     renderPicker();
+    renderClips();
     renderTransport();
     syncScrub();
     await rebuildWave();
@@ -1239,6 +1286,105 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     drawStrip();
     setStatus(said, 'good');
     toast(said, { kind: 'good', actionLabel: 'Undo', onAction: () => { void undoEdit(); } });
+  }
+
+  /**
+   * The clips, as something to point at.
+   *
+   * Until now a clip could be added and a stretch retaken, and a clip added by
+   * mistake could only be undone. Two takes recorded in the wrong order could
+   * not be swapped at all. Both are edits people expect to be able to make
+   * directly rather than by starting again.
+   */
+  function renderClips(): void {
+    const holder = $<HTMLDivElement>('ll-clips');
+    holder.innerHTML = '';
+    holder.hidden = !hasEditedReel();
+    if (holder.hidden) return;
+
+    for (const [index, clip] of layout(clips).entries()) {
+      const chip = document.createElement('div');
+      chip.className = 'll-clip';
+
+      const label = document.createElement('span');
+      const name = document.createElement('strong');
+      name.textContent = `Clip ${index + 1}`;
+      label.append(name, document.createTextNode(`, ${formatClock(clip.length)}`));
+      chip.append(label);
+
+      for (const [by, glyph, says] of [
+        [-1, '\u2190', 'earlier'], [1, '\u2192', 'later'],
+      ] as [-1 | 1, string, string][]) {
+        const move = document.createElement('button');
+        move.type = 'button';
+        move.textContent = glyph;
+        move.title = `Move clip ${index + 1} ${says}`;
+        move.setAttribute('aria-label', move.title);
+        move.disabled = by === -1 ? index === 0 : index === clips.length - 1;
+        move.addEventListener('click', () => { void reorderClip(clip.id, by); });
+        chip.append(move);
+      }
+
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.className = 'll-clip__drop';
+      drop.textContent = '\u00d7';
+      drop.title = `Remove clip ${index + 1}`;
+      drop.setAttribute('aria-label', drop.title);
+      drop.addEventListener('click', () => { void dropClip(clip.id); });
+      chip.append(drop);
+
+      holder.append(chip);
+    }
+  }
+
+  /**
+   * Applies a reel whose clips have moved rather than grown.
+   *
+   * Removing and reordering are not a shift: a caption written over the third
+   * take belongs to the third take and goes wherever it goes. `remapBlocks`
+   * answers that for every list at once, and reports what it had to drop
+   * because the clip it belonged to is gone.
+   */
+  async function adoptReorder(next: Clip[], said: string): Promise<void> {
+    if (!recording) return;
+    const before = layout(clips);
+    const after = layout(next);
+
+    let dropped = 0;
+    const move = <T extends { start: number; end: number }>(list: T[]): T[] => {
+      const out = remapBlocks(list, before, after);
+      dropped += out.dropped;
+      return out.blocks;
+    };
+    zooms = move(zooms);
+    texts = move(texts);
+    speeds = move(speeds);
+    redactions = move(redactions);
+    shapes = move(shapes);
+    captions = move(captions);
+    cuts = move(cuts);
+
+    await adoptReel(next, dropped > 0
+      ? `${said} ${dropped} ${dropped === 1 ? 'edit' : 'edits'} on it went too.`
+      : said);
+  }
+
+  async function dropClip(id: string): Promise<void> {
+    const next = removeClip(clips, id);
+    if (next.length === clips.length) return;
+    if (next.length === 0) {
+      setStatus('That is the only clip left. Discard the recording instead.', 'bad');
+      return;
+    }
+    const gone = clips.find((clip) => clip.id === id);
+    await adoptReorder(next, `Removed a clip of ${formatClock(gone ? gone.out - gone.in : 0)}.`);
+  }
+
+  async function reorderClip(id: string, by: -1 | 1): Promise<void> {
+    const next = moveClip(clips, id, by);
+    if (next === clips) return;
+    await adoptReorder(next, `Moved a clip ${by === -1 ? 'earlier' : 'later'}.`);
   }
 
   /** Puts a recording on the end of the reel. */
@@ -4338,7 +4484,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * A recording opened from a file has never been saved, and its edits are
    * exactly as worth carrying off this machine as a recorded one's.
    */
-  function forExport(): StoredProject | null {
+  async function forExport(): Promise<StoredProject | null> {
     if (!recording) return null;
     const now = new Date().toISOString();
     return {
@@ -4369,10 +4515,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       shapes,
       music: stored?.music ?? null,
       musicName: stored?.musicName ?? '',
-      clips: clips.length > 1 ? clips : [],
-      takes: [...takes].flatMap(([id, take]) => (id === FIRST_TAKE || !take.bytes?.byteLength
-        ? []
-        : [{ id, bytes: take.bytes, mime: take.blob.type || 'video/webm' }])),
+      clips: hasEditedReel() ? clips : [],
+      takes: await takeRecords(),
       keyframes: trackFromBlocks(zooms, recording.duration, settings.zoom),
       settings,
       createdAt: stored?.createdAt ?? now,
@@ -4381,7 +4525,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   async function saveProjectFile(withVideo: boolean): Promise<void> {
-    const current = forExport();
+    const current = await forExport();
     if (!current) return;
 
     // The bytes live in the database, and a recording opened from a file has
@@ -4469,14 +4613,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // Any further recordings the file carried, before the clips that name them
     // mean anything.
     const carriedTakes = sidecarTakes(sidecar);
-    if (carriedTakes.length > 0 && sidecar.clips) {
+    if (sidecar.clips) {
       await restoreReel(carriedTakes, sidecar.clips, {
         start: sidecar.start,
         end: sidecar.end > sidecar.start ? sidecar.end : sidecar.source.duration,
       });
     }
 
-    const onto = forExport();
+    const onto = await forExport();
     if (!onto) return;
     const merged = applySidecar(onto, sidecar);
 

@@ -918,13 +918,13 @@ export async function render(
   /**
    * The reel, and a decoder for each recording on it.
    *
-   * A reel of one is the ordinary case and stays on the single `source` above,
-   * so nothing about a plain recording changes. With more than one, each is
-   * opened as it is first needed rather than all at once: a decoder holds
+   * A plain recording leaves `clips` out and stays on the single `source`
+   * above. An edited reel may contain even one clip when the other clips were
+   * removed. Each source is opened as it is first needed: a decoder holds
    * hardware buffers, and a reel of eight takes would hold eight of them for the
    * whole export while using one at a time.
    */
-  const placed: Placed[] = project.clips && project.clips.length > 1
+  const placed: Placed[] = project.clips && project.clips.length > 0
     ? layout(project.clips)
     : [];
   const decoders = new Map<string, FrameSource | null>();

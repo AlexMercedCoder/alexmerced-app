@@ -260,11 +260,13 @@ describe('a timeline made of several recordings', () => {
     expect(sidecarSize(big, true)).toBeGreaterThan(4_000_000);
   });
 
-  it('drops a clip whose recording did not survive the file', () => {
+  it('drops a clip whose recording did not survive the file but keeps valid survivors', () => {
     const written = JSON.parse(writeSidecar(reel(), true));
     written.data.takes = [];
     const back = reviveSidecar(written.data);
-    expect(back.clips).toBeUndefined();
+    expect(back.clips).toEqual([
+      { id: 'c1', source: 'take-1', in: 0, out: 6 },
+    ]);
   });
 
   it('keeps the rest when one recording will not decode', () => {
@@ -276,5 +278,26 @@ describe('a timeline made of several recordings', () => {
   it('puts the reel back onto the project when the edits are applied', () => {
     const back = readSidecar(writeSidecar(reel(), true)).data;
     expect(applySidecar(project(), back).clips).toHaveLength(2);
+  });
+
+  it('keeps a one-clip window onto the first recording', () => {
+    const one = project({
+      clips: [{ id: 'c1', source: 'take-1', in: 3, out: 9 }],
+      duration: 6,
+    });
+    const back = readSidecar(writeSidecar(one, true)).data;
+    expect(back.clips).toEqual(one.clips);
+    expect(back.takes).toBeUndefined();
+  });
+
+  it('keeps a one-clip reel whose survivor is a further recording', () => {
+    const one = project({
+      clips: [{ id: 'c2', source: 'take-2', in: 0, out: 4 }],
+      takes: [{ id: 'take-2', bytes: new Uint8Array([7, 7]), mime: 'video/webm' }],
+      duration: 4,
+    });
+    const back = readSidecar(writeSidecar(one, true)).data;
+    expect(back.clips).toEqual(one.clips);
+    expect(sidecarTakes(back)).toEqual(one.takes);
   });
 });

@@ -188,8 +188,8 @@ export type Project = {
   /**
    * The reel: which recording each stretch of the timeline comes from.
    *
-   * Empty means the plain single recording case, and is what every project
-   * written before clips existed reads back as.
+   * Empty means the plain untouched recording case. A reel may contain one
+   * clip when all the others were removed, and that mapping still matters.
    */
   clips?: Clip[];
   /** The derived camera move, kept so a reopened project renders identically. */

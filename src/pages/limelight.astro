@@ -140,6 +140,10 @@ const app = getApp('limelight');
              confusion at a larger scale: the picker keeps every track visible
              as a thin strip, so nothing is forgotten, while only the one being
              worked on is full height with its controls. -->
+        <!-- The takes this timeline is made of. Hidden while there is only one,
+             which is most of the time. -->
+        <div class="ll-clips" id="ll-clips" aria-label="The clips on this timeline" hidden></div>
+
         <div class="ll-picker" id="ll-picker" role="tablist" aria-label="What to edit"></div>
         <p class="ll-firsttime" id="ll-firsttime" hidden>
           <span id="ll-firsttime-text"></span>
@@ -650,6 +654,20 @@ const app = getApp('limelight');
   .ll-group > .ll-card:last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 
   /* The picker, and the tracks it switches between. */
+  .ll-clips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.8rem 0 0.2rem; }
+  .ll-clip {
+    display: flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.3rem 0.25rem 0.6rem;
+    border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-raised);
+    font-size: 0.76rem; color: var(--ink-soft);
+  }
+  .ll-clip strong { font-weight: 600; color: var(--ink); }
+  .ll-clip button {
+    border: 0; background: none; cursor: pointer; font: inherit; line-height: 1;
+    padding: 0.15rem 0.25rem; border-radius: 0.25rem; color: var(--ink-faint);
+  }
+  .ll-clip button:hover:not(:disabled) { background: var(--paper-sunk); color: var(--ink); }
+  .ll-clip button:disabled { opacity: 0.3; cursor: default; }
+  .ll-clip__drop:hover:not(:disabled) { color: var(--danger); }
   .ll-picker { display: flex; gap: 0.3rem; flex-wrap: wrap; margin: 0.9rem 0 0.5rem; }
   .ll-pick {
     display: inline-flex; align-items: center; gap: 0.35rem;
