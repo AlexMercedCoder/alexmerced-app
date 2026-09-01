@@ -37,6 +37,15 @@ export type TrackOptions<T extends Block> = {
   barClass?: (block: T) => string;
   /** Called when a drag finishes, for persisting and redrawing. */
   onCommit: () => void;
+  /**
+   * What a bar is called when it is read out rather than looked at.
+   *
+   * A bar says "1.8x" and sits at a position that means something only if you
+   * can see where it is. Read aloud it has to carry both.
+   */
+  describe?: (block: T) => string;
+  /** How far the arrow keys move a block, in seconds. */
+  nudge?: { small: number; large: number };
   /** Double click, which opens rather than deletes. */
   onOpen?: (block: T) => void;
   onContextMenu?: (event: MouseEvent, block: T) => void;
@@ -47,7 +56,35 @@ export type TrackHandle = {
   render: () => void;
   /** Moves the existing bars without rebuilding them. For during a drag. */
   reposition: () => void;
+  /** Puts the keyboard on one block, for after it has been added. */
+  focus: (id: string) => void;
 };
+
+/**
+ * What a key press does to the block that has the keyboard.
+ *
+ * Pure, and separate from the DOM, because this is the part with a right
+ * answer. The scheme: left and right move the whole block, up and down change
+ * how long it is, Alt does the same to the start edge instead, and Shift makes
+ * every one of those ten times bigger.
+ */
+export function keyEdit(
+  key: string,
+  modifiers: { shift?: boolean; alt?: boolean },
+  nudge: { small: number; large: number },
+): { edge: TrackEdge; shift: number } | null {
+  const size = modifiers.shift ? nudge.large : nudge.small;
+  const edge: TrackEdge = modifiers.alt ? 'start' : 'move';
+  switch (key) {
+    case 'ArrowLeft': return { edge, shift: -size };
+    case 'ArrowRight': return { edge, shift: size };
+    // Up and down always work on the end, since Alt already means the start
+    // and a block cannot be lengthened from both ends at once.
+    case 'ArrowUp': return { edge: 'end', shift: size };
+    case 'ArrowDown': return { edge: 'end', shift: -size };
+    default: return null;
+  }
+}
 
 /**
  * Applies a drag to one block.
@@ -72,7 +109,17 @@ export function applyDrag<T extends Block>(
 
 export function mountBlockTrack<T extends Block>(options: TrackOptions<T>): TrackHandle {
   const { element } = options;
+  const nudge = options.nudge ?? { small: 0.1, large: 1 };
   let drag: { id: string; edge: TrackEdge; from: number; start: number; end: number } | null = null;
+
+  // The track itself takes the keyboard when the block that had it is deleted,
+  // so focus lands somewhere related rather than back at the top of the page.
+  element.tabIndex = -1;
+
+  function focus(id: string): void {
+    const bar = element.querySelector<HTMLDivElement>(`.ll-zoom[data-id="${CSS.escape(id)}"]`);
+    if (bar && document.activeElement !== bar) bar.focus();
+  }
 
   const timeAt = (event: PointerEvent): number => {
     const box = element.getBoundingClientRect();
@@ -92,6 +139,11 @@ export function mountBlockTrack<T extends Block>(options: TrackOptions<T>): Trac
 
   function render(): void {
     const duration = Math.max(0.001, options.duration());
+    // Every bar is about to be thrown away. If one of them has the keyboard,
+    // the browser hands focus back to the body, which is a long way from here.
+    const had = element.contains(document.activeElement)
+      ? (document.activeElement as HTMLElement).closest<HTMLElement>('.ll-zoom')?.dataset.id ?? null
+      : null;
     element.innerHTML = '';
 
     for (const block of options.blocks()) {
@@ -119,6 +171,54 @@ export function mountBlockTrack<T extends Block>(options: TrackOptions<T>): Trac
         bar.append(grip);
       }
 
+      // A div with a pointer handler is invisible to the keyboard, and this is
+      // the only way to reach a block: every edit here, including the Delete
+      // the shortcut list promises, needed a mouse first.
+      bar.tabIndex = 0;
+      bar.setAttribute('role', 'button');
+      bar.setAttribute('aria-label', options.describe
+        ? options.describe(block)
+        : options.title?.(block) ?? options.label(block));
+
+      bar.addEventListener('focus', () => {
+        // Reaching a block with Tab selects it, so the panel below shows the
+        // one you are on and Delete has something to act on.
+        if (options.selected() === block.id) return;
+        options.onSelect(block.id, block);
+        // onSelect leads back to the caller's render, which replaces this very
+        // element. Without this the focus falls to the body mid-Tab.
+        focus(block.id);
+      });
+
+      bar.addEventListener('keydown', (event) => {
+        if (event.ctrlKey || event.metaKey) return;
+        const edit = keyEdit(event.key, { shift: event.shiftKey, alt: event.altKey }, nudge);
+        if (edit) {
+          // The arrows step the playhead everywhere else on the page, and the
+          // handler for that listens on the window.
+          event.preventDefault();
+          event.stopPropagation();
+          const current = options.blocks().find((entry) => entry.id === block.id);
+          if (!current) return;
+          const moved = applyDrag(
+            options.blocks(), block.id, edit.edge, edit.shift,
+            { start: current.start, end: current.end },
+          );
+          options.onChange(options.constrain ? options.constrain(moved, block.id) : moved);
+          render();
+          options.onCommit();
+          focus(block.id);
+          return;
+        }
+        if (event.key === 'Enter' && options.onOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          options.onOpen(block);
+        }
+        // Delete is deliberately left alone: it belongs to the window handler,
+        // which removes whatever is selected, and focus has just selected this.
+      });
+
       bar.addEventListener('pointerdown', (event) => begin(event, block, 'move'));
       if (options.onOpen) bar.addEventListener('dblclick', () => options.onOpen!(block));
       if (options.onContextMenu) {
@@ -130,6 +230,13 @@ export function mountBlockTrack<T extends Block>(options: TrackOptions<T>): Trac
     const selected = options.selected();
     for (const bar of element.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
       bar.classList.toggle('is-selected', bar.dataset.id === selected);
+    }
+
+    if (had) {
+      const again = element.querySelector<HTMLDivElement>(`.ll-zoom[data-id="${CSS.escape(had)}"]`);
+      // The block it was on may have just been deleted, in which case the track
+      // takes the keyboard rather than losing it.
+      (again ?? element).focus();
     }
   }
 
@@ -171,5 +278,5 @@ export function mountBlockTrack<T extends Block>(options: TrackOptions<T>): Trac
     });
   }
 
-  return { render, reposition };
+  return { render, reposition, focus };
 }

@@ -1,7 +1,7 @@
 import { formatBytes } from '../../lib/bytes';
 import { createId } from '../../lib/id';
 import { readPref, writePref } from '../../lib/prefs';
-import { downloadBlob } from '../../lib/portable';
+import { downloadBlob, downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { registerTools } from '../../lib/webmcp';
 import type { Interest } from './attention';
@@ -52,6 +52,12 @@ import {
 } from './shapes';
 import { canTranscribe, transcribe, WHISPER_MODELS, type WhisperSize } from './transcribe';
 import { mountBlockTrack } from './blockTrack';
+import { mountSpeaker } from './announce';
+import { mountFilmstrip } from './filmstrip';
+import {
+  applySidecar, readSidecar, sidecarFilename, sidecarMismatch, sidecarSize, sidecarVideo,
+  writeSidecar,
+} from './sidecar';
 import {
   GENERAL_HELP, SHORTCUT_GROUPS, SHORTCUTS, shortcutFor, TRACK_HELP, trackHelp,
   type ShortcutId, type TrackName,
@@ -160,9 +166,20 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let restoring = false;
   let saveTimer = 0;
 
+  /**
+   * The live region, which is how any of this reaches somebody not watching.
+   *
+   * Progress goes through `progress` rather than `say` so a two minute export
+   * is four sentences instead of four hundred.
+   */
+  const speaker = mountSpeaker($<HTMLParagraphElement>('ll-said'));
+
   const setStatus = (message: string, state: 'idle' | 'busy' | 'good' | 'bad') => {
     statusEl.textContent = message;
     statusEl.dataset.state = state;
+    // A busy message is a stage report and arrives many times a second. Those
+    // are announced by the progress calls, at a quarter at a time.
+    if (state !== 'busy') speaker.say(message);
   };
 
   /**
@@ -275,11 +292,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   async function undoEdit(): Promise<void> {
     const state = history.undo();
+    // Saying nothing when there is nothing left to undo is the point: silence
+    // after a key press reads as broken, so it says so.
+    speaker.say(state ? 'Undone.' : 'Nothing left to undo.');
     if (state) await restore(state);
   }
 
   async function redoEdit(): Promise<void> {
     const state = history.redo();
+    speaker.say(state ? 'Redone.' : 'Nothing left to redo.');
     if (state) await restore(state);
   }
 
@@ -662,6 +683,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     history.reset(snapshot());
     renderHistory();
     await drawPreview();
+    // Last, and not awaited: the strip is worth having and worth nothing if it
+    // delays the recording appearing.
+    drawStrip();
   }
 
   async function analyse(): Promise<void> {
@@ -702,6 +726,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function onProgress(progress: { stage: string; done: number; total: number }): void {
     barFill.style.width = `${progress.total > 0 ? (progress.done / progress.total) * 100 : 0}%`;
     setStatus(`${progress.stage}: ${progress.done} of ${progress.total}.`, 'busy');
+    speaker.progress(progress.stage, progress.total > 0 ? progress.done / progress.total : null);
   }
 
   // ------------------------------------------------------------------ projects
@@ -767,6 +792,26 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const trimEl = $<HTMLDivElement>('ll-trim');
   const trimRange = $<HTMLDivElement>('ll-trim-range');
+
+  /** Thumbnails behind the trim range. Decoration, so nothing waits on it. */
+  const filmstrip = mountFilmstrip($<HTMLCanvasElement>('ll-strip'));
+
+  /**
+   * Redraws the strip, coalesced.
+   *
+   * A resize fires continuously and each draw walks the file, so the last one
+   * wins after things have settled rather than starting a decode per pixel.
+   */
+  let stripTimer = 0;
+  function drawStrip(delay = 0): void {
+    window.clearTimeout(stripTimer);
+    stripTimer = window.setTimeout(() => {
+      if (!recording || !video) { filmstrip.clear(); return; }
+      void filmstrip.draw(recording.blob, recording.duration, video);
+    }, delay);
+  }
+
+  window.addEventListener('resize', () => drawStrip(250));
 
   function renderTrim(): void {
     if (!recording) return;
@@ -1543,6 +1588,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     constrain: (next) => sortSpeeds(next),
     label: (region) => `${region.speed}x`,
     title: (region) => `${region.speed}x, ${formatClock(region.start)} to ${formatClock(region.end)}`,
+    describe: (region) => `Speed change, ${region.speed} times, ${formatClock(region.start)} to ${formatClock(region.end)}`,
     barClass: () => 'is-pinned',
     onCommit: () => persistSpeeds(),
   });
@@ -1585,6 +1631,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       setStatus('There is no room for a speed change there.', 'bad');
       return;
     }
+    announceAdded('Speed change', previewTime);
     selectedSpeed = speeds.find((region) => region.start <= previewTime + 0.01 && region.end >= previewTime - 0.01)?.id ?? null;
     persistSpeeds();
   });
@@ -1634,6 +1681,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     constrain: (next) => sortShapes(next),
     label: (shape) => shape.kind,
     title: (shape) => `${shape.kind}, ${formatClock(shape.start)} to ${formatClock(shape.end)}`,
+    describe: (shape) => `${shape.kind}, ${formatClock(shape.start)} to ${formatClock(shape.end)}`,
     barClass: () => 'is-pinned',
     onCommit: () => persistShapes(),
   });
@@ -1685,6 +1733,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!recording) return;
     const kind = $<HTMLSelectElement>('ll-shape-kind').value as ShapeKind;
     shapes = addShape(shapes, previewTime, recording.duration, kind, createId('shape'));
+    announceAdded(kind, previewTime);
     selectedShape = shapes.find((shape) => shape.start <= previewTime + 0.01 && shape.end >= previewTime - 0.01)?.id ?? null;
     selectedRedaction = null;
     renderRedactions();
@@ -1742,6 +1791,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // people forget they set up.
     label: (block) => (block.points.length > 1 ? `${block.style} \u00d7${block.points.length}` : block.style),
     title: (block) => `${block.style}, ${formatClock(block.start)} to ${formatClock(block.end)}`,
+    describe: (block) => `Cover up, ${block.style}, ${formatClock(block.start)} to ${formatClock(block.end)}`,
     barClass: () => 'is-pinned',
     onCommit: () => persistRedactions(),
   });
@@ -1958,6 +2008,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function persistZooms(label = ''): void { remember(label); }
 
+  /** Says that a block has arrived, and where, since neither is visible. */
+  function announceAdded(kind: string, at: number): void {
+    speaker.say(`${kind} added at ${formatClock(at)}.`);
+  }
+
   const zoomBlocks = mountBlockTrack<ZoomBlock>({
     element: zoomTrackEl,
     blocks: () => zooms,
@@ -1978,6 +2033,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     constrain: (next, id) => constrain(next, id, recording?.duration ?? 0),
     label: (zoom) => `${zoom.scale.toFixed(1)}x`,
     title: (zoom) => `${zoom.scale.toFixed(1)}x, ${formatClock(zoom.start)} to ${formatClock(zoom.end)}`,
+    describe: (zoom) => `Zoom, ${zoom.scale.toFixed(1)} times, ${formatClock(zoom.start)} to ${formatClock(zoom.end)}`,
     barClass: (zoom) => (zoom.pinned ? 'is-pinned' : ''),
     // Opens the zoom for aiming. It used to delete it, which is the opposite
     // of what a double click means everywhere else.
@@ -2152,6 +2208,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       return;
     }
     invalidateTrack();
+    announceAdded('Zoom', previewTime);
     selected = zooms.find((zoom) => zoom.pinned && zoom.start <= previewTime + 0.01 && zoom.end >= previewTime - 0.01)?.id ?? selected;
     selectedText = null;
     renderTextSelected();
@@ -2196,6 +2253,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // from another at a glance.
     label: (text) => text.text.split('\n')[0] || 'Text',
     title: (text) => `${text.text.split('\n')[0]}, ${formatClock(text.start)} to ${formatClock(text.end)}`,
+    describe: (text) => `Text, ${text.text.split('\n')[0] || 'empty'}, ${formatClock(text.start)} to ${formatClock(text.end)}`,
     barClass: () => 'is-pinned',
     // Opens the words for editing. Deleting on a double click was too easy to
     // do by accident and too quiet when it happened.
@@ -2280,6 +2338,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // addText sorts, so the new caption is found by what was not there before
     // rather than by where it ended up.
     selectedText = texts.find((text) => !before.has(text.id))?.id ?? selectedText;
+    announceAdded('Caption', previewTime);
     selected = null;
     renderSelected();
     renderTexts();
@@ -3078,6 +3137,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
               : 'Listening to the recording';
           listenNote.textContent = said;
           setStatus(`${said}.`, 'busy');
+          speaker.progress(
+            progress.stage === 'model' ? 'Fetching the model' : said,
+            progress.stage === 'model' ? progress.ratio : null,
+          );
         },
       );
 
@@ -3558,8 +3621,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       trimEnd: () => $<HTMLButtonElement>('ll-trim-end').click(),
       // Switch to the track first, or the block lands somewhere the person
       // cannot see and reads as nothing having happened.
-      addZoom: () => { showTrack('zoom'); $<HTMLButtonElement>('ll-zoom-add').click(); },
-      addText: () => { showTrack('text'); $<HTMLButtonElement>('ll-text-add').click(); },
+      // Adding from the keyboard puts the keyboard on what was added, so the
+      // arrow keys go straight to placing it.
+      addZoom: () => {
+        showTrack('zoom');
+        $<HTMLButtonElement>('ll-zoom-add').click();
+        if (selected) zoomBlocks.focus(selected);
+      },
+      addText: () => {
+        showTrack('text');
+        $<HTMLButtonElement>('ll-text-add').click();
+        if (selectedText) textTrack.focus(selectedText);
+      },
       cancel: () => { if (cropping) cropButton.click(); else if (focusTarget) stopAiming(); },
       remove: () => removeSelected(),
       // Both are handled before the modifier guard, so they never reach here.
@@ -3578,6 +3651,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * one is ever live and the order below is a formality rather than a guess.
    */
   function removeSelected(): void {
+    // Deleting is the edit most worth hearing: it is the one where nothing
+    // arrives to look at, only something leaving.
+    const kind = selectedText ? 'Caption'
+      : selectedRedaction ? 'Cover up'
+        : selectedShape ? 'Shape'
+          : selectedSpeed ? 'Speed change'
+            : selected ? 'Zoom' : null;
+    if (kind) speaker.say(`${kind} removed.`);
+
     if (selectedText) {
       texts = removeText(texts, selectedText);
       selectedText = null;
@@ -3841,11 +3923,177 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     toast('The untouched recording was saved.', { kind: 'good' });
   });
 
+  // ------------------------------------------------------------------ projects out and in
+
+  /**
+   * The project as the database would hold it, whether or not it is in there.
+   *
+   * A recording opened from a file has never been saved, and its edits are
+   * exactly as worth carrying off this machine as a recorded one's.
+   */
+  function forExport(): StoredProject | null {
+    if (!recording) return null;
+    const now = new Date().toISOString();
+    return {
+      id: stored?.id ?? 'unsaved',
+      name: stored?.name ?? 'Recording',
+      bytes: stored?.bytes ?? new Uint8Array(),
+      mime: stored?.mime ?? recording.blob.type ?? 'video/webm',
+      cameraBytes: stored?.cameraBytes ?? null,
+      duration: recording.duration,
+      width: video?.videoWidth ?? recording.width,
+      height: video?.videoHeight ?? recording.height,
+      hasAudio: recording.hasAudio,
+      pointer: recording.pointer,
+      clicks: recording.clicks,
+      keys: recording.keys,
+      marks: recording.marks,
+      start: trim.start,
+      end: trim.end,
+      crop,
+      wallpaper: stored?.wallpaper ?? null,
+      wallpaperMime: stored?.wallpaperMime ?? 'image/png',
+      zooms,
+      texts,
+      cuts,
+      speeds,
+      redactions,
+      captions,
+      shapes,
+      music: stored?.music ?? null,
+      musicName: stored?.musicName ?? '',
+      keyframes: trackFromBlocks(zooms, recording.duration, settings.zoom),
+      settings,
+      createdAt: stored?.createdAt ?? now,
+      updatedAt: now,
+    };
+  }
+
+  async function saveProjectFile(withVideo: boolean): Promise<void> {
+    const current = forExport();
+    if (!current) return;
+
+    // The bytes live in the database, and a recording opened from a file has
+    // never been in it. Reading them back from the blob is the only way to
+    // carry the video for that case.
+    const carrying = withVideo && current.bytes.byteLength === 0
+      ? { ...current, bytes: new Uint8Array(await recording!.blob.arrayBuffer()) }
+      : current;
+
+    if (withVideo && carrying.bytes.byteLength === 0) {
+      setStatus('There is nothing to carry: the recording could not be read.', 'bad');
+      return;
+    }
+
+    const text = writeSidecar(carrying, withVideo);
+    downloadFile(sidecarFilename(carrying.name, withVideo), text);
+    toast(
+      withVideo
+        ? `Saved everything, about ${formatBytes(sidecarSize(carrying, true))}.`
+        : 'Saved the edits. Open the video, then Open a project to put them back.',
+      { kind: 'good' },
+    );
+  }
+
+  $<HTMLButtonElement>('ll-save-edits')
+    .addEventListener('click', () => { void saveProjectFile(false); });
+  $<HTMLButtonElement>('ll-save-all')
+    .addEventListener('click', () => { void saveProjectFile(true); });
+
+  const projectFileInput = $<HTMLInputElement>('ll-project-file');
+  $<HTMLButtonElement>('ll-project-open').addEventListener('click', () => projectFileInput.click());
+
+  projectFileInput.addEventListener('change', () => {
+    const file = projectFileInput.files?.[0];
+    projectFileInput.value = '';
+    if (file) void openProjectFile(file);
+  });
+
+  async function openProjectFile(file: File): Promise<void> {
+    let envelope;
+    try {
+      envelope = readSidecar(await file.text());
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'That file could not be read.', 'bad');
+      return;
+    }
+
+    const sidecar = envelope.data;
+    const carried = (() => {
+      try { return sidecarVideo(sidecar); } catch { return null; }
+    })();
+
+    // A file with the recording in it stands on its own. One with only edits
+    // has to land on something, and landing on the wrong recording is worse
+    // than refusing, because nothing fails and everything is subtly wrong.
+    if (carried) {
+      const blob = new Blob([carried.bytes as unknown as BlobPart], { type: carried.mime });
+      stored = null;
+      await load({
+        blob,
+        duration: sidecar.source.duration,
+        width: sidecar.source.width,
+        height: sidecar.source.height,
+        pointer: [], clicks: [], keys: [], marks: [],
+        camera: null,
+        hasAudio: true,
+      });
+    } else if (!recording) {
+      setStatus('That file holds edits only. Open the video first, then open the project again.', 'bad');
+      return;
+    } else {
+      const wrong = sidecarMismatch(sidecar, {
+        duration: recording.duration,
+        width: video?.videoWidth ?? recording.width,
+        height: video?.videoHeight ?? recording.height,
+      });
+      if (wrong && !confirm(`${wrong}\n\nUse them anyway?`)) return;
+    }
+
+    const onto = forExport();
+    if (!onto) return;
+    const merged = applySidecar(onto, sidecar);
+
+    settings = merged.settings;
+    crop = merged.crop;
+    zooms = merged.zooms;
+    texts = merged.texts;
+    cuts = merged.cuts;
+    speeds = merged.speeds;
+    redactions = merged.redactions;
+    captions = merged.captions;
+    shapes = merged.shapes;
+    trim = { start: merged.start, end: merged.end };
+    selected = null; selectedText = null; selectedShape = null;
+    selectedRedaction = null; selectedSpeed = null;
+
+    renderControls();
+    renderTrim();
+    renderCrop();
+    renderZooms();
+    renderTexts();
+    renderSpeeds();
+    renderRedactions();
+    renderShapes();
+    renderCues();
+    renderPicker();
+    remember('import');
+    await drawPreview();
+    drawStrip();
+
+    const counts = envelope.counts ?? {};
+    const parts = Object.entries(counts)
+      .filter(([, count]) => count > 0)
+      .map(([name, count]) => `${count} ${name}`);
+    toast(parts.length ? `Opened: ${parts.join(', ')}.` : 'Opened the project.', { kind: 'good' });
+  }
+
   $<HTMLButtonElement>('ll-discard').addEventListener('click', () => {
     if (!confirm('Throw this recording away?')) return;
     release();
     recording = null;
     points = [];
+    filmstrip.clear();
     stageEl.hidden = true;
     editorEl.hidden = true;
     sourceNote.hidden = true;

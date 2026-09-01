@@ -178,6 +178,16 @@ export const GENERAL_HELP: { heading: string; points: string[] }[] = [
     ],
   },
   {
+    heading: 'The timeline, without a mouse',
+    points: [
+      'Tab moves onto the blocks in the open track, and reaching one selects it.',
+      'The arrow keys move the block you are on, and Shift makes every step ten times bigger.',
+      'Up and down make it longer or shorter, and holding Alt moves its start instead.',
+      'Enter opens it, which is what a double click does.',
+      'Delete removes it, and the keyboard stays on the track rather than going back to the top of the page.',
+    ],
+  },
+  {
     heading: 'Finishing',
     points: [
       'Where it is going sets the shape and the output size together.',

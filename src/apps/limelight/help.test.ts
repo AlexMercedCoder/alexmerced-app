@@ -114,9 +114,10 @@ describe('TRACK_HELP', () => {
 });
 
 describe('GENERAL_HELP', () => {
-  it('covers getting a recording in, the picture, words and finishing', () => {
+  it('covers getting a recording in, the picture, words, the keyboard and finishing', () => {
     expect(GENERAL_HELP.map((entry) => entry.heading)).toEqual([
-      'Getting a recording in', 'The picture', 'Words', 'Finishing',
+      'Getting a recording in', 'The picture', 'Words',
+      'The timeline, without a mouse', 'Finishing',
     ]);
   });
 
@@ -124,6 +125,14 @@ describe('GENERAL_HELP', () => {
     for (const entry of GENERAL_HELP) {
       expect(entry.points.length).toBeGreaterThan(1);
       for (const point of entry.points) expect(point.endsWith('.')).toBe(true);
+    }
+  });
+
+  it('spells out every key the timeline answers to', () => {
+    const points = GENERAL_HELP.find((entry) => entry.heading === 'The timeline, without a mouse')!
+      .points.join(' ');
+    for (const word of ['Tab', 'arrow keys', 'Shift', 'Alt', 'Enter', 'Delete']) {
+      expect(points).toContain(word);
     }
   });
 
