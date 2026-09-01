@@ -234,3 +234,59 @@ export async function analyseAudio(
     await context?.close().catch(() => {});
   }
 }
+
+export type Wave = { peaks: Peak[]; loudness: Float32Array; duration: number };
+
+/**
+ * One waveform for a reel made of several recordings.
+ *
+ * The sound track under the timeline is drawn from peaks and read for silences,
+ * and both have to describe the reel rather than whichever recording happens to
+ * be first. Each clip contributes the window of its own recording's analysis
+ * that it uses, resampled into the reel's columns.
+ *
+ * A clip whose recording has no sound contributes flat silence of the right
+ * width, for the same reason the encoder does: leaving it out would pull
+ * everything after it earlier and the waveform would stop describing the
+ * timeline it sits under.
+ */
+export function joinWaves(
+  clips: { wave: Wave | null; in: number; out: number }[], columns = 2000,
+): Wave | null {
+  const lengths = clips.map((clip) => Math.max(0, clip.out - clip.in));
+  const duration = lengths.reduce((sum, length) => sum + length, 0);
+  if (!(duration > 0) || columns <= 0) return null;
+  if (!clips.some((clip) => clip.wave)) return null;
+
+  const peaks: Peak[] = new Array(columns);
+  const loudness = new Float32Array(columns);
+
+  for (let column = 0; column < columns; column += 1) {
+    const at = ((column + 0.5) / columns) * duration;
+    let cursor = 0;
+    let picked: { wave: Wave | null; in: number; out: number } | null = null;
+    let within = 0;
+    for (const [index, clip] of clips.entries()) {
+      if (at < cursor + lengths[index] || index === clips.length - 1) {
+        picked = clip;
+        within = clip.in + Math.max(0, at - cursor);
+        break;
+      }
+      cursor += lengths[index];
+    }
+
+    const wave = picked?.wave ?? null;
+    if (!wave || !(wave.duration > 0) || wave.peaks.length === 0) {
+      peaks[column] = { min: 0, max: 0 };
+      continue;
+    }
+    const source = Math.min(
+      wave.peaks.length - 1,
+      Math.max(0, Math.floor((within / wave.duration) * wave.peaks.length)),
+    );
+    peaks[column] = wave.peaks[source];
+    loudness[column] = wave.loudness[Math.min(source, wave.loudness.length - 1)] ?? 0;
+  }
+
+  return { peaks, loudness, duration };
+}

@@ -20,6 +20,7 @@ import { reviveRedactions, type RedactBlock } from './redact';
 import { reviveCues, type Cue } from './captions';
 import { reviveShapes, type Shape } from './shapes';
 import { defaultMusic, defaultVoice, type MusicSettings, type VoiceSettings } from './sound';
+import { reviveClips, type Clip } from './reel';
 
 export type { ScratchSession } from './scratch';
 
@@ -176,6 +177,21 @@ export type Project = {
   /** A music bed, kept as the file that was chosen. */
   music: Uint8Array | null;
   musicName: string;
+  /**
+   * Further recordings on the timeline, beyond the first.
+   *
+   * A retake or an added clip brings its own file, and losing it on a reload
+   * would leave the reel pointing at a recording that is not there. Empty for
+   * every project that is one take, which is most of them.
+   */
+  takes?: { id: string; bytes: Uint8Array; mime: string }[];
+  /**
+   * The reel: which recording each stretch of the timeline comes from.
+   *
+   * Empty means the plain single recording case, and is what every project
+   * written before clips existed reads back as.
+   */
+  clips?: Clip[];
   /** The derived camera move, kept so a reopened project renders identically. */
   keyframes: ZoomKeyframe[] | null;
   settings: Settings;
@@ -315,6 +331,21 @@ export function reviveProject(value: unknown): Project | null {
     musicName: typeof project.musicName === 'string' ? project.musicName : '',
     keys: Array.isArray(project.keys) ? (project.keys as KeySample[]) : [],
     marks: Array.isArray(project.marks) ? (project.marks as MarkSample[]) : [],
+    takes: Array.isArray(project.takes)
+      ? project.takes.flatMap((take) => {
+        const raw = take as { id?: unknown; bytes?: unknown; mime?: unknown };
+        const bytes = asBytes(raw.bytes);
+        // A take whose bytes did not survive is dropped rather than kept as a
+        // name the reel would point at and find nothing behind.
+        if (typeof raw.id !== 'string' || !bytes || bytes.length === 0) return [];
+        return [{
+          id: raw.id,
+          bytes,
+          mime: typeof raw.mime === 'string' && raw.mime ? raw.mime : 'video/webm',
+        }];
+      })
+      : [],
+    clips: reviveClips(project.clips, () => createId('clip')),
     keyframes: Array.isArray(project.keyframes) ? (project.keyframes as ZoomKeyframe[]) : null,
     settings: reviveSettings(project.settings),
     createdAt: typeof project.createdAt === 'string' ? project.createdAt : stamp,

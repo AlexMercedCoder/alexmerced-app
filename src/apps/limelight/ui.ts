@@ -33,7 +33,8 @@ import {
 } from './text';
 import { defaultZoom, viewRect, zoomAt, type ZoomSettings } from './zoom';
 import {
-  analyseAudio, findSilences, keptDuration, mergeSpans, type Peak, type Span,
+  analyseAudio, findSilences, joinWaves, keptDuration, mergeSpans,
+  type Peak, type Span, type Wave,
 } from './waveform';
 import {
   addSpeed, clampSpeed, editedAt, editedDuration, removeSpeed, segmentsOf, sortSpeeds,
@@ -58,6 +59,11 @@ import {
   applySidecar, readSidecar, sidecarFilename, sidecarMismatch, sidecarSize, sidecarVideo,
   writeSidecar,
 } from './sidecar';
+import { describeTidy, planTidy, tidyChangesAnything } from './tidy';
+import {
+  joins, layout, reelDuration, shiftAfter, singleClip, sourceOf, splice,
+  type Clip, type Placed,
+} from './reel';
 import {
   GENERAL_HELP, SHORTCUT_GROUPS, SHORTCUTS, shortcutFor, TRACK_HELP, trackHelp,
   type ShortcutId, type TrackName,
@@ -103,6 +109,30 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let recording: Recording | null = null;
   let video: HTMLVideoElement | null = null;
   let cameraVideo: HTMLVideoElement | null = null;
+  /**
+   * The reel, and an element for each recording on it.
+   *
+   * One clip is the ordinary case and everything behaves as it always did. More
+   * than one and the seconds every other part of the editor works in belong to
+   * the reel rather than to any one recording, so only the two places that
+   * actually touch pixels or samples look inside.
+   */
+  let clips: Clip[] = [];
+  /**
+   * Where the take now being recorded is going.
+   *
+   * Null means it replaces everything, which is what Record has always done.
+   * A span means it is a retake and lands in place of that stretch, which is
+   * decided before recording starts because that is when the person said so.
+   */
+  let recordingInto: { start: number; end: number } | null = null;
+  const takes = new Map<string, {
+    blob: Blob; video: HTMLVideoElement; duration: number; hasAudio: boolean;
+    /** Kept alongside so saving is synchronous, like every other edit. */
+    bytes: Uint8Array | null;
+  }>();
+  /** The id the first recording always has, so lookups need no special case. */
+  const FIRST_TAKE = 'take-1';
   let urls: string[] = [];
   let points: Interest[] = [];
   let interestSource: 'pointer' | 'motion' | 'none' = 'none';
@@ -209,6 +239,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       // Derived from the blocks, and stored alongside them so a reopened
       // project renders exactly as it did.
       stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
+      // The reel, and the recordings it names. A project of one take writes
+      // neither, so nothing changes for the ordinary case or for a file written
+      // before clips existed.
+      const reel = clips.length > 1;
+      stored.clips = reel ? clips : [];
+      stored.takes = reel
+        ? [...takes].flatMap(([id, take]) => (id === FIRST_TAKE || !take.bytes?.byteLength
+          ? []
+          : [{ id, bytes: take.bytes, mime: take.blob.type || 'video/webm' }]))
+        : [];
       queueSave();
     }
   };
@@ -316,9 +356,44 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ project
 
+  /** The reel, laid out. Empty for the ordinary one recording case. */
+  function placedClips(): Placed[] {
+    return clips.length > 1 ? layout(clips) : [];
+  }
+
+  /**
+   * Which recording a moment on the reel belongs to, and the element for it.
+   *
+   * With one recording this is the identity: the same element, the same time.
+   * That is what keeps the single case exactly as fast and exactly as tested as
+   * it was.
+   */
+  function spotAt(time: number): { element: HTMLVideoElement; at: number; clip: Placed | null } {
+    const placed = placedClips();
+    if (placed.length === 0 || !video) {
+      return { element: video!, at: time, clip: null };
+    }
+    const found = sourceOf(placed, time);
+    const clip = placed.find((entry) => entry.id === found?.clip) ?? null;
+    return {
+      element: (found ? takes.get(found.source)?.video : null) ?? video,
+      at: found?.time ?? time,
+      clip,
+    };
+  }
+
+  /** The takes as the renderer wants them: a blob and an element per recording. */
+  function takesForRender(): Map<string, { blob: Blob; video: HTMLVideoElement }> {
+    const out = new Map<string, { blob: Blob; video: HTMLVideoElement }>();
+    for (const [id, take] of takes) out.set(id, { blob: take.blob, video: take.video });
+    return out;
+  }
+
   function project(): Project | null {
     if (!video || !recording) return null;
     return {
+      clips: clips.length > 1 ? clips : undefined,
+      takes: clips.length > 1 ? takesForRender() : undefined,
       video,
       camera: cameraVideo,
       source: recording.blob,
@@ -439,17 +514,24 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       recordButton.disabled = true;
       try {
         const result = await session.stop();
-        await load(result);
-        await keep({
-          ...result,
-          duration: recording?.duration ?? result.duration,
-          width: video?.videoWidth || result.width,
-          height: video?.videoHeight || result.height,
-        }, `Recording ${new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}`);
+        if (recordingInto) {
+          // A retake joins the recording that is already open rather than
+          // replacing it, so nothing about the existing edit is lost.
+          await spliceTake(result.blob, recordingInto);
+        } else {
+          await load(result);
+          await keep({
+            ...result,
+            duration: recording?.duration ?? result.duration,
+            width: video?.videoWidth || result.width,
+            height: video?.videoHeight || result.height,
+          }, `Recording ${new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}`);
+        }
       } catch (error) {
         setStatus(error instanceof Error ? error.message : 'The recording could not be finished.', 'bad');
       } finally {
         session = null;
+        recordingInto = null;
         recordButton.disabled = false;
         recordButton.textContent = 'Record';
         recordButton.classList.remove('is-recording');
@@ -603,6 +685,78 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       camera: project.cameraBytes ? new Blob([project.cameraBytes as unknown as BlobPart], { type: project.mime }) : null,
       hasAudio: project.hasAudio,
     }, { start: project.start, end: project.end });
+
+    // The reel is restored after the recording, because `load` resets it to the
+    // single clip it always starts as.
+    await restoreReel(project.takes ?? [], project.clips ?? [], {
+      start: project.start, end: project.end,
+    });
+  }
+
+  /**
+   * Puts a saved reel back together.
+   *
+   * Every extra recording has to be readable again before the clips that name
+   * it mean anything, so a take that will not load takes its clips with it
+   * rather than leaving the reel pointing at a hole.
+   */
+  async function restoreReel(
+    saved: { id: string; bytes: Uint8Array; mime: string }[],
+    savedClips: Clip[],
+    range: { start: number; end: number },
+  ): Promise<void> {
+    if (savedClips.length <= 1 || saved.length === 0 || !recording) return;
+
+    const found = new Set<string>([FIRST_TAKE]);
+    for (const take of saved) {
+      const blob = new Blob([take.bytes as unknown as BlobPart], { type: take.mime });
+      const element = document.createElement('video');
+      element.muted = true;
+      element.playsInline = true;
+      const url = URL.createObjectURL(blob);
+      urls.push(url);
+      element.src = url;
+      try {
+        await once(element, 'loadedmetadata');
+      } catch {
+        continue;
+      }
+      if (!Number.isFinite(element.duration) || element.duration === 0) {
+        await seekSafely(element, 1e6);
+        await seekSafely(element, 0);
+      }
+      const duration = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : 0;
+      if (duration <= 0) continue;
+      takes.set(take.id, {
+        blob, video: element, duration, hasAudio: true, bytes: take.bytes,
+      });
+      found.add(take.id);
+    }
+
+    const usable = savedClips.filter((clip) => found.has(clip.source));
+    if (usable.length <= 1) return;
+
+    clips = usable;
+    recording.duration = reelDuration(clips);
+    recording.hasAudio = [...takes.values()].some((take) => take.hasAudio);
+    trim = {
+      start: Math.max(0, Math.min(range.start, recording.duration)),
+      end: range.end > range.start ? Math.min(range.end, recording.duration) : recording.duration,
+    };
+    scrubber.max = String(Math.max(0.1, recording.duration));
+    $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
+
+    renderTrim();
+    renderZooms();
+    renderTexts();
+    renderSpeeds();
+    renderRedactions();
+    renderShapes();
+    renderCues();
+    renderPicker();
+    await rebuildWave();
+    await drawPreview();
+    drawStrip();
   }
 
   async function load(result: Recording, range?: { start: number; end: number }): Promise<void> {
@@ -623,6 +777,21 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       await seekSafely(video, 0);
     }
     recording.duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : result.duration;
+
+    // Every project is a reel of one until something is added to it. Holding it
+    // that way from the start means the reel code is exercised by the ordinary
+    // case rather than only by the rare one.
+    takes.clear();
+    takes.set(FIRST_TAKE, {
+      blob: result.blob,
+      video,
+      duration: recording.duration,
+      hasAudio: result.hasAudio,
+      // The first recording's bytes are already in the project record, so they
+      // are not held twice.
+      bytes: null,
+    });
+    clips = [singleClip(FIRST_TAKE, recording.duration)];
 
     if (result.camera) {
       cameraVideo = document.createElement('video');
@@ -807,7 +976,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     window.clearTimeout(stripTimer);
     stripTimer = window.setTimeout(() => {
       if (!recording || !video) { filmstrip.clear(); return; }
-      void filmstrip.draw(recording.blob, recording.duration, video);
+      // One piece per clip, which for the ordinary single recording is a list
+      // of one covering the whole thing.
+      const pieces = clips.length > 0
+        ? clips.flatMap((clip) => {
+          const take = takes.get(clip.source);
+          return take ? [{ blob: take.blob, video: take.video, in: clip.in, out: clip.out }] : [];
+        })
+        : [{ blob: recording.blob, video, in: 0, out: recording.duration }];
+      void filmstrip.draw(pieces);
     }, delay);
   }
 
@@ -818,6 +995,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const duration = Math.max(0.001, recording.duration);
     trimRange.style.left = `${(trim.start / duration) * 100}%`;
     trimRange.style.width = `${((trim.end - trim.start) / duration) * 100}%`;
+
+    // The joins. Without a mark there, a reel looks like one take that changes
+    // shot for no reason, and a retake looks like a glitch.
+    const joinsEl = $<HTMLDivElement>('ll-joins');
+    joinsEl.innerHTML = '';
+    for (const at of joins(placedClips())) {
+      const mark = document.createElement('span');
+      mark.style.left = `${(at / duration) * 100}%`;
+      joinsEl.append(mark);
+    }
     $<HTMLSpanElement>('ll-trim-label').textContent =
       `${formatClock(trim.start)} to ${formatClock(trim.end)}, ${formatClock(trim.end - trim.start)} long`;
   }
@@ -876,6 +1063,287 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderTrim();
     remember();
   });
+
+  /**
+   * The whole first pass, as one press and one undo.
+   *
+   * Cuts and zooms are two separate edits everywhere else in the editor, and
+   * doing them as two here would mean two presses of Ctrl+Z to get back to
+   * where you were. So the state is set in one go and `remember` is called
+   * once, which is the only thing that decides what an undo step is.
+   */
+  // ------------------------------------------------------------------ the reel
+
+  /**
+   * Takes a recording onto the reel and gives back what the clip needs.
+   *
+   * The element is made here and kept for as long as the take is: playback
+   * hands over to it, the preview seeks it, and the filmstrip draws from it.
+   */
+  async function addTake(blob: Blob): Promise<{
+    id: string; duration: number; hasAudio: boolean; width: number; height: number;
+  } | null> {
+    const id = createId('take');
+    const element = document.createElement('video');
+    element.muted = true;
+    element.playsInline = true;
+    const url = URL.createObjectURL(blob);
+    urls.push(url);
+    element.src = url;
+
+    try {
+      await once(element, 'loadedmetadata');
+    } catch {
+      return null;
+    }
+    // A MediaRecorder file often reports no duration until it is seeked once.
+    if (!Number.isFinite(element.duration) || element.duration === 0) {
+      await seekSafely(element, 1e6);
+      await seekSafely(element, 0);
+    }
+    const duration = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : 0;
+    if (duration <= 0) return null;
+
+    // Nothing reads a track list off a file reliably, so this is the practical
+    // test: if the sound decodes, there is sound.
+    const analysed = await analyseAudio(blob).catch(() => null);
+    const bytes = new Uint8Array(await blob.arrayBuffer().catch(() => new ArrayBuffer(0)));
+    takes.set(id, { blob, video: element, duration, hasAudio: !!analysed, bytes });
+    takeWaves.set(id, analysed);
+    return {
+      id, duration, hasAudio: !!analysed,
+      width: element.videoWidth, height: element.videoHeight,
+    };
+  }
+
+  /** Every take analysed once, so the reel waveform can be rebuilt cheaply. */
+  const takeWaves = new Map<string, Wave | null>();
+
+  /** The sound track under the timeline, built across whatever is on the reel. */
+  async function rebuildWave(): Promise<void> {
+    if (!recording) return;
+    if (clips.length <= 1) { await loadWaveform(); return; }
+
+    for (const [id, take] of takes) {
+      if (!takeWaves.has(id)) takeWaves.set(id, await analyseAudio(take.blob).catch(() => null));
+    }
+    wave = joinWaves(clips.map((clip) => ({
+      wave: takeWaves.get(clip.source) ?? null,
+      in: clip.in,
+      out: clip.out,
+    })));
+    selection = null;
+    $<HTMLDivElement>('ll-cutrow').hidden = !wave;
+    renderPicker();
+    drawWave();
+    renderCuts();
+  }
+
+  /**
+   * Everything on the timeline moves with a splice.
+   *
+   * Zooms, captions, subtitles, cover ups, shapes, speed regions and cuts are
+   * all written against the same line of seconds, so a retake that is longer or
+   * shorter than what it replaced moves every one of them. Missing any single
+   * list would leave that kind of block behind while the rest moved, which
+   * looks exactly like the app having lost track of your edits.
+   */
+  function shiftEverything(from: number, by: number): void {
+    if (by === 0) return;
+    zooms = shiftAfter(zooms, from, by);
+    texts = shiftAfter(texts, from, by);
+    speeds = shiftAfter(speeds, from, by);
+    redactions = shiftAfter(redactions, from, by);
+    shapes = shiftAfter(shapes, from, by);
+    captions = shiftAfter(captions, from, by);
+    cuts = shiftAfter(cuts, from, by);
+  }
+
+  /** Applies a new reel: length, trim, tracks and the picture. */
+  async function adoptReel(next: Clip[], said: string): Promise<void> {
+    if (!recording) return;
+    const wasWhole = Math.abs(trim.end - recording.duration) < 0.05 && trim.start < 0.05;
+    clips = next;
+    recording.duration = reelDuration(clips);
+    recording.hasAudio = [...takes.values()].some((take) => take.hasAudio);
+
+    // A trim nobody had touched follows the reel. One that was set by hand is
+    // clamped instead, because moving it would throw away a deliberate choice.
+    trim = wasWhole
+      ? { start: 0, end: recording.duration }
+      : {
+        start: Math.min(trim.start, Math.max(0, recording.duration - 0.1)),
+        end: Math.min(trim.end, recording.duration),
+      };
+
+    scrubber.max = String(Math.max(0.1, recording.duration));
+    $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
+    previewTime = Math.min(previewTime, trim.end);
+
+    remember('reel');
+    renderTrim();
+    renderZooms();
+    renderTexts();
+    renderSpeeds();
+    renderRedactions();
+    renderShapes();
+    renderCues();
+    renderPicker();
+    renderTransport();
+    syncScrub();
+    await rebuildWave();
+    await drawPreview();
+    drawStrip();
+    setStatus(said, 'good');
+    toast(said, { kind: 'good', actionLabel: 'Undo', onAction: () => { void undoEdit(); } });
+  }
+
+  /** Puts a recording on the end of the reel. */
+  async function appendClip(blob: Blob): Promise<void> {
+    if (!recording) return;
+    const take = await addTake(blob);
+    if (!take) {
+      setStatus('That file could not be read as a video.', 'bad');
+      return;
+    }
+    warnIfDifferentShape(take);
+    await adoptReel(
+      [...clips, { id: createId('clip'), source: take.id, in: 0, out: take.duration }],
+      `Added ${formatClock(take.duration)} to the end.`,
+    );
+  }
+
+  /**
+   * Puts a recording in place of a stretch of the reel.
+   *
+   * The stretch is whatever is selected on the sound track, and failing that
+   * the moment the playhead is on, which inserts rather than replaces.
+   */
+  async function spliceTake(blob: Blob, span: { start: number; end: number }): Promise<void> {
+    if (!recording) return;
+    const take = await addTake(blob);
+    if (!take) {
+      setStatus('That recording could not be read.', 'bad');
+      return;
+    }
+    warnIfDifferentShape(take);
+
+    const out = splice(
+      clips, span,
+      { id: createId('clip'), source: take.id, in: 0, out: take.duration },
+      () => createId('clip'),
+    );
+    shiftEverything(out.at, out.shift);
+    const replaced = Math.abs(span.end - span.start);
+    await adoptReel(out.clips, replaced > 0.05
+      ? `Replaced ${formatClock(replaced)} with ${formatClock(take.duration)}.`
+      : `Dropped ${formatClock(take.duration)} in at ${formatClock(out.at)}.`);
+  }
+
+  /**
+   * A take of a different shape is not refused, only pointed out.
+   *
+   * The composition draws every recording into the same frame, so a take with
+   * different proportions is stretched to fit. That is occasionally what
+   * somebody wants and usually a mistake, and the only way to tell is to ask.
+   */
+  function warnIfDifferentShape(take: { width: number; height: number }): void {
+    const first = takes.get(FIRST_TAKE);
+    if (!first || take.width <= 0 || first.video.videoWidth <= 0) return;
+    if (take.width === first.video.videoWidth && take.height === first.video.videoHeight) return;
+    toast(
+      `That take is ${take.width} by ${take.height} and the rest are `
+      + `${first.video.videoWidth} by ${first.video.videoHeight}, so it will be stretched to fit.`,
+    );
+  }
+
+  /**
+   * Records a replacement for a stretch of the reel.
+   *
+   * The stretch is whatever is selected on the sound track. With nothing
+   * selected the playhead is used, which is a stretch of no length, so the new
+   * take is dropped in rather than replacing anything. That is the more
+   * forgiving reading of an ambiguous press: adding is undoable in the obvious
+   * way and losing a passage you did not mean to lose is not.
+   */
+  $<HTMLButtonElement>('ll-retake').addEventListener('click', () => {
+    if (!recording || session?.running) return;
+    const span = selection
+      ? { start: Math.min(selection.start, selection.end), end: Math.max(selection.start, selection.end) }
+      : { start: previewTime, end: previewTime };
+    recordingInto = span;
+    pause();
+    toast(span.end - span.start > 0.05
+      ? `Recording over ${formatClock(span.end - span.start)}. Press Stop when you are done.`
+      : `Recording in at ${formatClock(span.start)}. Press Stop when you are done.`);
+    recordButton.click();
+  });
+
+  const clipFileInput = $<HTMLInputElement>('ll-clip-file');
+  $<HTMLButtonElement>('ll-add-clip').addEventListener('click', () => clipFileInput.click());
+  clipFileInput.addEventListener('change', () => {
+    const file = clipFileInput.files?.[0];
+    clipFileInput.value = '';
+    if (file) void appendClip(file);
+  });
+
+  async function tidyUp(): Promise<void> {
+    if (!recording) return;
+    const button = $<HTMLButtonElement>('ll-tidy');
+    button.disabled = true;
+    try {
+      // The attention pass may never have run: a reopened project skips it,
+      // and so does one that already had zooms.
+      if (points.length === 0) {
+        const current = project();
+        if (current) {
+          controller = new AbortController();
+          barEl.hidden = false;
+          try {
+            const found = await findInterest(current, onProgress, controller.signal);
+            points = found.points;
+            interestSource = found.source;
+          } catch { /* a failed search is a reason to do less, not to fail */ } finally {
+            controller = null;
+            barEl.hidden = true;
+          }
+        }
+      }
+
+      const plan = planTidy({
+        silences: wave ? findSilences(wave.loudness, recording.duration) : [],
+        cuts,
+        trim,
+        zooms,
+        suggested: blocksFromInterest(points, recording.duration, settings.zoom),
+      });
+
+      if (!tidyChangesAnything(plan)) {
+        setStatus(describeTidy(plan, formatClock), 'good');
+        return;
+      }
+
+      cuts = plan.cuts;
+      zooms = plan.zooms;
+      selection = null;
+      remember('tidy');
+
+      renderCuts();
+      renderTrim();
+      renderZooms();
+      renderPicker();
+      if (previewTime > trim.end) { previewTime = trim.end; syncScrub(); }
+      await drawPreview();
+
+      const said = describeTidy(plan, formatClock);
+      setStatus(said, 'good');
+      toast(said, { kind: 'good', actionLabel: 'Undo', onAction: () => { void undoEdit(); } });
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  $<HTMLButtonElement>('ll-tidy').addEventListener('click', () => { void tidyUp(); });
 
   $<HTMLButtonElement>('ll-trim-reset').addEventListener('click', () => {
     if (!recording) return;
@@ -2413,7 +2881,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (cropping) { drawCropEditor(context); return; }
     if (focusTarget) { drawAimEditor(context); return; }
 
-    drawFrame(context, current, time, zoomAt(zoomTrack(), time), cursorAt(current, time));
+    // The element goes with the moment. Everything else about the frame, the
+    // zoom, the cursor, the overlays, is addressed in reel seconds and does not
+    // care which recording it came off.
+    const drawn = { ...current, video: spotAt(time).element };
+    drawFrame(context, drawn, time, zoomAt(zoomTrack(), time), cursorAt(current, time));
     if (selectedRedaction) drawRedactOutline(context, time);
   }
 
@@ -2437,7 +2909,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     try {
       let target = previewTime;
       for (;;) {
-        await seekSafely(video, Math.min(current.duration - 1e-3, target));
+        // On a reel this is the recording the playhead is over, at that
+        // recording's own time, rather than the first one at the reel's time.
+        const spot = spotAt(target);
+        const limit = Number.isFinite(spot.element.duration) && spot.element.duration > 0
+          ? spot.element.duration
+          : current.duration;
+        await seekSafely(spot.element, Math.max(0, Math.min(limit - 1e-3, spot.at)));
         if (cameraVideo) {
           await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), target)).catch(() => {});
         }
@@ -3699,10 +4177,35 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * the decoder's timing; browsers without it fall back to animation frames,
    * which is close enough because the element is still the clock.
    */
+  /**
+   * The element currently driving playback, and the clip it is playing.
+   *
+   * On a reel of one this is always the recording's own element and the clip is
+   * null, which is the path everything took before clips existed. On a longer
+   * reel the element changes at every join, and the clock has to be read
+   * through the clip: an element three seconds into its own recording may be
+   * twenty seconds into the finished video.
+   */
+  let stage: HTMLVideoElement | null = null;
+  let stageClip: Placed | null = null;
+
+  function driver(): HTMLVideoElement | null {
+    return stage ?? video;
+  }
+
+  /** Element time to reel time. The identity when there is one recording. */
+  function reelTime(): number {
+    const element = driver();
+    if (!element) return previewTime;
+    if (!stageClip) return element.currentTime;
+    return stageClip.at + Math.max(0, element.currentTime - stageClip.in);
+  }
+
   function stopFrames(): void {
-    if (frameHandle && video) {
-      const cancel = (video as VideoWithFrameCallback).cancelVideoFrameCallback;
-      if (typeof cancel === 'function') cancel.call(video, frameHandle);
+    const element = driver();
+    if (frameHandle && element) {
+      const cancel = (element as VideoWithFrameCallback).cancelVideoFrameCallback;
+      if (typeof cancel === 'function') cancel.call(element, frameHandle);
     }
     if (rafHandle) cancelAnimationFrame(rafHandle);
     frameHandle = 0;
@@ -3710,15 +4213,55 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   function queueFrame(): void {
-    if (!video || !playing) return;
-    const request = (video as VideoWithFrameCallback).requestVideoFrameCallback;
-    if (typeof request === 'function') frameHandle = request.call(video, () => step());
+    const element = driver();
+    if (!element || !playing) return;
+    const request = (element as VideoWithFrameCallback).requestVideoFrameCallback;
+    if (typeof request === 'function') frameHandle = request.call(element, () => step());
     else rafHandle = requestAnimationFrame(() => step());
   }
 
+  /**
+   * Hands playback from one clip to the next.
+   *
+   * Two elements are never playing at once: the one that has finished is
+   * stopped before the next is started, or a join would play both recordings
+   * over each other for as long as the handover took.
+   */
+  async function handOver(to: Placed): Promise<void> {
+    const leaving = driver();
+    if (leaving) { leaving.pause(); leaving.muted = true; }
+    stopFrames();
+
+    const arriving = takes.get(to.source)?.video ?? video;
+    if (!arriving) { pause(); return; }
+    stage = arriving;
+    stageClip = to;
+
+    await seekSafely(arriving, to.in).catch(() => {});
+    arriving.muted = muted || !(takes.get(to.source)?.hasAudio ?? true);
+    arriving.volume = Number(volInput.value);
+    try {
+      await arriving.play();
+    } catch {
+      pause();
+      return;
+    }
+    queueFrame();
+  }
+
   function step(): void {
-    if (!playing || !video || !recording) return;
-    const time = video.currentTime;
+    const element = driver();
+    if (!playing || !element || !recording) return;
+
+    // A clip that has played to its own end hands over rather than running on
+    // into whatever else happens to be in that recording after the window.
+    if (stageClip && element.currentTime >= stageClip.out - 1e-3) {
+      const placed = placedClips();
+      const next = placed[placed.findIndex((entry) => entry.id === stageClip!.id) + 1];
+      if (next) { void handOver(next); return; }
+    }
+
+    const time = reelTime();
 
     if (time >= trim.end - 1e-3) {
       if (looping) { void restart(); return; }
@@ -3741,7 +4284,17 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         paint(previewTime);
         return;
       }
-      video.currentTime = inCut.end;
+      // The cut is in reel seconds. On a reel the far side of it may be in a
+      // different recording, in which case the handover does the seeking.
+      const landing = spotAt(inCut.end);
+      if (stageClip && landing.clip && landing.clip.id !== stageClip.id) {
+        void handOver(landing.clip).then(() => {
+          const arriving = driver();
+          if (arriving) arriving.currentTime = landing.at;
+        });
+        return;
+      }
+      element.currentTime = landing.at;
       if (cameraVideo) cameraVideo.currentTime = inCut.end;
       queueFrame();
       return;
@@ -3755,7 +4308,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   async function restart(): Promise<void> {
     if (!video) return;
-    await seekSafely(video, trim.start);
+    const spot = spotAt(trim.start);
+    if (spot.clip && spot.clip.id !== stageClip?.id) {
+      previewTime = trim.start;
+      await handOver(spot.clip);
+      const arriving = driver();
+      if (arriving) arriving.currentTime = spot.at;
+      syncScrub();
+      return;
+    }
+    await seekSafely(spot.element, spot.at);
     if (cameraVideo) await seekSafely(cameraVideo, trim.start).catch(() => {});
     previewTime = trim.start;
     syncScrub();
@@ -3766,20 +4328,32 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!video || !recording || playing || cropping) return;
     if (previewTime >= trim.end - 1e-3 || previewTime < trim.start) previewTime = trim.start;
 
-    await seekSafely(video, Math.min(recording.duration - 1e-3, previewTime));
+    // Playback begins on whichever recording the playhead is over, which on a
+    // reel of one is the only one there is.
+    const spot = spotAt(previewTime);
+    stage = spot.element;
+    stageClip = spot.clip;
+
+    const limit = Number.isFinite(spot.element.duration) && spot.element.duration > 0
+      ? spot.element.duration
+      : recording.duration;
+    await seekSafely(spot.element, Math.max(0, Math.min(limit - 1e-3, spot.at)));
     if (cameraVideo) {
       await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), previewTime)).catch(() => {});
     }
 
     // Muted for scrubbing, unmuted to play. Without this you cannot hear your
     // own narration while editing, which is most of what there is to check.
-    video.muted = muted || !recording.hasAudio;
-    video.volume = Number(volInput.value);
+    const hasSound = spot.clip
+      ? takes.get(spot.clip.source)?.hasAudio ?? recording.hasAudio
+      : recording.hasAudio;
+    spot.element.muted = muted || !hasSound;
+    spot.element.volume = Number(volInput.value);
 
     playing = true;
     renderTransport();
     try {
-      await video.play();
+      await spot.element.play();
       if (cameraVideo) await cameraVideo.play().catch(() => {});
     } catch {
       playing = false;
@@ -3794,6 +4368,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!playing) return;
     playing = false;
     stopFrames();
+    // Every element, not only the one driving: a handover leaves the previous
+    // one paused, and muting all of them keeps scrubbing silent.
+    for (const take of takes.values()) { take.video.pause(); take.video.muted = true; }
     video?.pause();
     cameraVideo?.pause();
     if (video) video.muted = true;

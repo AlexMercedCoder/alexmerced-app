@@ -47,9 +47,23 @@ export function planStrip(
   return { times, slot, height };
 }
 
+/**
+ * One piece of the strip: a window onto one recording.
+ *
+ * A reel of one is a list of one, which is how the ordinary case stays the
+ * ordinary case.
+ */
+export type StripPiece = {
+  blob: Blob;
+  video: HTMLVideoElement;
+  /** The window of that recording this piece uses, in its own seconds. */
+  in: number;
+  out: number;
+};
+
 export type StripHandle = {
-  /** Draws the strip for a recording. Safe to call again; the last call wins. */
-  draw: (blob: Blob, duration: number, video: HTMLVideoElement) => Promise<void>;
+  /** Draws the strip. Safe to call again; the last call wins. */
+  draw: (pieces: StripPiece[]) => Promise<void>;
   /** Empties it, for when the recording goes away. */
   clear: () => void;
 };
@@ -84,7 +98,7 @@ export function mountFilmstrip(canvas: HTMLCanvasElement): StripHandle {
     context?.clearRect(0, 0, canvas.width, canvas.height);
   }
 
-  async function draw(blob: Blob, duration: number, video: HTMLVideoElement): Promise<void> {
+  async function draw(pieces: StripPiece[]): Promise<void> {
     token += 1;
     const mine = token;
     const context = canvas.getContext('2d');
@@ -97,25 +111,52 @@ export function mountFilmstrip(canvas: HTMLCanvasElement): StripHandle {
     canvas.height = height;
     context.clearRect(0, 0, width, height);
 
-    const aspect = video.videoWidth > 0 && video.videoHeight > 0
-      ? video.videoWidth / video.videoHeight
+    const lengths = pieces.map((piece) => Math.max(0, piece.out - piece.in));
+    const duration = lengths.reduce((sum, length) => sum + length, 0);
+    const first = pieces[0];
+    if (!first) return;
+
+    const aspect = first.video.videoWidth > 0 && first.video.videoHeight > 0
+      ? first.video.videoWidth / first.video.videoHeight
       : 16 / 9;
     const plan = planStrip(width, height, duration, aspect);
     if (plan.times.length === 0) return;
 
-    const source = await openFrameSource(blob).catch(() => null);
-    // The element is the fallback, and it is also what the preview is playing
-    // from, so its position has to be handed back afterwards.
-    const before = video.currentTime;
+    /** Which piece a moment on the strip belongs to, and where inside it. */
+    const locate = (time: number): { piece: StripPiece; at: number } => {
+      let cursor = 0;
+      for (const [index, piece] of pieces.entries()) {
+        if (time < cursor + lengths[index] || index === pieces.length - 1) {
+          return { piece, at: piece.in + Math.max(0, Math.min(time - cursor, lengths[index])) };
+        }
+        cursor += lengths[index];
+      }
+      return { piece: first, at: first.in };
+    };
+
+    // One decoder per recording, opened as it is first wanted and kept until
+    // the strip is finished. Reopening per thumbnail would walk the file again
+    // for every one of them.
+    const sources = new Map<Blob, Awaited<ReturnType<typeof openFrameSource>>>();
+    // Elements are the fallback, and they are also what the preview plays from,
+    // so their positions are handed back afterwards.
+    const before = new Map(pieces.map((piece) => [piece.video, piece.video.currentTime]));
 
     try {
       for (const [index, time] of plan.times.entries()) {
         if (mine !== token) return;
         const x = index * plan.slot;
+        const { piece, at } = locate(time);
+
+        if (!sources.has(piece.blob)) {
+          sources.set(piece.blob, await openFrameSource(piece.blob).catch(() => null));
+          if (mine !== token) return;
+        }
+        const source = sources.get(piece.blob) ?? null;
 
         let drawn = false;
         if (source) {
-          const frame = await source.frameAt(time);
+          const frame = await source.frameAt(at);
           if (mine !== token) return;
           if (frame) {
             // Cover rather than fit: a letterboxed thumbnail wastes the little
@@ -129,20 +170,22 @@ export function mountFilmstrip(canvas: HTMLCanvasElement): StripHandle {
         }
 
         if (!drawn) {
-          await seekFrame(video, time);
+          await seekFrame(piece.video, at);
           if (mine !== token) return;
-          if (video.videoWidth > 0) {
-            const scale = Math.max(plan.slot / video.videoWidth, plan.height / video.videoHeight);
-            const w = video.videoWidth * scale;
-            const h = video.videoHeight * scale;
-            context.drawImage(video, x + (plan.slot - w) / 2, (plan.height - h) / 2, w, h);
+          if (piece.video.videoWidth > 0) {
+            const scale = Math.max(
+              plan.slot / piece.video.videoWidth, plan.height / piece.video.videoHeight,
+            );
+            const w = piece.video.videoWidth * scale;
+            const h = piece.video.videoHeight * scale;
+            context.drawImage(piece.video, x + (plan.slot - w) / 2, (plan.height - h) / 2, w, h);
           }
         }
       }
     } finally {
-      source?.close();
-      if (!source && Math.abs(video.currentTime - before) > 0.01) {
-        await seekFrame(video, before).catch(() => {});
+      for (const source of sources.values()) source?.close();
+      for (const [element, was] of before) {
+        if (Math.abs(element.currentTime - was) > 0.01) await seekFrame(element, was).catch(() => {});
       }
     }
   }

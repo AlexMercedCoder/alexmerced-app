@@ -35,7 +35,16 @@ export type AudioTrackOptions = {
    * start-to-end window is used, which is what every caller did before cuts
    * existed.
    */
-  spans?: { start: number; end: number; speed?: number }[];
+  spans?: { start: number; end: number; speed?: number; source?: string }[];
+  /**
+   * Further recordings the spans may name, by id.
+   *
+   * A timeline can hold several takes, and the sound has to come from whichever
+   * one each piece belongs to. A span that names nothing, or names something
+   * not in here, falls back to the recording passed as the first argument,
+   * which is exactly what every caller did before clips existed.
+   */
+  sources?: Map<string, Blob | ArrayBuffer | Uint8Array>;
   /**
    * Applied to each channel after the spans are joined and before encoding.
    *
@@ -64,17 +73,31 @@ export async function encodeOpus(
   if (!canEncodeAudio()) return null;
 
   const buffer = await decodeAudio(source);
-  if (!buffer) return null;
 
-  const channels = Math.min(2, options.channels ?? buffer.numberOfChannels) as 1 | 2;
+  const extra = new Map<string, AudioBuffer>();
+  for (const [id, bytes] of options.sources ?? []) {
+    const decoded = await decodeAudio(bytes);
+    if (decoded) extra.set(id, decoded);
+  }
+
+  // A reel where the first take is silent and a later one is not still has
+  // sound. Only when nothing at all decoded is this a silent recording.
+  const any = buffer ?? extra.values().next().value ?? null;
+  if (!any) return null;
+
+  const channels = Math.min(2, options.channels ?? any.numberOfChannels) as 1 | 2;
   const start = Math.max(0, options.start ?? 0);
-  const end = Math.min(buffer.duration, options.end ?? buffer.duration);
-  if (end <= start) return null;
+  const end = Math.min(buffer?.duration ?? Infinity, options.end ?? buffer?.duration ?? Infinity);
 
   const spans = (options.spans ?? []).filter((span) => span.end > span.start);
-  const planes = spans.length > 0
-    ? joinSpans(buffer, spans, channels)
-    : resampleTo48k(buffer, start, end, channels);
+  const across = extra.size > 0 || spans.some((span) => span.source !== undefined);
+  if (spans.length === 0 && !(end > start)) return null;
+
+  const planes = across
+    ? joinAcross(spans, extra, buffer, channels)
+    : spans.length > 0
+      ? joinSpans(buffer!, spans, channels)
+      : resampleTo48k(buffer!, start, end, channels);
   const processed = options.process
     ? planes.map((plane) => options.process!(plane, OPUS_RATE))
     : planes;
@@ -202,6 +225,45 @@ export function joinSpans(
   const pieces = spans.map((span) => resampleTo48k(buffer, span.start, span.end, channels, span.speed));
   const total = pieces.reduce((sum, piece) => sum + piece[0].length, 0);
 
+  const planes: Float32Array[] = [];
+  for (let channel = 0; channel < channels; channel += 1) {
+    const target = new Float32Array(total);
+    let at = 0;
+    for (const piece of pieces) {
+      target.set(piece[channel], at);
+      at += piece[channel].length;
+    }
+    planes.push(target);
+  }
+  return planes;
+}
+
+/**
+ * The same, across several recordings.
+ *
+ * A clip whose recording has no sound, or whose sound will not decode, still
+ * occupies time in the finished video. It contributes silence of exactly the
+ * right length rather than nothing at all: dropping it would pull everything
+ * after it earlier, and the sound would drift further out of step with the
+ * picture at every join.
+ */
+export function joinAcross(
+  spans: { start: number; end: number; speed?: number; source?: string }[],
+  buffers: Map<string, AudioBuffer>,
+  fallback: AudioBuffer | null,
+  channels: number,
+): Float32Array[] {
+  const pieces = spans.map((span) => {
+    const buffer = (span.source !== undefined ? buffers.get(span.source) : null) ?? fallback;
+    const speed = Number.isFinite(span.speed) && (span.speed ?? 1) > 0 ? span.speed! : 1;
+    if (!buffer) {
+      const frames = Math.round(((span.end - span.start) / speed) * OPUS_RATE);
+      return Array.from({ length: channels }, () => new Float32Array(Math.max(0, frames)));
+    }
+    return resampleTo48k(buffer, span.start, span.end, channels, speed);
+  });
+
+  const total = pieces.reduce((sum, piece) => sum + piece[0].length, 0);
   const planes: Float32Array[] = [];
   for (let channel = 0; channel < channels; channel += 1) {
     const target = new Float32Array(total);

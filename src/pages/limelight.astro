@@ -107,6 +107,9 @@ const app = getApp('limelight');
           <!-- Decoration under the trim range: what is at each moment, so the
                range is dragged against the recording rather than against grey. -->
           <canvas class="ll-strip" id="ll-strip" aria-hidden="true"></canvas>
+          <!-- Where one clip gives way to the next, so a reel does not look
+               like one long take that changes for no reason. -->
+          <div class="ll-joins" id="ll-joins" aria-hidden="true"></div>
           <div class="ll-trim__range" id="ll-trim-range"></div>
         </div>
         <div class="ll-scrubrow">
@@ -115,6 +118,13 @@ const app = getApp('limelight');
           <button class="btn btn--sm" id="ll-trim-start">Start here</button>
           <button class="btn btn--sm" id="ll-trim-end">End here</button>
           <button class="btn btn--sm btn--ghost" id="ll-trim-reset">Reset the trim</button>
+          <!-- Both halves of the first pass, which otherwise live behind two
+               different tracks that somebody who has just stopped recording is
+               not looking at. -->
+          <button class="btn btn--sm btn--primary" id="ll-tidy">Tidy this up</button>
+          <button class="btn btn--sm" id="ll-add-clip">Add a clip</button>
+          <button class="btn btn--sm" id="ll-retake">Record over this</button>
+          <input type="file" id="ll-clip-file" accept="video/*" hidden />
           <span class="ll-time" id="ll-trim-label"></span>
         </div>
 
@@ -494,6 +504,8 @@ const app = getApp('limelight');
   .ll-project__remove:hover { color: #b91c1c; }
 
   .ll-trim { position: relative; height: 2.2rem; border: 1px solid var(--rule); border-radius: 0.4rem; background: var(--paper-raised); cursor: ew-resize; touch-action: none; overflow: hidden; }
+  .ll-joins { position: absolute; inset: 0; pointer-events: none; }
+  .ll-joins span { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--paper); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 45%, transparent); }
   .ll-strip { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0.75; }
   .ll-trim__range { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 22%, transparent); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent); box-shadow: 0 0 0 9999px color-mix(in srgb, var(--paper-sunk) 62%, transparent); }
   .ll { display: grid; gap: 1rem; padding: 1.25rem 0 3rem; }

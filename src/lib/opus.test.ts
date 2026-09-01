@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignToZero, canEncodeAudio, OPUS_RATE, resampleTo48k } from './opus';
+import { alignToZero, canEncodeAudio, joinAcross, OPUS_RATE, resampleTo48k } from './opus';
 import type { WebmSample } from './webm';
 
 /** A stand-in AudioBuffer, since neither Node nor jsdom has Web Audio. */
@@ -88,5 +88,57 @@ describe('alignToZero', () => {
 describe('canEncodeAudio', () => {
   it('reports false where WebCodecs is absent, rather than throwing', () => {
     expect(typeof canEncodeAudio()).toBe('boolean');
+  });
+});
+
+describe('joinAcross', () => {
+  const ones = fakeBuffer(OPUS_RATE, 4, 1, () => 1);
+  const halves = fakeBuffer(OPUS_RATE, 4, 1, () => 0.5);
+
+  it('takes each piece from the recording it belongs to', () => {
+    const planes = joinAcross(
+      [{ start: 0, end: 1, source: 'a' }, { start: 0, end: 1, source: 'b' }],
+      new Map([['a', ones], ['b', halves]]), null, 1,
+    );
+    expect(planes[0]).toHaveLength(OPUS_RATE * 2);
+    expect(planes[0][10]).toBeCloseTo(1);
+    expect(planes[0][OPUS_RATE + 10]).toBeCloseTo(0.5);
+  });
+
+  it('falls back to the first recording for a piece that names nothing', () => {
+    const planes = joinAcross([{ start: 0, end: 1 }], new Map(), ones, 1);
+    expect(planes[0][10]).toBeCloseTo(1);
+  });
+
+  it('fills silence for a clip whose recording has no sound', () => {
+    // Dropping it instead would pull everything after it earlier, and the sound
+    // would drift further from the picture at every join.
+    const planes = joinAcross(
+      [{ start: 0, end: 1, source: 'a' }, { start: 0, end: 2, source: 'silent' }, { start: 0, end: 1, source: 'a' }],
+      new Map([['a', ones]]), null, 1,
+    );
+    expect(planes[0]).toHaveLength(OPUS_RATE * 4);
+    expect(planes[0][OPUS_RATE + 10]).toBe(0);
+    expect(planes[0][OPUS_RATE * 3 + 10]).toBeCloseTo(1);
+  });
+
+  it('makes the silence shorter when that clip runs fast', () => {
+    const planes = joinAcross(
+      [{ start: 0, end: 2, speed: 2, source: 'silent' }], new Map(), null, 1,
+    );
+    expect(planes[0]).toHaveLength(OPUS_RATE);
+  });
+
+  it('keeps both channels the same length', () => {
+    const planes = joinAcross(
+      [{ start: 0, end: 1, source: 'a' }, { start: 0, end: 1, source: 'gone' }],
+      new Map([['a', fakeBuffer(OPUS_RATE, 4, 2)]]), null, 2,
+    );
+    expect(planes).toHaveLength(2);
+    expect(planes[0].length).toBe(planes[1].length);
+  });
+
+  it('produces nothing at all when there are no pieces', () => {
+    expect(joinAcross([], new Map(), ones, 1)[0]).toHaveLength(0);
   });
 });

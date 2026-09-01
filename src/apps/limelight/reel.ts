@@ -1,0 +1,260 @@
+/**
+ * More than one recording on one timeline.
+ *
+ * Everything in this editor addresses source seconds. A zoom sits at 4.2, a
+ * caption runs from 9 to 12, a cut removes 20 to 24. That worked because there
+ * was exactly one recording and its own clock was the timeline's clock.
+ *
+ * The reel keeps that true while allowing several recordings. Clips are laid
+ * end to end on one continuous line of seconds, and everything downstream goes
+ * on addressing that line without knowing it is made of pieces. Only two things
+ * ever need to look inside: whatever is fetching a frame, and whatever is
+ * assembling the sound.
+ *
+ * A clip is a window onto a recording rather than a whole one, which is what
+ * makes a retake possible: recording over the middle of a take splits the clip
+ * either side of it and drops the new one in between.
+ */
+
+export type Clip = {
+  id: string;
+  /** Which recording this comes from. */
+  source: string;
+  /** The window of that recording to use, in its own seconds. */
+  in: number;
+  out: number;
+};
+
+/** A clip with its position on the reel worked out. */
+export type Placed = Clip & {
+  /** Where it starts on the reel, in reel seconds. */
+  at: number;
+  /** How long it runs. */
+  length: number;
+};
+
+export function clipLength(clip: Clip): number {
+  return Math.max(0, clip.out - clip.in);
+}
+
+/** Where each clip sits, laid end to end with no gaps. */
+export function layout(clips: Clip[]): Placed[] {
+  const out: Placed[] = [];
+  let at = 0;
+  for (const clip of clips) {
+    const length = clipLength(clip);
+    if (length <= 0) continue;
+    out.push({ ...clip, at, length });
+    at += length;
+  }
+  return out;
+}
+
+export function reelDuration(clips: Clip[]): number {
+  return clips.reduce((total, clip) => total + clipLength(clip), 0);
+}
+
+/**
+ * Which recording to show for a moment on the reel, and where in it.
+ *
+ * Past the end it clamps to the last frame there is rather than returning
+ * nothing, because a rounding error on the final frame of an export must not
+ * turn into a hole in the video.
+ */
+export function sourceOf(
+  placed: Placed[], time: number,
+): { source: string; time: number; clip: string } | null {
+  if (placed.length === 0) return null;
+  const wanted = Math.max(0, time);
+  for (const clip of placed) {
+    if (wanted < clip.at + clip.length) {
+      return {
+        source: clip.source,
+        time: clip.in + Math.max(0, wanted - clip.at),
+        clip: clip.id,
+      };
+    }
+  }
+  const last = placed[placed.length - 1];
+  return { source: last.source, time: last.out, clip: last.id };
+}
+
+/** Where one clip gives way to the next, for drawing the joins. */
+export function joins(placed: Placed[]): number[] {
+  return placed.slice(1).map((clip) => clip.at);
+}
+
+/**
+ * Cuts the reel at a moment, so a clip can be dropped in there.
+ *
+ * A clip that straddles the moment becomes two windows onto the same
+ * recording. One that already starts or ends there is left alone: splitting on
+ * a boundary would add an empty clip, and an empty clip is a join with nothing
+ * between it.
+ */
+export function splitAt(clips: Clip[], time: number, makeId: () => string): Clip[] {
+  const out: Clip[] = [];
+  let at = 0;
+  for (const clip of clips) {
+    const length = clipLength(clip);
+    const inside = time > at && time < at + length;
+    if (inside) {
+      const offset = clip.in + (time - at);
+      out.push({ ...clip, out: offset });
+      out.push({ ...clip, id: makeId(), in: offset });
+    } else {
+      out.push(clip);
+    }
+    at += length;
+  }
+  return out;
+}
+
+/**
+ * Everything outside a stretch of the reel, as clips.
+ *
+ * The stretch itself is dropped, which is what replacing it means. Used by both
+ * halves of a retake: what comes before, and what comes after.
+ */
+export function without(clips: Clip[], span: { start: number; end: number }, makeId: () => string): Clip[] {
+  const from = Math.min(span.start, span.end);
+  const to = Math.max(span.start, span.end);
+  // A stretch of no length removes nothing. Without this the overlap branch
+  // below splits a clip in two at that point, which changes nothing visible and
+  // leaves a join in the reel that nobody asked for.
+  if (to <= from) return clips;
+  const out: Clip[] = [];
+  let at = 0;
+  for (const clip of clips) {
+    const length = clipLength(clip);
+    const end = at + length;
+    // Wholly inside the stretch, so it goes.
+    if (at >= from && end <= to) { at = end; continue; }
+    // Wholly outside it, so it stays.
+    if (end <= from || at >= to) { out.push(clip); at = end; continue; }
+
+    // Overlapping, so the part outside survives. Both halves can survive at
+    // once, when the stretch is in the middle of one clip.
+    if (at < from) out.push({ ...clip, out: clip.in + (from - at) });
+    if (end > to) out.push({ ...clip, id: makeId(), in: clip.in + (to - at) });
+    at = end;
+  }
+  return out;
+}
+
+export type Splice = {
+  clips: Clip[];
+  /** Where the new material starts on the reel. */
+  at: number;
+  /** How much longer or shorter everything after it has become. */
+  shift: number;
+};
+
+/**
+ * Puts a recording in place of a stretch of the reel.
+ *
+ * This is a retake. The stretch being replaced is almost never the same length
+ * as what replaces it, so everything after it moves, and the amount it moves by
+ * is returned rather than applied here: zooms, captions, shapes, cuts and speed
+ * regions all live on the same line of seconds and all have to move with it.
+ */
+export function splice(
+  clips: Clip[], span: { start: number; end: number }, replacement: Clip, makeId: () => string,
+): Splice {
+  const from = Math.max(0, Math.min(span.start, span.end));
+  const to = Math.max(from, Math.max(span.start, span.end));
+  // Removing the stretch leaves a boundary exactly where the replacement goes.
+  // When the stretch is empty there is nothing to remove and no boundary, so
+  // one is made: inserting at four seconds has to split the clip at four
+  // seconds, not put the new material after the whole thing.
+  const kept = splitAt(without(clips, { start: from, end: to }, makeId), from, makeId);
+
+  const before: Clip[] = [];
+  const after: Clip[] = [];
+  let at = 0;
+  for (const clip of kept) {
+    // Measured against the reel with the stretch already gone, so anything
+    // sitting at or past the hole belongs after the replacement.
+    (at < from ? before : after).push(clip);
+    at += clipLength(clip);
+  }
+
+  return {
+    clips: [...before, replacement, ...after],
+    at: from,
+    shift: clipLength(replacement) - (to - from),
+  };
+}
+
+/**
+ * Moves everything that sits after a moment.
+ *
+ * A block straddling the splice is left where it starts rather than stretched:
+ * a caption that ran across the passage being replaced was written about what
+ * used to be there, and guessing how much of it still applies would be worse
+ * than leaving it visible and wrong in one place a person can see.
+ */
+export function shiftAfter<T extends { start: number; end: number }>(
+  blocks: T[], from: number, shift: number,
+): T[] {
+  if (shift === 0) return blocks;
+  return blocks.map((block) => (block.start >= from
+    ? { ...block, start: Math.max(0, block.start + shift), end: Math.max(0, block.end + shift) }
+    : block));
+}
+
+/** A reel of exactly one recording, which is what every project starts as. */
+export function singleClip(source: string, duration: number, id = 'clip-1'): Clip {
+  return { id, source, in: 0, out: Math.max(0, duration) };
+}
+
+/** Whether this is still the plain one recording case. */
+export function isSingle(clips: Clip[]): boolean {
+  return clips.length <= 1;
+}
+
+export function reviveClips(value: unknown, makeId: () => string): Clip[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is Clip =>
+      typeof entry === 'object' && entry !== null
+      && typeof (entry as Clip).source === 'string'
+      && Number.isFinite((entry as Clip).in) && Number.isFinite((entry as Clip).out))
+    .map((entry) => ({
+      id: typeof entry.id === 'string' ? entry.id : makeId(),
+      source: entry.source,
+      in: Math.max(0, entry.in),
+      out: Math.max(0, entry.out),
+    }))
+    .filter((clip) => clip.out > clip.in);
+}
+
+/**
+ * Segments of the reel, rewritten as segments of the recordings underneath.
+ *
+ * The trim, the cuts and the speed regions all describe the reel, and a single
+ * one of their segments can run across a join. The sound has to be assembled
+ * out of the right recordings in the right order, so each segment is split at
+ * every boundary it crosses and each piece is given the recording it belongs to
+ * along with that recording's own seconds.
+ */
+export function acrossClips(
+  placed: Placed[],
+  segments: { start: number; end: number; speed: number }[],
+): { start: number; end: number; speed: number; source: string }[] {
+  const out: { start: number; end: number; speed: number; source: string }[] = [];
+  for (const segment of segments) {
+    for (const clip of placed) {
+      const from = Math.max(segment.start, clip.at);
+      const to = Math.min(segment.end, clip.at + clip.length);
+      if (to <= from) continue;
+      out.push({
+        start: clip.in + (from - clip.at),
+        end: clip.in + (to - clip.at),
+        speed: segment.speed,
+        source: clip.source,
+      });
+    }
+  }
+  return out;
+}

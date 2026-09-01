@@ -38,6 +38,7 @@ import { type Span } from './waveform';
 import { editedDuration, segmentsOf, sourceAt, type SpeedRegion } from './timeline';
 import { rectAt, redactionsAt, type RedactBlock } from './redact';
 import { openFrameSource, type FrameSource } from './frames';
+import { acrossClips, layout, sourceOf, type Clip, type Placed } from './reel';
 import { buildZoomTrack, viewRect, zoomAt, type ZoomKeyframe, type ZoomSettings } from './zoom';
 
 /**
@@ -59,6 +60,16 @@ export type Project = {
   camera: HTMLVideoElement | null;
   /** The recording itself, which is where the audio still lives. */
   source: Blob | null;
+  /**
+   * The reel, when the timeline holds more than the one recording.
+   *
+   * Left out, everything behaves exactly as it did: one recording, one clock,
+   * `source` and `video` above. Given, the seconds everything else works in are
+   * the reel's, and these say which recording each of them belongs to.
+   */
+  clips?: Clip[];
+  /** The other recordings the clips name, by id. */
+  takes?: Map<string, { blob: Blob; video: HTMLVideoElement }>;
   duration: number;
   sourceWidth: number;
   sourceHeight: number;
@@ -880,6 +891,30 @@ export async function render(
     source = await openFrameSource(project.source, sourceBytes ?? undefined);
   }
 
+  /**
+   * The reel, and a decoder for each recording on it.
+   *
+   * A reel of one is the ordinary case and stays on the single `source` above,
+   * so nothing about a plain recording changes. With more than one, each is
+   * opened as it is first needed rather than all at once: a decoder holds
+   * hardware buffers, and a reel of eight takes would hold eight of them for the
+   * whole export while using one at a time.
+   */
+  const placed: Placed[] = project.clips && project.clips.length > 1
+    ? layout(project.clips)
+    : [];
+  const decoders = new Map<string, FrameSource | null>();
+  const opened = new Set<string>();
+
+  async function frameSourceFor(id: string): Promise<FrameSource | null> {
+    if (opened.has(id)) return decoders.get(id) ?? null;
+    opened.add(id);
+    const take = project.takes?.get(id);
+    const made = take ? await openFrameSource(take.blob).catch(() => null) : null;
+    decoders.set(id, made);
+    return made;
+  }
+
   try {
     /** Composes one frame onto the canvas. Shared by every format. */
     const compose = async (index: number): Promise<number> => {
@@ -887,22 +922,47 @@ export async function render(
       // Edited time in, source time out.
       const sourceTime = sourceAt(segments, time);
 
+      // On a reel, the moment belongs to one of several recordings, and the
+      // time inside that recording is what everything below wants.
+      const spot = placed.length > 0 ? sourceOf(placed, sourceTime) : null;
+      const element = spot ? project.takes?.get(spot.source)?.video ?? project.video : project.video;
+      const at = spot ? spot.time : sourceTime;
+
       let decoded: VideoFrame | null = null;
-      if (source) {
-        decoded = await source.frameAt(sourceTime);
+      if (spot) {
+        const clipSource = await frameSourceFor(spot.source);
+        if (clipSource) {
+          decoded = await clipSource.frameAt(at);
+          // A decoder that stops producing has hit something it cannot handle.
+          // Forgetting it here sends this clip, and only this clip, down the
+          // seeking path for the rest of the export.
+          if (!decoded) { clipSource.close(); decoders.set(spot.source, null); }
+        }
+      } else if (source) {
+        decoded = await source.frameAt(at);
         // A source that stops producing has hit something it cannot decode. The
         // seeking path picks up from here rather than the export failing.
         if (!decoded) { source.close(); source = null; }
       }
       if (!decoded) {
-        await seekTo(project.video, Math.min(project.duration - 1e-3, sourceTime));
+        // Clamped against the element's own length, which on a reel is this
+        // clip's recording rather than the whole timeline.
+        const limit = Number.isFinite(element.duration) && element.duration > 0
+          ? element.duration
+          : project.duration;
+        await seekTo(element, Math.max(0, Math.min(limit - 1e-3, at)));
       }
       if (project.camera) {
         await seekTo(project.camera, Math.min(Math.max(0, project.camera.duration - 1e-3), sourceTime)).catch(() => {});
       }
 
       // The zoom track and the cursor are both in source time.
-      const frameProject = decoded ? { ...project, frame: decoded } : project;
+      //
+      // The element goes along with the frame: without it, a clip that fell back
+      // to seeking would seek the right video and then draw the first one.
+      const frameProject = decoded
+        ? { ...project, frame: decoded, video: element }
+        : element === project.video ? project : { ...project, video: element };
       drawFrame(context, frameProject, sourceTime, zoomAt(track, sourceTime), cursorTrack.length ? sampleAt(cursorTrack, sourceTime) : null);
       return time;
     };
@@ -1029,8 +1089,16 @@ export async function render(
     const cleaning = voice && (voice.normalise || voice.highPass > 0 || voice.gate > 0);
     const bedding = bed && bed.length > 0 && music && music.level > 0;
 
+    // On a reel each piece of sound comes from the recording its clip belongs
+    // to, so the segments are rewritten into those recordings' own seconds
+    // before the encoder sees them.
+    const audioSpans = placed.length > 0 ? acrossClips(placed, segments) : segments;
+    const takes = new Map<string, Blob>();
+    for (const [id, take] of project.takes ?? []) takes.set(id, take.blob);
+
     audio = await encodeOpus(sourceBytes ?? project.source, {
-      start: from, end: to, track: 2, spans: segments,
+      start: from, end: to, track: 2, spans: audioSpans,
+      ...(placed.length > 0 ? { sources: takes } : {}),
       // Applied after the kept pieces are joined, so a filter's state does not
       // restart at every cut and click at the joins.
       process: cleaning || bedding
@@ -1107,6 +1175,7 @@ export async function render(
     // A VideoFrame holds a hardware buffer until it is closed, and the
     // decoder holds more, so this matters even on the paths that threw.
     source?.close();
+    for (const decoder of decoders.values()) decoder?.close();
     // Dropping the reference lets the whole recording be collected as soon as
     // the export is done rather than at the next natural scope exit.
     sourceBytes = null;

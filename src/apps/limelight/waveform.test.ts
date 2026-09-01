@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  findSilences, keptDuration, keptSpans, loudnessFrom, mergeSpans, peaksFrom, sourceTimeAt,
-  type Span,
+  findSilences, joinWaves, keptDuration, keptSpans, loudnessFrom, mergeSpans, peaksFrom, sourceTimeAt, type Span,
 } from './waveform';
 
 /** A run of samples at a fixed amplitude, for building predictable signals. */
@@ -190,5 +189,63 @@ describe('sourceTimeAt', () => {
       const inACut = many.some((cut) => source > cut.start + 1e-9 && source < cut.end - 1e-9);
       expect(inACut).toBe(false);
     }
+  });
+});
+
+describe('joinWaves', () => {
+  const wave = (level: number, seconds: number, columns = 100) => ({
+    peaks: Array.from({ length: columns }, () => ({ min: -level, max: level })),
+    loudness: Float32Array.from({ length: columns }, () => level),
+    duration: seconds,
+  });
+
+  it('lays two recordings end to end', () => {
+    const out = joinWaves([
+      { wave: wave(1, 4), in: 0, out: 4 },
+      { wave: wave(0.5, 4), in: 0, out: 4 },
+    ], 100)!;
+    expect(out.duration).toBe(8);
+    expect(out.peaks[10].max).toBeCloseTo(1);
+    expect(out.peaks[90].max).toBeCloseTo(0.5);
+  });
+
+  it('reads only the window a clip uses', () => {
+    // The second clip is the back half of its recording, so it should read from
+    // the back half of that recording's analysis.
+    const rising = {
+      peaks: Array.from({ length: 100 }, (_, index) => ({ min: 0, max: index / 100 })),
+      loudness: Float32Array.from({ length: 100 }, (_, index) => index / 100),
+      duration: 10,
+    };
+    const out = joinWaves([{ wave: rising, in: 5, out: 10 }], 100)!;
+    expect(out.duration).toBe(5);
+    expect(out.peaks[0].max).toBeCloseTo(0.5, 1);
+    expect(out.peaks[99].max).toBeCloseTo(0.99, 1);
+  });
+
+  it('fills silence for a recording with no sound rather than dropping it', () => {
+    const out = joinWaves([
+      { wave: wave(1, 2), in: 0, out: 2 },
+      { wave: null, in: 0, out: 2 },
+      { wave: wave(1, 2), in: 0, out: 2 },
+    ], 90)!;
+    expect(out.duration).toBe(6);
+    expect(out.peaks[45].max).toBe(0);
+    expect(out.peaks[80].max).toBeCloseTo(1);
+  });
+
+  it('has nothing to join when no recording has sound at all', () => {
+    expect(joinWaves([{ wave: null, in: 0, out: 4 }], 100)).toBeNull();
+  });
+
+  it('has nothing to join for a reel of no length', () => {
+    expect(joinWaves([{ wave: wave(1, 4), in: 2, out: 2 }], 100)).toBeNull();
+    expect(joinWaves([], 100)).toBeNull();
+  });
+
+  it('gives back exactly the columns it was asked for', () => {
+    const out = joinWaves([{ wave: wave(1, 4), in: 0, out: 4 }], 37)!;
+    expect(out.peaks).toHaveLength(37);
+    expect(out.loudness).toHaveLength(37);
   });
 });

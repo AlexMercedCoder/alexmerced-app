@@ -158,6 +158,9 @@ export const GENERAL_HELP: { heading: string; points: string[] }[] = [
       'Recording this tab is the only case where the zoom can follow your cursor exactly, because a browser is not told where the pointer is over another window.',
       'Press M while recording to mark a chapter.',
       'Open a video reads a file you already have.',
+      'Add a clip puts another recording on the end of this one.',
+      'Record over this replaces whatever is selected on the sound track with a fresh take, and drops it in at the playhead when nothing is selected.',
+      'A join between two takes is marked on the trim bar, and everything after a retake moves with it.',
       'A recording is written down as it is made, so a crash does not lose it.',
     ],
   },
@@ -193,6 +196,8 @@ export const GENERAL_HELP: { heading: string; points: string[] }[] = [
       'Where it is going sets the shape and the output size together.',
       'A look saves the background, padding, shadow and tilt so the next recording can match this one.',
       'Export writes the file. Everything happens on this machine.',
+      'Save the edits writes a small file with the trim, the zooms and everything else in it. Save everything carries the recording along too.',
+      'Open a project puts a saved file back. Edits alone need the video open first, and are refused if it is the wrong one.',
     ],
   },
 ];
