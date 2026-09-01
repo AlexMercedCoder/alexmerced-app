@@ -264,6 +264,17 @@ const app = getApp('limelight');
             Selecting lines and pressing Cut removes those seconds from the video, which is
             the quickest way to take out a sentence you did not mean to say.
           </p>
+          <div class="ll-scrubrow ll-listen" id="ll-listen-row">
+            <button class="btn btn--sm btn--primary" id="ll-listen">Write it out for me</button>
+            <select class="field ll-listen-size" id="ll-listen-size"></select>
+            <span class="ll-time" id="ll-listen-note"></span>
+          </div>
+          <p class="ll-note" id="ll-listen-explain">
+            The words are worked out on this machine. Doing that needs a model, which is
+            fetched the first time you ask and then kept, and is the only thing on this site
+            that touches the network. Your recording stays here.
+          </p>
+
           <div class="ll-scrubrow">
             <button class="btn btn--sm" id="ll-captions-open">Open a transcript</button>
             <button class="btn btn--sm" id="ll-captions-add">Add a line here</button>
@@ -520,6 +531,7 @@ const app = getApp('limelight');
   .ll-vol { display: inline-flex; align-items: center; gap: 0.3rem; }
   .ll-vol input { width: 5rem; }
   .ll-vol[hidden] { display: none; }
+  .ll-listen-size { max-width: 11rem; }
   .ll-cues { list-style: none; margin: 0.7rem 0; padding: 0; display: grid; gap: 0.3rem; max-height: 22rem; overflow-y: auto; }
   .ll-cue { display: grid; grid-template-columns: auto auto 1fr; gap: 0.5rem; align-items: start;
     padding: 0.35rem 0.5rem; border: 1px solid var(--rule); border-radius: 7px; background: var(--surface); }

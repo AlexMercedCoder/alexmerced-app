@@ -49,6 +49,7 @@ import {
   addShape, removeShape, SHAPE_COLOURS, SHAPE_KINDS, sortShapes, updateShape,
   type Shape, type ShapeKind,
 } from './shapes';
+import { canTranscribe, transcribe, WHISPER_MODELS, type WhisperSize } from './transcribe';
 import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
   reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
@@ -3109,10 +3110,102 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLSpanElement>('ll-cues-label').textContent = picked.length
       ? `${picked.length} line${picked.length === 1 ? '' : 's'}, ${seconds.toFixed(1)}s`
       : '';
+    renderListen();
     $<HTMLInputElement>('ll-captions-burn').checked = settings.burnCaptions;
     $<HTMLInputElement>('ll-caption-size').value = String(settings.captionSize);
     $<HTMLSpanElement>('ll-caption-size-out').textContent = `${Math.round(settings.captionSize * 100)}%`;
   }
+
+  // ---------------------------------------------------------------- listening
+
+  const listenButton = $<HTMLButtonElement>('ll-listen');
+  const listenSize = $<HTMLSelectElement>('ll-listen-size');
+  const listenNote = $<HTMLSpanElement>('ll-listen-note');
+
+  for (const model of WHISPER_MODELS) {
+    const option = document.createElement('option');
+    option.value = model.id;
+    option.textContent = `${model.label}, ${model.note}`;
+    listenSize.append(option);
+  }
+
+  let listening = false;
+
+  function renderListen(): void {
+    const possible = canTranscribe() && Boolean(recording?.hasAudio);
+    listenButton.disabled = !possible || listening;
+    listenSize.disabled = listening;
+    if (!recording?.hasAudio) {
+      listenNote.textContent = recording ? 'This recording has no sound.' : '';
+      return;
+    }
+    if (!canTranscribe()) listenNote.textContent = 'This browser cannot run the model.';
+    else if (!listening) listenNote.textContent = '';
+  }
+
+  listenButton.addEventListener('click', async () => {
+    if (!recording?.hasAudio || listening) return;
+    listening = true;
+    renderListen();
+    barEl.hidden = false;
+
+    try {
+      // Decoded here rather than inside the transcriber, because the recording
+      // is already in hand and decoding it twice would be wasteful.
+      const Context = window.AudioContext
+        ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Context) throw new Error('This browser has no audio decoder.');
+      const context = new Context();
+      let buffer: AudioBuffer;
+      try {
+        buffer = await context.decodeAudioData(await recording.blob.arrayBuffer());
+      } finally {
+        await context.close().catch(() => {});
+      }
+
+      const found = await transcribe(
+        buffer,
+        listenSize.value as WhisperSize,
+        (progress) => {
+          const percent = progress.ratio === null ? null : Math.round(progress.ratio * 100);
+          barFill.style.width = `${percent ?? 0}%`;
+          const said = progress.stage === 'library'
+            ? 'Fetching the model runtime'
+            : progress.stage === 'model'
+              ? `Fetching the model${percent === null ? '' : `, ${percent}%`}`
+              : 'Listening to the recording';
+          listenNote.textContent = said;
+          setStatus(`${said}.`, 'busy');
+        },
+      );
+
+      if (found.length === 0) {
+        setStatus('Nothing could be made out in the recording.', 'bad');
+        return;
+      }
+      captions = sortCues(found.map((cue) => ({ ...cue, id: createId('cue') })));
+      pickedCues.clear();
+      remember('transcribed');
+      renderCues();
+      void drawPreview();
+      setStatus(`Wrote out ${found.length} lines. Nothing left this browser.`, 'good');
+      toast(`${found.length} lines. Select any of them and press Cut to remove them from the video.`);
+    } catch (error) {
+      // The model is a convenience, so a failure says what happened and leaves
+      // the import and typing paths exactly as they were.
+      setStatus(
+        error instanceof Error && /fetch|network|Failed/i.test(error.message)
+          ? 'The model could not be fetched. You can still open an SRT or VTT file instead.'
+          : 'The recording could not be written out. You can still open an SRT or VTT file instead.',
+        'bad',
+      );
+    } finally {
+      listening = false;
+      barEl.hidden = true;
+      barFill.style.width = '0%';
+      renderListen();
+    }
+  });
 
   $<HTMLButtonElement>('ll-captions-open').addEventListener('click', () => cueFile.click());
   cueFile.addEventListener('change', async () => {
