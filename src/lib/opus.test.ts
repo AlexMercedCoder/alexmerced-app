@@ -141,4 +141,22 @@ describe('joinAcross', () => {
   it('produces nothing at all when there are no pieces', () => {
     expect(joinAcross([], new Map(), ones, 1)[0]).toHaveLength(0);
   });
+
+  it('applies clip volume and mute before joining', () => {
+    const planes = joinAcross([
+      { start: 0, end: 1, source: 'a', gain: 0.5 },
+      { start: 0, end: 1, source: 'a', muted: true },
+    ], new Map([['a', ones]]), null, 1);
+    expect(planes[0][100]).toBeCloseTo(0.5);
+    expect(planes[0][OPUS_RATE + 100]).toBe(0);
+  });
+
+  it('fades at the beginning and end of a clip', () => {
+    const planes = joinAcross([{
+      start: 0, end: 2, source: 'a', fadeIn: 1, fadeOut: 1, clipFrom: 0, clipLength: 2,
+    }], new Map([['a', ones]]), null, 1);
+    expect(planes[0][0]).toBe(0);
+    expect(planes[0][OPUS_RATE]).toBeCloseTo(1, 3);
+    expect(planes[0].at(-1)).toBeCloseTo(0, 3);
+  });
 });

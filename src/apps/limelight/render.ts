@@ -1,6 +1,6 @@
 import { encodeGif, type GifFrame } from '../../lib/gif';
 import { muxMp4, type Mp4Sample, type Mp4Track } from '../../lib/mp4';
-import { alignToZero, encodeOpus } from '../../lib/opus';
+import { alignToZero, encodeAac, encodeOpus } from '../../lib/opus';
 import { muxWebm, type WebmSample, type WebmTrack } from '../../lib/webm';
 import {
   interestFromPointer, mergeInterest, motionCentre, motionGrid, sampleAt, smoothPath,
@@ -1101,6 +1101,7 @@ export async function render(
 
     // ------------------------------------------------------------------ sound
     let audio: Awaited<ReturnType<typeof encodeOpus>> = null;
+    let aac: Awaited<ReturnType<typeof encodeAac>> = null;
     let note: string | null = null;
 
     if (project.keepAudio && project.source) {
@@ -1121,13 +1122,13 @@ export async function render(
     const takes = new Map<string, Blob>();
     for (const [id, take] of project.takes ?? []) takes.set(id, take.blob);
 
-    audio = await encodeOpus(sourceBytes ?? project.source, {
+    const audioOptions = {
       start: from, end: to, track: 2, spans: audioSpans,
       ...(placed.length > 0 ? { sources: takes } : {}),
       // Applied after the kept pieces are joined, so a filter's state does not
       // restart at every cut and click at the joins.
       process: cleaning || bedding
-        ? (samples, rate) => {
+        ? (samples: Float32Array, rate: number) => {
           const cleaned = cleaning ? cleanVoice(samples, rate, voice) : samples;
           if (!bedding) return cleaned;
           // The envelope comes from the voice itself, so the bed ducks for
@@ -1136,8 +1137,12 @@ export async function render(
           return mixUnder(cleaned, bed, duckingEnvelope(coarseLoudness(cleaned, columns), columns, music));
         }
         : undefined,
-    });
-      if (!audio) note = 'No sound was found in the recording, so this is silent.';
+    };
+    // Safari's MP4 support expects AAC. Use it whenever this browser exposes
+    // the encoder, and retain the existing Opus path as an explicit fallback.
+    if (wantsMp4) aac = await encodeAac(sourceBytes ?? project.source, audioOptions);
+    if (!aac) audio = await encodeOpus(sourceBytes ?? project.source, audioOptions);
+    if (!audio && !aac) note = 'No sound was found in the recording, so this is silent.';
     }
 
     onProgress({ stage: 'Writing the file', done: total, total });
@@ -1152,10 +1157,18 @@ export async function render(
         track: 1, timestamp: chunk.timestamp, duration: chunk.duration, data: chunk.data, keyframe: chunk.keyframe,
       }));
 
-      if (audio) {
-        // Opus in MP4 is standardised and plays in Chrome, Edge and Firefox, but
-        // Safari will show the picture and stay silent. Saying so is better than
-        // letting someone find out after they have sent it to somebody.
+      if (aac) {
+        tracks.push({
+          kind: 'audio', description: aac.description, codec: 'aac',
+          sampleRate: aac.sampleRate, channels: aac.channels,
+        });
+        for (const sample of alignToZero(aac.samples)) {
+          samples.push({
+            track: 2, timestamp: sample.timestamp, duration: aac.sampleDuration,
+            data: sample.data, keyframe: true,
+          });
+        }
+      } else if (audio) {
         tracks.push({
           kind: 'audio', description: audio.track.kind === 'audio' ? audio.track.codecPrivate ?? new Uint8Array(0) : new Uint8Array(0),
           codec: 'opus', sampleRate: 48000, channels: audio.track.kind === 'audio' ? audio.track.channels : 2,
@@ -1169,7 +1182,7 @@ export async function render(
       const file = muxMp4({ tracks }, samples);
       return {
         blob: new Blob([file as unknown as BlobPart], { type: 'video/mp4' }),
-        frames: total, hasAudio: audio !== null, extension: 'mp4', note,
+        frames: total, hasAudio: audio !== null || aac !== null, extension: 'mp4', note,
       };
     }
 

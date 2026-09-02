@@ -106,6 +106,35 @@ describe('storage', () => {
     expect(back!.clicks).toHaveLength(1);
   });
 
+  it('stores immutable recordings apart from frequently changing metadata', async () => {
+    const project = make('reel', {
+      id: 'separate',
+      takes: [{ id: 'take-2', bytes: Uint8Array.from([8, 8, 8]), mime: 'video/webm' }],
+    });
+    await saveProject(project);
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('limelight', 4);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const raw = await new Promise<any>((resolve, reject) => {
+      const request = db.transaction('projects').objectStore('projects').get('separate');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const mediaCount = await new Promise<number>((resolve, reject) => {
+      const request = db.transaction('media').objectStore('media').count();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    expect(raw.bytes).toHaveLength(0);
+    expect(raw.takes).toEqual([]);
+    expect(raw.mediaRefs.takes).toHaveLength(1);
+    expect(mediaCount).toBe(2);
+    expect((await loadProject('separate'))!.takes?.[0].bytes).toEqual(Uint8Array.from([8, 8, 8]));
+  });
+
   it('lists the most recently touched first', async () => {
     await saveProject(make('older', { id: 'a', updatedAt: '2026-01-01T00:00:00Z' }));
     await new Promise((resolve) => setTimeout(resolve, 5));

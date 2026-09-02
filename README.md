@@ -215,6 +215,11 @@ one and doing the other:
   instead, which needs no cursor at all and works on a recording that was
   merely dropped in.
 
+Limelight can also assemble several takes on one reel. Clip cards carry a
+thumbnail, name, source trim and their own volume and fades; they can be
+dragged, split, removed and restored with Undo. MP4 uses AAC when the browser
+exposes it, with an explicit Opus fallback on browsers that do not.
+
 ## Known limits, stated plainly
 
 - PDF text uses the standard fourteen fonts, which are Latin-1. CJK and emoji

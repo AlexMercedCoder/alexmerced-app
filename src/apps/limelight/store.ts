@@ -53,7 +53,7 @@ export const APP_ID = 'limelight';
 export const APP_VERSION = 1;
 
 const DB_NAME = 'limelight';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const SETTINGS_KEY = 'limelight:settings';
 const CURRENT_KEY = 'limelight:current';
 
@@ -390,8 +390,17 @@ export function createProject(
 
 // --------------------------------------------------------------------- storage
 
-let projects: Collection<Project> | null = null;
+type MediaAsset = { id: string; bytes: Uint8Array; mime: string };
+type MediaRefs = {
+  source: string;
+  camera?: string;
+  takes: { id: string; ref: string; mime: string }[];
+};
+type ProjectRecord = Project & { mediaRefs?: MediaRefs };
+
+let projects: Collection<ProjectRecord> | null = null;
 let looks: Collection<Look> | null = null;
+let media: Collection<MediaAsset> | null = null;
 let database: Promise<IDBDatabase> | null = null;
 
 /**
@@ -408,15 +417,24 @@ function db(): Promise<IDBDatabase> {
       // Chunks of a recording still being made, plus what is known about it.
       { name: 'scratch', keyPath: 'id' },
       { name: 'scratchSessions', keyPath: 'id' },
+      // Immutable recording files live apart from the frequently changing
+      // timeline metadata, so an autosave does not clone hundreds of MB.
+      { name: 'media', keyPath: 'id' },
     ]);
   }
   return database;
 }
 
-async function connect(): Promise<Collection<Project>> {
+async function connect(): Promise<Collection<ProjectRecord>> {
   if (projects) return projects;
   projects = new Collection<Project>(await db(), 'projects');
   return projects;
+}
+
+async function connectMedia(): Promise<Collection<MediaAsset>> {
+  if (media) return media;
+  media = new Collection<MediaAsset>(await db(), 'media');
+  return media;
 }
 
 async function connectLooks(): Promise<Collection<Look>> {
@@ -521,15 +539,37 @@ export function saveCurrentId(id: string | null): void { writePref(CURRENT_KEY, 
 
 export async function loadProjects(): Promise<Project[]> {
   const store = await connect();
-  return (await store.all())
-    .map(reviveProject)
+  const hydrated = await Promise.all((await store.all()).map(hydrateProject));
+  return hydrated
     .filter((project): project is Project => project !== null)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function loadProject(id: string): Promise<Project | null> {
   const store = await connect();
-  return reviveProject(await store.get(id));
+  return hydrateProject(await store.get(id));
+}
+
+async function hydrateProject(record: ProjectRecord | undefined): Promise<Project | null> {
+  if (!record) return null;
+  if (!record.mediaRefs) return reviveProject(record);
+  const assets = await connectMedia();
+  const source = await assets.get(record.mediaRefs.source);
+  if (!source?.bytes.byteLength) return null;
+  const camera = record.mediaRefs.camera ? await assets.get(record.mediaRefs.camera) : undefined;
+  const takes = (await Promise.all(record.mediaRefs.takes.map(async (take) => {
+    const asset = await assets.get(take.ref);
+    return asset?.bytes.byteLength
+      ? { id: take.id, bytes: asset.bytes, mime: take.mime || asset.mime }
+      : null;
+  }))).filter((take): take is { id: string; bytes: Uint8Array; mime: string } => take !== null);
+  return reviveProject({
+    ...record,
+    bytes: source.bytes,
+    mime: source.mime || record.mime,
+    cameraBytes: camera?.bytes ?? null,
+    takes,
+  });
 }
 
 export class StorageFullError extends Error {}
@@ -562,7 +602,35 @@ export async function storageRoom(): Promise<{ used: number; quota: number } | n
  */
 export async function saveProject(project: Project): Promise<void> {
   try {
-    await (await connect()).put({ ...project, updatedAt: new Date().toISOString() });
+    const assets = await connectMedia();
+    const refs: MediaRefs = { source: `${project.id}:source`, takes: [] };
+    const records: MediaAsset[] = [{ id: refs.source, bytes: project.bytes, mime: project.mime }];
+    if (project.cameraBytes?.byteLength) {
+      refs.camera = `${project.id}:camera`;
+      records.push({ id: refs.camera, bytes: project.cameraBytes, mime: project.mime });
+    }
+    for (const take of project.takes ?? []) {
+      const ref = `${project.id}:take:${take.id}`;
+      refs.takes.push({ id: take.id, ref, mime: take.mime });
+      records.push({ id: ref, bytes: take.bytes, mime: take.mime });
+    }
+    // Sources and takes never change under an id. Avoiding an unconditional
+    // put is what turns a normal autosave into a metadata-only write.
+    for (const asset of records) {
+      const existing = await assets.get(asset.id);
+      if (!existing || existing.bytes.byteLength !== asset.bytes.byteLength || existing.mime !== asset.mime) {
+        await assets.put(asset);
+      }
+    }
+    const shell: ProjectRecord = {
+      ...project,
+      bytes: new Uint8Array(),
+      cameraBytes: null,
+      takes: [],
+      mediaRefs: refs,
+      updatedAt: new Date().toISOString(),
+    };
+    await (await connect()).put(shell);
   } catch (error) {
     const name = (error as { name?: string } | null)?.name ?? '';
     if (name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED') {
@@ -577,13 +645,25 @@ export async function oldestProjects(): Promise<Project[]> {
   return (await loadProjects()).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
 }
 
-export async function deleteProject(id: string): Promise<void> { await (await connect()).delete(id); }
-export async function clearAll(): Promise<void> { await (await connect()).clear(); }
+export async function deleteProject(id: string): Promise<void> {
+  const store = await connect();
+  const record = await store.get(id);
+  if (record?.mediaRefs) {
+    const ids = [record.mediaRefs.source, record.mediaRefs.camera, ...record.mediaRefs.takes.map((take) => take.ref)]
+      .filter((asset): asset is string => typeof asset === 'string');
+    await (await connectMedia()).deleteMany(ids);
+  }
+  await store.delete(id);
+}
+export async function clearAll(): Promise<void> {
+  await Promise.all([(await connect()).clear(), (await connectMedia()).clear()]);
+}
 
 export async function storedBytes(): Promise<number> {
   return (await loadProjects()).reduce(
     (sum, project) => sum + project.bytes.length + (project.cameraBytes?.length ?? 0)
-      + (project.wallpaper?.length ?? 0),
+      + (project.wallpaper?.length ?? 0)
+      + (project.takes ?? []).reduce((takeSum, take) => takeSum + take.bytes.length, 0),
     0,
   );
 }

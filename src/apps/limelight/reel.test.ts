@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   acrossClips, clipLength, isPlainRecording, isSingle, joins, layout, moveClip,
-  reelDuration, remapBlocks, removeClip, reviveClips, shiftAfter, singleClip, sourceOf,
-  splice, splitAt, without, type Clip,
+  moveClipTo, reelDuration, remapBlocks, removeClip, reviveClips, shiftAfter,
+  singleClip, sourceOf, splice, splitAt, updateClip, without, type Clip,
 } from './reel';
 
 let counter = 0;
@@ -361,6 +361,31 @@ describe('removeClip and moveClip', () => {
   it('keeps the reel the same length when it only reorders', () => {
     expect(reelDuration(moveClip(three(), 'c', -1))).toBe(reelDuration(three()));
   });
+
+  it('moves directly to a drag-and-drop position', () => {
+    expect(moveClipTo(three(), 'a', 2).map((entry) => entry.id)).toEqual(['b', 'c', 'a']);
+    const unchanged = three();
+    expect(moveClipTo(unchanged, 'ghost', 1)).toBe(unchanged);
+  });
+});
+
+describe('updateClip', () => {
+  const one = (): Clip[] => [clip('a', 'take-1', 1, 8)];
+
+  it('renames and trims without changing identity', () => {
+    expect(updateClip(one(), 'a', { name: ' Opening ', in: 2, out: 7 }, 10)[0])
+      .toMatchObject({ id: 'a', name: 'Opening', in: 2, out: 7 });
+  });
+
+  it('clamps audio and trim controls to usable values', () => {
+    expect(updateClip(one(), 'a', { in: -4, out: 20, gain: 8, fadeIn: 99, fadeOut: -2 }, 10)[0])
+      .toMatchObject({ in: 0, out: 10, gain: 2, fadeIn: 10 });
+  });
+
+  it('keeps optional defaults out of saved clips', () => {
+    expect(updateClip(one(), 'a', { gain: 1, muted: false, fadeIn: 0 })[0])
+      .toEqual({ id: 'a', source: 'take-1', in: 1, out: 8 });
+  });
 });
 
 describe('remapBlocks', () => {
@@ -420,5 +445,23 @@ describe('remapBlocks', () => {
 
   it('has nothing to remap without blocks', () => {
     expect(remapBlocks([], layout(three()), layout(three()))).toEqual({ blocks: [], dropped: 0 });
+  });
+
+  it('splits an edit at joins so reordered halves stay with their clips', () => {
+    let id = 0;
+    const before = layout(three());
+    const after = layout(moveClipTo(three(), 'b', 0));
+    const out = remapBlocks([{ id: 'wide', start: 3, end: 6 }], before, after, () => `part-${++id}`);
+    expect(out.blocks).toEqual([
+      { id: 'part-1', start: 0, end: 2 },
+      { id: 'wide', start: 9, end: 10 },
+    ]);
+  });
+
+  it('trims a block to a clip whose source window became shorter', () => {
+    const before = layout([clip('a', 'take-1', 0, 5)]);
+    const after = layout([clip('a', 'take-1', 0, 3)]);
+    expect(remapBlocks([{ start: 2, end: 5 }], before, after).blocks)
+      .toEqual([{ start: 2, end: 3 }]);
   });
 });

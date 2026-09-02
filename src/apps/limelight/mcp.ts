@@ -18,7 +18,10 @@ import {
   defaultSilence, findSilences, keptDuration, mergeSpans, type Span,
 } from './waveform';
 import type { Look } from './store';
-import { joins, layout, reelDuration, type Clip } from './reel';
+import { createId } from '../../lib/id';
+import {
+  joins, layout, moveClipTo, reelDuration, removeClip, splitAt, updateClip, type Clip,
+} from './reel';
 import {
   CAMERA_SHAPES, CROP_ASPECTS, cropToAspect, FULL_CROP, isFullCrop, normaliseCrop, OUTPUT_SIZES, PRESETS,
   type CameraCorner, type CameraShape, type Composition, type Crop,
@@ -48,6 +51,7 @@ type State = {
   playing: boolean;
   /** The reel, when the timeline holds more than one recording. */
   clips: Clip[];
+  sourceDurations: Record<string, number>;
 };
 
 /** Changes an agent is allowed to make. Everything is local and reversible. */
@@ -65,6 +69,7 @@ type Edit = (change: {
   applyLook?: string;
   /** Run the first pass: cut the quiet gaps and add the zooms. */
   tidy?: true;
+  reel?: { clips: Clip[]; preserveTimeline?: boolean; message: string };
 }) => void;
 
 /**
@@ -759,27 +764,83 @@ export function limelightTools(read: () => State, edit: Edit): McpTool[] {
       execute: () => {
         const state = read();
         if (!state.recording) return textResult({ clips: [], note: 'Nothing has been recorded or opened yet.' });
-        if (state.clips.length <= 1) {
-          return textResult({
-            clips: 1,
-            duration: Number(state.recording.duration.toFixed(2)),
-            joins: [],
-            note: 'One recording. Timeline seconds are this recording\u2019s own seconds.',
-          });
-        }
         const placed = layout(state.clips);
         return textResult({
           clips: placed.map((clip) => ({
             id: clip.id,
+            name: clip.name ?? null,
             source: clip.source,
             startsAt: Number(clip.at.toFixed(2)),
             runsFor: Number(clip.length.toFixed(2)),
             fromItsOwn: [Number(clip.in.toFixed(2)), Number(clip.out.toFixed(2))],
+            audio: {
+              gain: clip.gain ?? 1, muted: clip.muted ?? false,
+              fadeIn: clip.fadeIn ?? 0, fadeOut: clip.fadeOut ?? 0,
+            },
           })),
           duration: Number(reelDuration(state.clips).toFixed(2)),
           joins: joins(placed).map((at) => Number(at.toFixed(2))),
           note: 'Timeline seconds run across every clip. A retake or an added clip moves everything after it.',
         });
+      },
+    },
+    {
+      name: 'limelight_edit_reel',
+      description:
+        'Edit the clips on the timeline: move or remove one, rename it, change its source trim and audio, or split the clip under a timeline moment. Every change is local, undoable, and uses the same timeline remapping as the visible controls.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['move', 'remove', 'update', 'split'], description: 'What to change.' },
+          id: { type: 'string', description: 'The clip id from limelight_describe_reel.' },
+          index: { type: 'number', description: 'For move: the zero-based destination position.' },
+          at: { type: 'number', description: 'For split: a moment in timeline seconds.' },
+          name: { type: 'string', description: 'For update: a new clip name.' },
+          in: { type: 'number', description: 'For update: first source second to use.' },
+          out: { type: 'number', description: 'For update: source second to stop using.' },
+          gain: { type: 'number', description: 'For update: clip volume from 0 to 2.' },
+          muted: { type: 'boolean', description: 'For update: whether this clip is silent.' },
+          fadeIn: { type: 'number', description: 'For update: seconds for sound to fade in.' },
+          fadeOut: { type: 'number', description: 'For update: seconds for sound to fade out.' },
+        },
+        required: ['action'],
+      },
+      execute: (input) => {
+        const state = read();
+        if (!state.recording || state.clips.length === 0) return errorResult('There is no reel to edit yet.');
+        const action = readEnum(input, 'action', ['move', 'remove', 'update', 'split'] as const, 'update');
+        if (action === 'split') {
+          const at = readNumber(input, 'at', state.previewTime);
+          const clips = splitAt(state.clips, at, () => createId('clip'));
+          if (clips.length === state.clips.length) return errorResult('That moment is not inside a clip.');
+          edit({ reel: { clips, preserveTimeline: true, message: `Split the clip at ${at.toFixed(2)} seconds.` } });
+          return textResult({ done: true, action, at, clips: clips.length });
+        }
+
+        const id = requireString(input, 'id');
+        const clip = state.clips.find((entry) => entry.id === id);
+        if (!clip) return errorResult(`There is no clip named ${id}.`);
+        let clips = state.clips;
+        if (action === 'remove') {
+          if (clips.length === 1) return errorResult('The only clip cannot be removed.');
+          clips = removeClip(clips, id);
+        } else if (action === 'move') {
+          clips = moveClipTo(clips, id, readNumber(input, 'index', 0));
+        } else {
+          const change: Partial<Pick<Clip, 'name' | 'in' | 'out' | 'gain' | 'muted' | 'fadeIn' | 'fadeOut'>> = {};
+          if (typeof input.name === 'string') change.name = readString(input, 'name', clip.name ?? '');
+          if (typeof input.in === 'number') change.in = readNumber(input, 'in', clip.in);
+          if (typeof input.out === 'number') change.out = readNumber(input, 'out', clip.out);
+          if (typeof input.gain === 'number') change.gain = readNumber(input, 'gain', clip.gain ?? 1);
+          if (typeof input.muted === 'boolean') change.muted = readBoolean(input, 'muted', clip.muted ?? false);
+          if (typeof input.fadeIn === 'number') change.fadeIn = readNumber(input, 'fadeIn', clip.fadeIn ?? 0);
+          if (typeof input.fadeOut === 'number') change.fadeOut = readNumber(input, 'fadeOut', clip.fadeOut ?? 0);
+          clips = updateClip(clips, id, change, state.sourceDurations[clip.source] ?? clip.out);
+        }
+        if (clips === state.clips) return errorResult('That change did not move or update the clip.');
+        const message = action === 'remove' ? 'Removed the clip.' : action === 'move' ? 'Moved the clip.' : 'Updated the clip.';
+        edit({ reel: { clips, message } });
+        return textResult({ done: true, action, clips: layout(clips).map((entry) => entry.id) });
       },
     },
     {

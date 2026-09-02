@@ -18,11 +18,19 @@
 
 export type Clip = {
   id: string;
+  /** A person's name for the take. Empty falls back to its position. */
+  name?: string;
   /** Which recording this comes from. */
   source: string;
   /** The window of that recording to use, in its own seconds. */
   in: number;
   out: number;
+  /** Clip-local audio. One is unchanged, zero is silent. */
+  gain?: number;
+  muted?: boolean;
+  /** Seconds over which sound enters and leaves. */
+  fadeIn?: number;
+  fadeOut?: number;
 };
 
 /** A clip with its position on the reel worked out. */
@@ -236,12 +244,27 @@ export function reviveClips(value: unknown, makeId: () => string): Clip[] {
       typeof entry === 'object' && entry !== null
       && typeof (entry as Clip).source === 'string'
       && Number.isFinite((entry as Clip).in) && Number.isFinite((entry as Clip).out))
-    .map((entry) => ({
-      id: typeof entry.id === 'string' ? entry.id : makeId(),
-      source: entry.source,
-      in: Math.max(0, entry.in),
-      out: Math.max(0, entry.out),
-    }))
+    .map((entry) => {
+      const input = entry as Clip;
+      const start = Math.max(0, input.in);
+      const end = Math.max(0, input.out);
+      const length = Math.max(0, end - start);
+      const name = typeof input.name === 'string' ? input.name.trim().slice(0, 80) : '';
+      const gain = Number.isFinite(input.gain) ? Math.max(0, Math.min(2, input.gain!)) : 1;
+      const fadeIn = Number.isFinite(input.fadeIn) ? Math.max(0, Math.min(length, input.fadeIn!)) : 0;
+      const fadeOut = Number.isFinite(input.fadeOut) ? Math.max(0, Math.min(length, input.fadeOut!)) : 0;
+      return {
+        id: typeof input.id === 'string' ? input.id : makeId(),
+        source: input.source,
+        in: start,
+        out: end,
+        ...(name ? { name } : {}),
+        ...(gain !== 1 ? { gain } : {}),
+        ...(input.muted === true ? { muted: true } : {}),
+        ...(fadeIn > 0 ? { fadeIn } : {}),
+        ...(fadeOut > 0 ? { fadeOut } : {}),
+      };
+    })
     .filter((clip) => clip.out > clip.in);
 }
 
@@ -257,8 +280,12 @@ export function reviveClips(value: unknown, makeId: () => string): Clip[] {
 export function acrossClips(
   placed: Placed[],
   segments: { start: number; end: number; speed: number }[],
-): { start: number; end: number; speed: number; source: string }[] {
-  const out: { start: number; end: number; speed: number; source: string }[] = [];
+): {
+  start: number; end: number; speed: number; source: string;
+  gain?: number; muted?: boolean; fadeIn?: number; fadeOut?: number;
+  clipFrom?: number; clipLength?: number;
+}[] {
+  const out: ReturnType<typeof acrossClips> = [];
   for (const segment of segments) {
     for (const clip of placed) {
       const from = Math.max(segment.start, clip.at);
@@ -269,6 +296,14 @@ export function acrossClips(
         end: clip.in + (to - clip.at),
         speed: segment.speed,
         source: clip.source,
+        ...(clip.gain !== undefined ? { gain: clip.gain } : {}),
+        ...(clip.muted ? { muted: true } : {}),
+        ...(clip.fadeIn ? { fadeIn: clip.fadeIn } : {}),
+        ...(clip.fadeOut ? { fadeOut: clip.fadeOut } : {}),
+        ...((clip.fadeIn || clip.fadeOut) ? {
+          clipFrom: from - clip.at,
+          clipLength: clip.length,
+        } : {}),
       });
     }
   }
@@ -295,6 +330,49 @@ export function moveClip(clips: Clip[], id: string, by: -1 | 1): Clip[] {
   return out;
 }
 
+/** Moves a clip to an exact position, as drag and drop needs. */
+export function moveClipTo(clips: Clip[], id: string, index: number): Clip[] {
+  const from = clips.findIndex((clip) => clip.id === id);
+  if (from < 0) return clips;
+  const to = Math.max(0, Math.min(clips.length - 1, Math.round(index)));
+  if (from === to) return clips;
+  const out = [...clips];
+  const [moving] = out.splice(from, 1);
+  out.splice(to, 0, moving);
+  return out;
+}
+
+/** Changes the editable, clip-local properties without touching its identity. */
+export function updateClip(
+  clips: Clip[], id: string,
+  change: Partial<Pick<Clip, 'name' | 'in' | 'out' | 'gain' | 'muted' | 'fadeIn' | 'fadeOut'>>,
+  sourceDuration = Number.POSITIVE_INFINITY,
+): Clip[] {
+  const index = clips.findIndex((clip) => clip.id === id);
+  if (index < 0) return clips;
+  const clip = clips[index];
+  const limit = Number.isFinite(sourceDuration) ? Math.max(0.05, sourceDuration) : Number.POSITIVE_INFINITY;
+  let start = Math.max(0, Math.min(change.in ?? clip.in, limit - 0.05));
+  let end = Math.max(start + 0.05, Math.min(change.out ?? clip.out, limit));
+  if (end > limit) { end = limit; start = Math.min(start, Math.max(0, end - 0.05)); }
+  const length = end - start;
+  const name = (change.name ?? clip.name ?? '').trim().slice(0, 80);
+  const gain = Math.max(0, Math.min(2, change.gain ?? clip.gain ?? 1));
+  const fadeIn = Math.max(0, Math.min(length, change.fadeIn ?? clip.fadeIn ?? 0));
+  const fadeOut = Math.max(0, Math.min(length, change.fadeOut ?? clip.fadeOut ?? 0));
+  const next: Clip = {
+    ...clip, in: start, out: end,
+    ...(name ? { name } : { name: undefined }),
+    ...(gain !== 1 ? { gain } : { gain: undefined }),
+    ...((change.muted ?? clip.muted) ? { muted: true } : { muted: undefined }),
+    ...(fadeIn > 0 ? { fadeIn } : { fadeIn: undefined }),
+    ...(fadeOut > 0 ? { fadeOut } : { fadeOut: undefined }),
+  };
+  const out = [...clips];
+  out[index] = next;
+  return out;
+}
+
 /**
  * Moves everything on the timeline to follow the clips it was written against.
  *
@@ -308,24 +386,40 @@ export function moveClip(clips: Clip[], id: string, by: -1 | 1): Clip[] {
  * exists, and leaving it would put words over whatever moved into that gap.
  */
 export function remapBlocks<T extends { start: number; end: number }>(
-  blocks: T[], before: Placed[], after: Placed[],
+  blocks: T[], before: Placed[], after: Placed[], makeId?: () => string,
 ): { blocks: T[]; dropped: number } {
   const moved = new Map(after.map((clip) => [clip.id, clip]));
   const out: T[] = [];
   let dropped = 0;
 
   for (const block of blocks) {
-    const home = before.find((clip) => block.start >= clip.at && block.start < clip.at + clip.length);
-    if (!home) {
+    const homes = before.filter((clip) =>
+      block.end > clip.at && block.start < clip.at + clip.length);
+    if (homes.length === 0) {
       // Past the end of every clip, which is where a block sits when the reel
       // has shrunk under it. Kept where it is; the caller clamps.
       out.push(block);
       continue;
     }
-    const now = moved.get(home.id);
-    if (!now) { dropped += 1; continue; }
-    const shift = now.at - home.at;
-    out.push(shift === 0 ? block : { ...block, start: block.start + shift, end: block.end + shift });
+    let kept = 0;
+    for (const home of homes) {
+      const now = moved.get(home.id);
+      if (!now) continue;
+      const localStart = Math.max(block.start, home.at) - home.at;
+      const localEnd = Math.min(block.end, home.at + home.length) - home.at;
+      if (localStart >= now.length) continue;
+      const keptEnd = Math.min(localEnd, now.length);
+      if (keptEnd <= localStart) continue;
+      const piece = {
+        ...block,
+        start: now.at + localStart,
+        end: now.at + keptEnd,
+      };
+      if (kept > 0 && makeId && 'id' in piece && typeof piece.id === 'string') piece.id = makeId();
+      out.push(piece);
+      kept += 1;
+    }
+    if (kept === 0) dropped += 1;
   }
-  return { blocks: out, dropped };
+  return { blocks: out.sort((a, b) => a.start - b.start || a.end - b.end), dropped };
 }

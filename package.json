@@ -14,6 +14,7 @@
     "preview": "astro preview",
     "check": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "astro": "^7.2.9"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "fake-indexeddb": "^6.2.2",
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",

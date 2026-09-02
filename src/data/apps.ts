@@ -363,6 +363,7 @@ export const apps: AppEntry[] = [
     features: [
       'Screen, window, or this tab, with the microphone, system audio, and camera',
       'Automatic zoom, from your pointer when it can be known and from motion when it cannot',
+      'A multi-take reel with thumbnails, names, drag ordering, splitting, trimming, and clip-level sound',
       'Backgrounds, padding, rounded corners, a shadow, and a camera bubble',
       'Rendered a frame at a time, so what comes out is exactly what the preview showed',
     ],

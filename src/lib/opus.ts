@@ -35,7 +35,11 @@ export type AudioTrackOptions = {
    * start-to-end window is used, which is what every caller did before cuts
    * existed.
    */
-  spans?: { start: number; end: number; speed?: number; source?: string }[];
+  spans?: {
+    start: number; end: number; speed?: number; source?: string;
+    gain?: number; muted?: boolean; fadeIn?: number; fadeOut?: number;
+    clipFrom?: number; clipLength?: number;
+  }[];
   /**
    * Further recordings the spans may name, by id.
    *
@@ -55,6 +59,14 @@ export type AudioTrackOptions = {
 };
 
 export type EncodedAudio = { samples: WebmSample[]; track: WebmTrack; duration: number };
+export type EncodedAac = {
+  samples: WebmSample[];
+  description: Uint8Array;
+  sampleRate: number;
+  channels: number;
+  duration: number;
+  sampleDuration: number;
+};
 
 export function canEncodeAudio(): boolean {
   return typeof AudioEncoder !== 'undefined' && typeof AudioData !== 'undefined';
@@ -188,6 +200,114 @@ export async function encodeOpus(
   };
 }
 
+/**
+ * The same prepared soundtrack as Opus, encoded as AAC-LC for an MP4.
+ *
+ * AAC is not exposed by every WebCodecs implementation. Returning null lets a
+ * caller fall back to Opus while still producing a usable file and an honest
+ * compatibility note.
+ */
+export async function encodeAac(
+  source: Blob | ArrayBuffer | Uint8Array,
+  options: AudioTrackOptions = {},
+): Promise<EncodedAac | null> {
+  if (!canEncodeAudio()) return null;
+  const config: AudioEncoderConfig = {
+    codec: 'mp4a.40.2',
+    sampleRate: OPUS_RATE,
+    numberOfChannels: options.channels ?? 2,
+    bitrate: options.bitrate ?? 160_000,
+  };
+  try {
+    if (typeof AudioEncoder.isConfigSupported === 'function') {
+      const support = await AudioEncoder.isConfigSupported(config);
+      if (!support.supported) return null;
+    }
+  } catch { return null; }
+
+  const prepared = await prepareAudio(source, options);
+  if (!prepared) return null;
+  const { channels, processed, frames } = prepared;
+  config.numberOfChannels = channels;
+
+  const samples: WebmSample[] = [];
+  let failure: Error | null = null;
+  let description: Uint8Array | undefined;
+  const frameSize = 1024;
+  const encoder = new AudioEncoder({
+    output: (chunk, metadata) => {
+      const raw: unknown = metadata?.decoderConfig?.description;
+      if (raw && !description) {
+        description = raw instanceof ArrayBuffer
+          ? new Uint8Array(raw)
+          : ArrayBuffer.isView(raw)
+            ? new Uint8Array(raw.buffer as ArrayBuffer, raw.byteOffset, raw.byteLength)
+            : undefined;
+      }
+      const data = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(data);
+      samples.push({ track: options.track ?? 2, timestamp: chunk.timestamp, data, keyframe: true });
+    },
+    error: (error) => { failure = error; },
+  });
+  try { encoder.configure(config); } catch { return null; }
+
+  for (let offset = 0; offset < frames; offset += frameSize) {
+    if (failure) break;
+    const length = Math.min(frameSize, frames - offset);
+    const flat = new Float32Array(length * channels);
+    for (let channel = 0; channel < channels; channel += 1) {
+      flat.set(processed[channel].subarray(offset, offset + length), channel * length);
+    }
+    const data = new AudioData({
+      format: 'f32-planar', sampleRate: OPUS_RATE, numberOfFrames: length,
+      numberOfChannels: channels, timestamp: Math.round((offset / OPUS_RATE) * 1_000_000), data: flat,
+    });
+    encoder.encode(data);
+    data.close();
+  }
+  await encoder.flush().catch(() => { failure = new AudioTrackError('AAC encoding failed.'); });
+  encoder.close();
+  if (failure || samples.length === 0) return null;
+
+  // AudioSpecificConfig for AAC-LC at 48 kHz. WebCodecs normally supplies it,
+  // but the two-byte form is deterministic for mono and stereo.
+  const fallback = Uint8Array.from([0x11, 0x80 | (channels << 3)]);
+  return {
+    samples, description: description ?? fallback, sampleRate: OPUS_RATE, channels,
+    duration: frames / OPUS_RATE,
+    sampleDuration: Math.round((frameSize / OPUS_RATE) * 1_000_000),
+  };
+}
+
+type PreparedAudio = { channels: 1 | 2; processed: Float32Array[]; frames: number };
+
+async function prepareAudio(
+  source: Blob | ArrayBuffer | Uint8Array, options: AudioTrackOptions,
+): Promise<PreparedAudio | null> {
+  const buffer = await decodeAudio(source);
+  const extra = new Map<string, AudioBuffer>();
+  for (const [id, bytes] of options.sources ?? []) {
+    const decoded = await decodeAudio(bytes);
+    if (decoded) extra.set(id, decoded);
+  }
+  const any = buffer ?? extra.values().next().value ?? null;
+  if (!any) return null;
+  const channels = Math.min(2, options.channels ?? any.numberOfChannels) as 1 | 2;
+  const start = Math.max(0, options.start ?? 0);
+  const end = Math.min(buffer?.duration ?? Infinity, options.end ?? buffer?.duration ?? Infinity);
+  const spans = (options.spans ?? []).filter((span) => span.end > span.start);
+  const across = extra.size > 0 || spans.some((span) => span.source !== undefined);
+  if (spans.length === 0 && !(end > start)) return null;
+  const planes = across
+    ? joinAcross(spans, extra, buffer, channels)
+    : spans.length > 0
+      ? joinSpans(buffer!, spans, channels)
+      : resampleTo48k(buffer!, start, end, channels);
+  const processed = options.process ? planes.map((plane) => options.process!(plane, OPUS_RATE)) : planes;
+  return processed[0].length > 0 ? { channels, processed, frames: processed[0].length } : null;
+}
+
 /** Reads any format the browser can, and reports nothing when there is no audio. */
 async function decodeAudio(source: Blob | ArrayBuffer | Uint8Array): Promise<AudioBuffer | null> {
   const bytes = source instanceof Blob
@@ -248,7 +368,11 @@ export function joinSpans(
  * picture at every join.
  */
 export function joinAcross(
-  spans: { start: number; end: number; speed?: number; source?: string }[],
+  spans: {
+    start: number; end: number; speed?: number; source?: string;
+    gain?: number; muted?: boolean; fadeIn?: number; fadeOut?: number;
+    clipFrom?: number; clipLength?: number;
+  }[],
   buffers: Map<string, AudioBuffer>,
   fallback: AudioBuffer | null,
   channels: number,
@@ -260,7 +384,22 @@ export function joinAcross(
       const frames = Math.round(((span.end - span.start) / speed) * OPUS_RATE);
       return Array.from({ length: channels }, () => new Float32Array(Math.max(0, frames)));
     }
-    return resampleTo48k(buffer, span.start, span.end, channels, speed);
+    const piece = resampleTo48k(buffer, span.start, span.end, channels, speed);
+    const gain = span.muted ? 0 : Math.max(0, Math.min(2, span.gain ?? 1));
+    const fadeIn = Math.max(0, span.fadeIn ?? 0);
+    const fadeOut = Math.max(0, span.fadeOut ?? 0);
+    if (gain === 1 && fadeIn === 0 && fadeOut === 0) return piece;
+    const clipFrom = Math.max(0, span.clipFrom ?? 0);
+    const clipLength = Math.max(0, span.clipLength ?? (span.end - span.start));
+    for (const plane of piece) {
+      for (let index = 0; index < plane.length; index += 1) {
+        const clipAt = clipFrom + (index / OPUS_RATE) * speed;
+        const enter = fadeIn > 0 ? Math.min(1, clipAt / fadeIn) : 1;
+        const leave = fadeOut > 0 ? Math.min(1, Math.max(0, clipLength - clipAt) / fadeOut) : 1;
+        plane[index] *= gain * Math.min(enter, leave);
+      }
+    }
+    return piece;
   });
 
   const total = pieces.reduce((sum, piece) => sum + piece[0].length, 0);

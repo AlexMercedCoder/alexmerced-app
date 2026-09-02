@@ -66,8 +66,9 @@ import {
 } from './sidecar';
 import { describeTidy, planTidy, tidyChangesAnything } from './tidy';
 import {
-  isPlainRecording, joins, layout, moveClip, reelDuration, remapBlocks, removeClip,
-  shiftAfter, singleClip, sourceOf, splice, type Clip, type Placed,
+  isPlainRecording, joins, layout, moveClip, moveClipTo, reelDuration, remapBlocks,
+  removeClip, shiftAfter, singleClip, sourceOf, splice, splitAt, updateClip,
+  type Clip, type Placed,
 } from './reel';
 import {
   GENERAL_HELP, SHORTCUT_GROUPS, SHORTCUTS, shortcutFor, TRACK_HELP, trackHelp,
@@ -1269,7 +1270,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
     previewTime = Math.min(previewTime, trim.end);
 
-    remember('reel');
+    // Structural edits are deliberate steps. Coalescing two quick operations
+    // (for example split, then remove) makes Undo jump over both of them.
+    remember();
     renderTrim();
     renderZooms();
     renderTexts();
@@ -1305,12 +1308,49 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     for (const [index, clip] of layout(clips).entries()) {
       const chip = document.createElement('div');
       chip.className = 'll-clip';
+      chip.draggable = true;
+      chip.addEventListener('dragstart', (event) => {
+        event.dataTransfer?.setData('text/plain', clip.id);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+        chip.classList.add('is-dragging');
+      });
+      chip.addEventListener('dragend', () => chip.classList.remove('is-dragging'));
+      chip.addEventListener('dragover', (event) => { event.preventDefault(); });
+      chip.addEventListener('drop', (event) => {
+        event.preventDefault();
+        const id = event.dataTransfer?.getData('text/plain');
+        if (id) void reorderClipTo(id, index);
+      });
 
-      const label = document.createElement('span');
-      const name = document.createElement('strong');
-      name.textContent = `Clip ${index + 1}`;
-      label.append(name, document.createTextNode(`, ${formatClock(clip.length)}`));
-      chip.append(label);
+      const take = takes.get(clip.source);
+      if (take?.video.src) {
+        const thumb = document.createElement('video');
+        thumb.className = 'll-clip__thumb';
+        thumb.src = take.video.src;
+        thumb.currentTime = Math.min(clip.in, Math.max(0, take.duration - 0.05));
+        thumb.muted = true;
+        thumb.playsInline = true;
+        thumb.preload = 'metadata';
+        thumb.setAttribute('aria-hidden', 'true');
+        chip.append(thumb);
+      }
+
+      const body = document.createElement('div');
+      body.className = 'll-clip__body';
+      const head = document.createElement('div');
+      head.className = 'll-clip__head';
+      const name = document.createElement('input');
+      name.className = 'll-clip__name';
+      name.value = clip.name ?? `Clip ${index + 1}`;
+      name.setAttribute('aria-label', `Name clip ${index + 1}`);
+      name.addEventListener('change', () => updateClipDetails(clip.id, { name: name.value }, 'Renamed the clip.'));
+      const length = document.createElement('span');
+      length.textContent = formatClock(clip.length);
+      head.append(name, length);
+      body.append(head);
+
+      const actions = document.createElement('div');
+      actions.className = 'll-clip__actions';
 
       for (const [by, glyph, says] of [
         [-1, '\u2190', 'earlier'], [1, '\u2192', 'later'],
@@ -1322,7 +1362,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         move.setAttribute('aria-label', move.title);
         move.disabled = by === -1 ? index === 0 : index === clips.length - 1;
         move.addEventListener('click', () => { void reorderClip(clip.id, by); });
-        chip.append(move);
+        actions.append(move);
       }
 
       const drop = document.createElement('button');
@@ -1332,7 +1372,59 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       drop.title = `Remove clip ${index + 1}`;
       drop.setAttribute('aria-label', drop.title);
       drop.addEventListener('click', () => { void dropClip(clip.id); });
-      chip.append(drop);
+      actions.append(drop);
+      body.append(actions);
+
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = 'Trim and sound';
+      details.append(summary);
+      const controls = document.createElement('div');
+      controls.className = 'll-clip__settings';
+      const numeric = (
+        label: string, value: number, min: number, max: number, step: number,
+        change: (value: number) => void,
+      ) => {
+        const field = document.createElement('label');
+        field.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number'; input.value = String(Number(value.toFixed(2)));
+        input.min = String(min); input.max = String(max); input.step = String(step);
+        input.addEventListener('change', () => change(Number(input.value)));
+        field.append(input); controls.append(field);
+      };
+      const sourceDuration = take?.duration ?? clip.out;
+      numeric('In', clip.in, 0, Math.max(0, sourceDuration - 0.05), 0.05,
+        (value) => { void editClipWindow(clip.id, { in: value }); });
+      numeric('Out', clip.out, 0.05, sourceDuration, 0.05,
+        (value) => { void editClipWindow(clip.id, { out: value }); });
+      numeric('Volume', clip.gain ?? 1, 0, 2, 0.05,
+        (value) => updateClipDetails(clip.id, { gain: value }, 'Changed the clip volume.'));
+      numeric('Fade in', clip.fadeIn ?? 0, 0, clip.length, 0.05,
+        (value) => updateClipDetails(clip.id, { fadeIn: value }, 'Changed the clip fade.'));
+      numeric('Fade out', clip.fadeOut ?? 0, 0, clip.length, 0.05,
+        (value) => updateClipDetails(clip.id, { fadeOut: value }, 'Changed the clip fade.'));
+      const mute = document.createElement('label');
+      const muteInput = document.createElement('input');
+      muteInput.type = 'checkbox'; muteInput.checked = clip.muted === true;
+      muteInput.addEventListener('change', () =>
+        updateClipDetails(clip.id, { muted: muteInput.checked }, muteInput.checked ? 'Muted the clip.' : 'Unmuted the clip.'));
+      mute.append(muteInput, document.createTextNode(' Mute'));
+      controls.append(mute);
+      const normalise = document.createElement('button');
+      normalise.type = 'button'; normalise.textContent = 'Normalise clip';
+      normalise.addEventListener('click', () => { void normaliseClipAudio(clip.id); });
+      controls.append(normalise);
+      if (index < clips.length - 1) {
+        const smooth = document.createElement('button');
+        smooth.type = 'button'; smooth.textContent = 'Smooth next join';
+        smooth.title = 'Fade this clip out while the next clip fades in';
+        smooth.addEventListener('click', () => smoothClipJoin(clip.id));
+        controls.append(smooth);
+      }
+      details.append(controls);
+      body.append(details);
+      chip.append(body);
 
       holder.append(chip);
     }
@@ -1353,7 +1445,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     let dropped = 0;
     const move = <T extends { start: number; end: number }>(list: T[]): T[] => {
-      const out = remapBlocks(list, before, after);
+      const out = remapBlocks(list, before, after, () => createId('block'));
       dropped += out.dropped;
       return out.blocks;
     };
@@ -1385,6 +1477,85 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const next = moveClip(clips, id, by);
     if (next === clips) return;
     await adoptReorder(next, `Moved a clip ${by === -1 ? 'earlier' : 'later'}.`);
+  }
+
+  async function reorderClipTo(id: string, index: number): Promise<void> {
+    const next = moveClipTo(clips, id, index);
+    if (next === clips) return;
+    await adoptReorder(next, 'Reordered the clips.');
+  }
+
+  async function editClipWindow(
+    id: string, change: Partial<Pick<Clip, 'in' | 'out'>>,
+  ): Promise<void> {
+    const clip = clips.find((entry) => entry.id === id);
+    if (!clip) return;
+    const next = updateClip(clips, id, change, takes.get(clip.source)?.duration);
+    await adoptReorder(next, 'Trimmed the clip.');
+  }
+
+  function updateClipDetails(
+    id: string,
+    change: Partial<Pick<Clip, 'name' | 'gain' | 'muted' | 'fadeIn' | 'fadeOut'>>,
+    said: string,
+  ): void {
+    const clip = clips.find((entry) => entry.id === id);
+    if (!clip) return;
+    clips = updateClip(clips, id, change, takes.get(clip.source)?.duration);
+    const field = Object.keys(change)[0] ?? 'detail';
+    remember(`clip:${id}:${field}`);
+    renderClips();
+    renderTransport();
+    void drawPreview();
+    setStatus(said, 'good');
+  }
+
+  async function normaliseClipAudio(id: string): Promise<void> {
+    const clip = clips.find((entry) => entry.id === id);
+    const take = clip ? takes.get(clip.source) : null;
+    if (!clip || !take) return;
+    let analysed = takeWaves.get(clip.source);
+    if (analysed === undefined) {
+      analysed = await analyseAudio(take.blob).catch(() => null);
+      takeWaves.set(clip.source, analysed);
+    }
+    if (!analysed || analysed.loudness.length === 0) {
+      setStatus('That clip has no sound to normalise.', 'bad');
+      return;
+    }
+    const from = Math.floor((clip.in / analysed.duration) * analysed.loudness.length);
+    const to = Math.max(from + 1, Math.ceil((clip.out / analysed.duration) * analysed.loudness.length));
+    let peak = 0;
+    for (const value of analysed.loudness.subarray(from, to)) peak = Math.max(peak, value);
+    if (peak <= 1e-4) { setStatus('That clip is silent.', 'bad'); return; }
+    // RMS columns sit well below sample peaks. Bringing the loudest column to
+    // 0.22 is a useful speech level while the two-times cap leaves headroom.
+    updateClipDetails(id, { gain: Math.max(0.25, Math.min(2, 0.22 / peak)) }, 'Normalised the clip volume.');
+  }
+
+  function smoothClipJoin(id: string): void {
+    const index = clips.findIndex((clip) => clip.id === id);
+    const current = clips[index];
+    const next = clips[index + 1];
+    if (!current || !next) return;
+    const duration = Math.min(0.25, (current.out - current.in) / 2, (next.out - next.in) / 2);
+    clips = updateClip(clips, current.id, { fadeOut: duration }, takes.get(current.source)?.duration);
+    clips = updateClip(clips, next.id, { fadeIn: duration }, takes.get(next.source)?.duration);
+    remember(`clip:${current.id}:join`);
+    renderClips();
+    renderTransport();
+    void drawPreview();
+    setStatus(`Smoothed the next join over ${duration.toFixed(2)} seconds.`, 'good');
+  }
+
+  async function splitClipHere(): Promise<void> {
+    if (!recording) return;
+    const next = splitAt(clips, previewTime, () => createId('clip'));
+    if (next.length === clips.length) {
+      setStatus('Move the playhead inside a clip to split it.', 'bad');
+      return;
+    }
+    await adoptReel(next, `Split the clip at ${formatClock(previewTime)}.`);
   }
 
   /** Puts a recording on the end of the reel. */
@@ -1470,6 +1641,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const clipFileInput = $<HTMLInputElement>('ll-clip-file');
   $<HTMLButtonElement>('ll-add-clip').addEventListener('click', () => clipFileInput.click());
+  $<HTMLButtonElement>('ll-split-clip').addEventListener('click', () => { void splitClipHere(); });
   clipFileInput.addEventListener('change', () => {
     const file = clipFileInput.files?.[0];
     clipFileInput.value = '';
@@ -4170,6 +4342,24 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     return stageClip.at + Math.max(0, element.currentTime - stageClip.in);
   }
 
+  function clipAudioLevel(clip: Placed | null, sourceTime: number): number {
+    if (!clip) return 1;
+    if (clip.muted) return 0;
+    const local = Math.max(0, sourceTime - clip.in);
+    const enter = clip.fadeIn ? Math.min(1, local / clip.fadeIn) : 1;
+    const leave = clip.fadeOut ? Math.min(1, Math.max(0, clip.length - local) / clip.fadeOut) : 1;
+    return Math.max(0, Math.min(2, clip.gain ?? 1)) * Math.min(enter, leave);
+  }
+
+  function applyPlaybackVolume(element: HTMLVideoElement, clip: Placed | null): void {
+    const hasSound = clip
+      ? takes.get(clip.source)?.hasAudio ?? recording?.hasAudio ?? false
+      : recording?.hasAudio ?? false;
+    const level = clipAudioLevel(clip, element.currentTime);
+    element.muted = muted || !hasSound || level <= 0;
+    element.volume = Math.max(0, Math.min(1, Number(volInput.value) * level));
+  }
+
   function stopFrames(): void {
     const element = driver();
     if (frameHandle && element) {
@@ -4207,8 +4397,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     stageClip = to;
 
     await seekSafely(arriving, to.in).catch(() => {});
-    arriving.muted = muted || !(takes.get(to.source)?.hasAudio ?? true);
-    arriving.volume = Number(volInput.value);
+    applyPlaybackVolume(arriving, to);
     try {
       await arriving.play();
     } catch {
@@ -4231,6 +4420,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
 
     const time = reelTime();
+    applyPlaybackVolume(element, stageClip);
 
     if (time >= trim.end - 1e-3) {
       if (looping) { void restart(); return; }
@@ -4313,11 +4503,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     // Muted for scrubbing, unmuted to play. Without this you cannot hear your
     // own narration while editing, which is most of what there is to check.
-    const hasSound = spot.clip
-      ? takes.get(spot.clip.source)?.hasAudio ?? recording.hasAudio
-      : recording.hasAudio;
-    spot.element.muted = muted || !hasSound;
-    spot.element.volume = Number(volInput.value);
+    applyPlaybackVolume(spot.element, spot.clip);
 
     playing = true;
     renderTransport();
@@ -4797,12 +4983,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       previewTime,
       playing,
       clips,
+      sourceDurations: Object.fromEntries([...takes].map(([id, take]) => [id, take.duration])),
     }),
     (change) => {
       // Tidying is a whole pass rather than a value to set, and it renders and
       // records itself, so it returns rather than falling through to the
       // single `remember` below and recording a second, empty step.
       if (change.tidy) { void tidyUp(); return; }
+      if (change.reel) {
+        if (change.reel.preserveTimeline) void adoptReel(change.reel.clips, change.reel.message);
+        else void adoptReorder(change.reel.clips, change.reel.message);
+        return;
+      }
       if (change.crop) { crop = change.crop; cropAspect = 'free'; }
       if (change.trim) trim = { ...change.trim };
       if (change.texts) { texts = change.texts; selectedText = null; }

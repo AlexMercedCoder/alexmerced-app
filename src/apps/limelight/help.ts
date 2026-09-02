@@ -159,6 +159,7 @@ export const GENERAL_HELP: { heading: string; points: string[] }[] = [
       'Press M while recording to mark a chapter.',
       'Open a video reads a file you already have.',
       'Add a clip puts another recording on the end of this one.',
+      'Clip cards can be dragged into order, renamed, trimmed, muted, faded or normalised. Split clip here cuts the clip under the playhead in two.',
       'Record over this replaces whatever is selected on the sound track with a fresh take, and drops it in at the playhead when nothing is selected.',
       'A join between two takes is marked on the trim bar, and everything after a retake moves with it.',
       'A recording is written down as it is made, so a crash does not lose it.',

@@ -123,6 +123,7 @@ const app = getApp('limelight');
                not looking at. -->
           <button class="btn btn--sm btn--primary" id="ll-tidy">Tidy this up</button>
           <button class="btn btn--sm" id="ll-add-clip">Add a clip</button>
+          <button class="btn btn--sm" id="ll-split-clip">Split clip here</button>
           <button class="btn btn--sm" id="ll-retake">Record over this</button>
           <input type="file" id="ll-clip-file" accept="video/*" hidden />
           <span class="ll-time" id="ll-trim-label"></span>
@@ -654,13 +655,23 @@ const app = getApp('limelight');
   .ll-group > .ll-card:last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 
   /* The picker, and the tracks it switches between. */
-  .ll-clips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.8rem 0 0.2rem; }
+  .ll-clips { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.55rem; margin: 0.8rem 0 0.2rem; }
   .ll-clip {
-    display: flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.3rem 0.25rem 0.6rem;
-    border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-raised);
+    display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.45rem;
+    border: 1px solid var(--rule); border-radius: 10px; background: var(--paper-raised);
     font-size: 0.76rem; color: var(--ink-soft);
   }
-  .ll-clip strong { font-weight: 600; color: var(--ink); }
+  .ll-clip.is-dragging { opacity: 0.45; }
+  .ll-clip__thumb { width: 5rem; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #111; }
+  .ll-clip__body { min-width: 0; flex: 1; }
+  .ll-clip__head, .ll-clip__actions { display: flex; align-items: center; gap: 0.3rem; }
+  .ll-clip__head { justify-content: space-between; }
+  .ll-clip__name {
+    min-width: 0; width: 100%; border: 0; border-bottom: 1px solid transparent;
+    background: transparent; color: var(--ink); font: inherit; font-weight: 600;
+  }
+  .ll-clip__name:focus { outline: 0; border-bottom-color: var(--accent); }
+  .ll-clip__actions { margin-top: 0.25rem; }
   .ll-clip button {
     border: 0; background: none; cursor: pointer; font: inherit; line-height: 1;
     padding: 0.15rem 0.25rem; border-radius: 0.25rem; color: var(--ink-faint);
@@ -668,6 +679,11 @@ const app = getApp('limelight');
   .ll-clip button:hover:not(:disabled) { background: var(--paper-sunk); color: var(--ink); }
   .ll-clip button:disabled { opacity: 0.3; cursor: default; }
   .ll-clip__drop:hover:not(:disabled) { color: var(--danger); }
+  .ll-clip details { margin-top: 0.3rem; }
+  .ll-clip summary { cursor: pointer; color: var(--ink-faint); }
+  .ll-clip__settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.35rem; margin-top: 0.4rem; }
+  .ll-clip__settings label { display: grid; gap: 0.12rem; }
+  .ll-clip__settings input[type="number"] { width: 100%; padding: 0.25rem; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); color: var(--ink); }
   .ll-picker { display: flex; gap: 0.3rem; flex-wrap: wrap; margin: 0.9rem 0 0.5rem; }
   .ll-pick {
     display: inline-flex; align-items: center; gap: 0.35rem;
