@@ -273,3 +273,31 @@ Limelight separates its undoable state (`editorState.ts`), save projection and
 serialized per-project autosaves (`persistence.ts`), playback (`playback.ts`) and
 presentation controls (`controls.ts`). `ui.ts` composes those modules with the
 remaining editing tracks and capture workflow.
+
+## Shared workspace
+
+The Workspace page backs up selected tools, including binary recordings and images
+when media workspaces are selected. Its versioned JSON archive preserves IndexedDB
+records and app preferences. Restore validates the archive and commits one workspace
+at a time, with rollback for a failed workspace. A recovery download is offered before
+replacement. It does not back up transient Quarry tables or files that a tool has not saved.
+
+The tool finder supports task searches, pinned tools, recent tools, and Ctrl/Cmd+K.
+The file inbox on the homepage and Workspace page offers compatible tools. Transfers
+are stored temporarily in IndexedDB and never uploaded. Quarry results can go to
+Ordinate, Decanter output to Quarry, Loupe images to Quire, and selected Stint project
+time to a draft Tally invoice. Stint does not mark entries as invoiced.
+
+Tools acquire a Web Lock before mounting, so another editing tab cannot overwrite
+the same workspace. Close the first tab, then use Try again in the second. Backup
+and restore also acquire these locks. Browsers without Web Locks cannot provide this
+protection; avoid editing the same tool in multiple tabs there.
+
+Offline readiness distinguishes core pages, the SQL engine, and partial speech-model
+caches. Optional downloads are explicit and removable. Speech preparation and WAV
+export run in cancellable workers. PDF and image jobs cancel between processing
+steps; a running assembly step finishes before cancellation takes effect.
+
+The browser suite includes archive restore, task search and focus return, two-tab
+ownership, file transfers, mobile layout, and axe accessibility checks. These automated
+checks supplement keyboard testing; they do not certify every screen-reader workflow.

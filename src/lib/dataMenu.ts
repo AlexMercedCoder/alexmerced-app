@@ -1,3 +1,4 @@
+import { previewImport } from './workspace/importPreview';
 import { downloadFile, exportFilename, ImportError, pickTextFile, type ImportMode } from './portable';
 import { toast } from './toast';
 
@@ -36,6 +37,10 @@ export function wireDataMenu(root: ParentNode, options: DataMenuOptions): void {
     const text = await pickTextFile();
     if (text === null) return;
 
+    let current: unknown;
+    let preview: ReturnType<typeof previewImport>;
+    try { current = await options.buildExport(); preview = previewImport(text, options.app, current); }
+    catch (error) { toast(error instanceof Error ? error.message : 'The file could not be checked.', { kind: 'error' }); return; }
     const runImport = async (mode: ImportMode) => {
       try {
         const summary = await options.applyImport(text, mode);
@@ -56,6 +61,12 @@ export function wireDataMenu(root: ParentNode, options: DataMenuOptions): void {
       return;
     }
 
+    dialog.querySelector('[data-import-preview]')?.remove();
+    const details = document.createElement('div'); details.dataset.importPreview = ''; details.className = 'workspace-panel';
+    for (const line of preview.lines) { const paragraph = document.createElement('p'); paragraph.textContent = line; details.append(paragraph); }
+    const backup = document.createElement('button'); backup.type = 'button'; backup.className = 'btn'; backup.textContent = 'Download backup before importing';
+    backup.onclick = () => downloadFile(exportFilename(options.app), JSON.stringify(current, null, 2)); details.append(backup);
+    dialog.querySelector('form')?.prepend(details);
     dialog.returnValue = '';
     dialog.showModal();
     dialog.addEventListener(

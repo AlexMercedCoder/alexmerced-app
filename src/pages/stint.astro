@@ -71,9 +71,11 @@ const app = getApp('stint');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountStint } from '../apps/stint/ui';
   const root = document.getElementById('stint-root');
-  if (root) void mountStint(root as HTMLElement);
+  if (root) void mountWorkspace('stint', async () => { await mountStint(root as HTMLElement); await receiveInput('stint'); });
 </script>
 
 <style is:global>

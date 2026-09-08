@@ -88,9 +88,11 @@ const app = getApp('cutaway');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountCutaway } from '../apps/cutaway/ui';
   const root = document.getElementById('cutaway-root');
-  if (root) void mountCutaway(root as HTMLElement);
+  if (root) void mountWorkspace('cutaway', async () => { await mountCutaway(root as HTMLElement); await receiveInput('cutaway'); });
 </script>
 
 <style is:global>

@@ -1,3 +1,4 @@
+import { runJob } from '../../lib/workspace/jobs';
 import { formatBytes } from '../../lib/bytes';
 import { createId } from '../../lib/id';
 import { downloadBlob, downloadFile } from '../../lib/portable';
@@ -4064,11 +4065,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       const ready = { ...current, keyframes: trackFromBlocks(editor.zooms, current.duration, editor.settings.zoom) };
       // The worker first, so the page stays usable. Anything it cannot finish
       // comes back here rather than failing.
-      const offloaded = canExportInWorker(ready)
-        ? await renderInWorker(ready, onProgress, controller.signal)
-        : null;
-      const result = offloaded
-        ?? await render(ready, points, onProgress, controller.signal);
+      const activeController = controller;
+      const result = await runJob('Export video', async (signal, report) => {
+        signal.addEventListener('abort', () => activeController.abort(), { once: true });
+        const progress = (value: { stage: string; done: number; total: number }) => { onProgress(value); report(`${value.stage}: ${value.done} of ${value.total}`); };
+        const offloaded = canExportInWorker(ready) ? await renderInWorker(ready, progress, activeController.signal) : null;
+        return offloaded ?? await render(ready, points, progress, activeController.signal);
+      });
       const stem = (stored?.name ?? 'limelight').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'limelight';
       downloadBlob(`${stem}.${result.extension}`, result.blob);
       setStatus(

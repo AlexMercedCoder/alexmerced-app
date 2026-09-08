@@ -1,3 +1,4 @@
+import { receiveFiles } from '../../lib/workspace/handoff';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadBlob, downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
@@ -386,6 +387,13 @@ export async function mountOrdinate(root: HTMLElement): Promise<void> {
     renderList();
   }
 
+  await receiveFiles('ordinate', async files => {
+    const file = files[0];
+    const chart = createChart(file.name.replace(/\.[^.]+$/, ''), await file.text());
+    const parsed = parseInput(chart.source);
+    if (!parsed.rows.length) throw new Error('This file has no chartable rows.');
+    await saveChart(chart); charts.push(chart); select(chart.id);
+  });
   // Everything this app can do, offered to an agent on this page.
   registerTools(ordinateTools(refreshLibrary));
 }

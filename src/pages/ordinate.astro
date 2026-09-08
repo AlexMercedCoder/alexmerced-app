@@ -35,12 +35,12 @@ const app = getApp('ordinate');
         </div>
       </aside>
 
-      <main class="or-main">
+      <section aria-label="Ordinate workspace" class="or-main">
         <div class="or-canvas" id="or-canvas"></div>
         <p class="or-warning" id="or-warning" hidden></p>
 
         <div class="or-types" id="or-types" role="group" aria-label="Chart type"></div>
-      </main>
+      </section>
 
       <aside class="or-right">
         <label class="field-row"><span>Chart name</span><input class="field" id="or-name" /></label>
@@ -87,9 +87,11 @@ const app = getApp('ordinate');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountOrdinate } from '../apps/ordinate/ui';
   const root = document.getElementById('ordinate-root');
-  if (root) void mountOrdinate(root as HTMLElement);
+  if (root) void mountWorkspace('ordinate', async () => { await mountOrdinate(root as HTMLElement); await receiveInput('ordinate'); });
 </script>
 
 <style is:global>

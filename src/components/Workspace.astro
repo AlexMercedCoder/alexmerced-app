@@ -1,0 +1,42 @@
+<button class="btn btn--sm" id="workspace-launch" aria-haspopup="dialog" aria-controls="workspace-launcher">Find a tool</button>
+<a class="btn btn--sm" href="/workspace">Workspace</a>
+<dialog id="workspace-launcher" class="workspace-dialog" aria-labelledby="launcher-title">
+  <form method="dialog"><button class="btn workspace-close" aria-label="Close tool finder">Close</button></form>
+  <h2 id="launcher-title">Find a tool</h2>
+  <label for="launcher-query">Search by name or task</label>
+  <input id="launcher-query" class="field" type="search" placeholder="Try combine PDFs or track hours" autocomplete="off" />
+  <p class="muted">Ctrl or Command + K opens this finder. Tab moves through results. Escape closes it.</p>
+  <div id="launcher-results" aria-live="polite"></div>
+</dialog>
+<script>
+  import { apps } from '../data/apps';
+  import { readPref, writePref } from '../lib/prefs';
+  const dialog = document.querySelector<HTMLDialogElement>('#workspace-launcher')!;
+  const input = document.querySelector<HTMLInputElement>('#launcher-query')!;
+  const results = document.querySelector('#launcher-results')!;
+  const opener = document.querySelector<HTMLButtonElement>('#workspace-launch')!;
+  const current = location.pathname.split('/')[1];
+  let recent = readPref<string[]>('workspace:recent', []);
+  let favorites = readPref<string[]>('workspace:favorites', []);
+  if (apps.some(a => a.slug === current)) { recent = [current, ...recent.filter(s => s !== current)].slice(0, 6); writePref('workspace:recent', recent); }
+  function render() {
+    const terms = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const aliases: Record<string, string> = { quire: 'combine pdfs join pdf', stint: 'track hours time', loupe: 'shrink image picture', ordinate: 'graph plot', laneway: 'tasks todo' };
+    const found = apps.filter(a => terms.every(t => `${a.name} ${a.description} ${a.keywords.join(' ')} ${aliases[a.slug] ?? ''}`.toLowerCase().includes(t)));
+    found.sort((a, b) => Number(favorites.includes(b.slug)) - Number(favorites.includes(a.slug)) || (recent.indexOf(a.slug) < 0 ? 99 : recent.indexOf(a.slug)) - (recent.indexOf(b.slug) < 0 ? 99 : recent.indexOf(b.slug)));
+    results.replaceChildren();
+    if (!found.length) { results.textContent = 'No tools match. Try a shorter search.'; return; }
+    for (const app of found) {
+      const row = document.createElement('div'); row.className = 'launcher-row';
+      const link = document.createElement('a'); link.href = `/${app.slug}`; link.textContent = `${app.name} · ${app.tagline}${recent.includes(app.slug) ? ' · Recent' : ''}`;
+      const star = document.createElement('button'); star.className = 'btn btn--sm'; star.textContent = favorites.includes(app.slug) ? 'Unpin' : 'Pin'; star.setAttribute('aria-label', `${star.textContent} ${app.name}`); star.setAttribute('aria-pressed', String(favorites.includes(app.slug)));
+      star.onclick = () => { favorites = favorites.includes(app.slug) ? favorites.filter(s => s !== app.slug) : [...favorites, app.slug]; writePref('workspace:favorites', favorites); render(); (results.querySelector(`[aria-label$=" ${app.name}"]`) as HTMLElement)?.focus(); };
+      row.append(link, star); results.append(row);
+    }
+  }
+  function open() { if (!dialog.open) dialog.showModal(); render(); input.focus(); }
+  opener.onclick = open; input.oninput = render;
+  input.onkeydown = event => { if (event.key === 'Enter') (results.querySelector('a') as HTMLElement)?.click(); };
+  dialog.addEventListener('close', () => opener.focus());
+  document.addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); if (dialog.open) dialog.close(); else open(); } });
+</script>

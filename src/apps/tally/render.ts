@@ -143,7 +143,7 @@ export async function toPdf(invoice: Invoice, theme: Theme): Promise<Uint8Array>
 
   for (const item of rows) {
     const descriptionWidth = cols.quantity - cols.description - 12;
-    const lines = wrapText(item.description || '—', face.regular, 10, descriptionWidth);
+    const lines = wrapText(item.description || '-', face.regular, 10, descriptionWidth);
     const rowHeight = Math.max(lines.length * 14, 18) + 8;
 
     if (top + rowHeight > bottomLimit()) newPage();

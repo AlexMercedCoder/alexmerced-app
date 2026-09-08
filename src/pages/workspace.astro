@@ -1,0 +1,51 @@
+---
+import Base from '../layouts/Base.astro';
+import { apps } from '../data/apps';
+import { MEDIA_APPS } from '../lib/workspace/archive';
+---
+<Base title="Workspace" description="Back up saved work, open files in compatible tools, and prepare for offline use.">
+<div class="shell shell--wide" style="padding-block:2rem">
+<h1>Your workspace</h1>
+<p>Saved work belongs to this browser. Keep a backup file if you want to move it or recover it after clearing browser data.</p>
+<div class="workspace-grid">
+<section class="workspace-panel" aria-labelledby="backup-title">
+<h2 id="backup-title">Backup and restore</h2>
+<p id="storage-estimate">Checking storage…</p><p id="last-backup"></p>
+<p>Choose the tools to include. Media tools include their saved recordings and images, so their backups can be large. Backups include saved records and settings. Export unsaved files, including loaded Quarry tables, before closing other tabs for the selected tools.</p>
+<div class="workspace-options" id="backup-apps">{apps.filter(a => a.storage !== 'none').map(a => <label><input type="checkbox" value={a.slug} checked={!MEDIA_APPS.has(a.slug)} />{a.name}{MEDIA_APPS.has(a.slug) ? ' (media)' : ''}</label>)}</div>
+<div class="workspace-actions"><button class="btn btn--primary" id="backup-download">Download backup</button><button class="btn" id="storage-persist">Request storage protection</button></div>
+<label for="backup-file">Restore from a backup file</label><input class="field" id="backup-file" type="file" accept=".json" />
+<div id="restore-preview"></div>
+<button class="btn" id="backup-recovery" hidden>Download recovery copy</button>
+<button class="btn btn--primary" id="backup-restore" hidden>Replace selected workspaces</button>
+<p class="workspace-status" id="backup-status" role="status"></p>
+</section>
+<section class="workspace-panel" aria-labelledby="offline-title">
+<h2 id="offline-title">Offline readiness</h2><p id="offline-core" role="status">Checking the core cache…</p>
+<p>Core pages are downloaded when the site installs. Optional downloads use additional storage.</p>
+<div class="workspace-actions"><button class="btn" id="offline-refresh">Check again</button><button class="btn" id="offline-core-download">Prepare core tools</button></div>
+<p id="offline-sql">SQL engine: checking…</p>
+<div class="workspace-actions"><button class="btn" id="offline-sql-download">Download SQL engine (about 34 MB)</button><button class="btn" id="offline-sql-remove">Remove SQL download</button></div>
+<p id="offline-model">Speech models: checking…</p>
+<p>Speech downloads come from jsDelivr and Hugging Face. Audio stays in your browser. Preparing a model can take several minutes.</p>
+<label for="offline-size">Speech model</label><select class="field" id="offline-size"><option value="tiny">Quick, about 40 MB</option><option value="base">Better, about 80 MB</option><option value="small">Best, about 250 MB</option></select>
+<div class="workspace-actions"><button class="btn" id="offline-model-download">Prepare speech model</button><button class="btn" id="offline-model-remove">Remove speech downloads</button></div>
+<p id="offline-status" class="workspace-status" role="status"></p>
+</section>
+</div>
+<section class="workspace-panel" aria-labelledby="inbox-title">
+<h2 id="inbox-title">File inbox</h2><p>Choose a file to see what you can do with it. Transfers stay in this browser.</p>
+<div class="workspace-drop" id="workspace-drop"><label for="inbox-file">Drop a file here or choose one</label><input class="field" id="inbox-file" type="file" /></div>
+<div class="workspace-actions" id="inbox-actions"></div><p id="inbox-status" role="status"></p>
+</section>
+<section class="workspace-panel" aria-labelledby="examples-title">
+<h2 id="examples-title">Start with an example</h2><p>These create separate examples. Your existing work is kept.</p>
+<div class="workspace-actions">
+<button class="btn" data-example="laneway">Freelance project board</button><button class="btn" data-example="rote">Study deck</button><button class="btn" data-example="tally">Draft invoice</button><button class="btn" data-example="ordinate">CSV to chart</button><button class="btn" data-example="limelight">Short video project</button>
+</div><p id="example-status" role="status"></p>
+<ol><li>Open the CSV example in Ordinate to edit a chart.</li><li>To query it first, download the <a href="/examples/monthly-sales.csv" download>sample CSV</a> and open it in Quarry through the file inbox.</li><li>Run a query, then choose “Chart results” to send the result to Ordinate.</li></ol>
+</section>
+<section class="workspace-panel"><h2>Keyboard access</h2><p>Use Ctrl or Command + K to find a tool. Tab moves between controls. Enter activates buttons and links. Escape closes dialogs. Laneway offers keyboard card movement, and Limelight includes buttons to move clips without dragging.</p><p>Long exports include progress and cancellation. If a job fails, its input stays available so you can change the settings and try again.</p></section>
+</div>
+<script>import { mountCenter } from '../lib/workspace/center'; void mountCenter();</script>
+</Base>

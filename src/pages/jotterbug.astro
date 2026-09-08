@@ -77,9 +77,11 @@ const app = getApp('jotterbug');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountJotterbug } from '../apps/jotterbug/ui';
   const root = document.getElementById('jotterbug-root');
-  if (root) void mountJotterbug(root as HTMLElement);
+  if (root) void mountWorkspace('jotterbug', async () => { await mountJotterbug(root as HTMLElement); await receiveInput('jotterbug'); });
 </script>
 
 <style is:global>

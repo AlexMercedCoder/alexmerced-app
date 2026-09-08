@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 120_000,
+  expect: { timeout: 30_000 },
   fullyParallel: false,
   // Service-worker release tests intentionally change this test server's release.
   workers: 1,

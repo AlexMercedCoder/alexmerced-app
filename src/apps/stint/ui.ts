@@ -1,3 +1,5 @@
+import { invoiceFromTime } from '../../lib/workspace/invoice';
+import { withWorkspaceLock } from '../../lib/workspace/locks';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
@@ -543,6 +545,28 @@ export async function mountStint(root: HTMLElement): Promise<void> {
     render();
     toast(increment ? `Rounding to the ${settings.mode} ${increment} minutes.` : 'Rounding off.', { kind: 'good' });
   });
+
+  const invoiceButton = document.createElement('button'); invoiceButton.className = 'btn btn--sm'; invoiceButton.textContent = 'Draft invoice in Tally';
+  root.querySelector('#st-export-csv')?.parentElement?.append(invoiceButton);
+  invoiceButton.onclick = async () => {
+    const dialog = document.createElement('dialog'); dialog.className = 'workspace-dialog'; dialog.setAttribute('aria-label', 'Choose a project to invoice');
+    const title = document.createElement('h2'); title.textContent = 'Draft an invoice';
+    const note = document.createElement('p'); note.textContent = 'Uses completed billable time in the visible date range. Choose one project. Check the draft before sending it.';
+    const form = document.createElement('form'); form.method = 'dialog';
+    const select = document.createElement('select'); select.className = 'field'; select.setAttribute('aria-label', 'Project to invoice');
+    for (const project of projects.filter(p => visibleEntries().some(e => e.projectId === p.id && e.billable && e.end))) { const option = document.createElement('option'); option.value = project.id; option.textContent = `${project.name} (${project.client || 'no client'})`; select.append(option); }
+    const create = document.createElement('button'); create.className = 'btn'; create.value = 'create'; create.textContent = 'Create draft'; create.disabled = !select.options.length;
+    const cancel = document.createElement('button'); cancel.className = 'btn'; cancel.value = 'cancel'; cancel.textContent = 'Cancel';
+    form.append(select, create, cancel); dialog.append(title, note, form); document.body.append(dialog); dialog.showModal();
+    dialog.addEventListener('close', async () => {
+      const value = select.value; const accepted = dialog.returnValue === 'create'; dialog.remove(); invoiceButton.focus(); if (!accepted) return;
+      try {
+        const invoice = invoiceFromTime(projects.find(p => p.id === value)!, visibleEntries(), settings);
+        await withWorkspaceLock('tally', async () => { const store = await import('../tally/store'); await store.saveInvoice(invoice); store.saveSelected(invoice.id); });
+        location.assign('/tally');
+      } catch (error) { toast(error instanceof Error ? error.message : 'The draft could not be saved.', { kind: 'error' }); }
+    }, { once: true });
+  };
 
   root.querySelector('#st-export-csv')?.addEventListener('click', () => {
     const list = visibleEntries();

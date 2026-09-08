@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
 
-const PRECACHE_EXTENSIONS = new Set(['.html', '.css', '.js', '.svg', '.png', '.webmanifest', '.woff2']);
+const PRECACHE_EXTENSIONS = new Set(['.html', '.css', '.js', '.svg', '.png', '.webmanifest', '.woff2', '.csv', '.webm']);
 const SKIP = new Set(['sw.js', 'og.png', 'sitemap-index.xml', 'sitemap-0.xml', 'robots.txt']);
 
 function walk(directory) {
@@ -123,7 +123,31 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) {
+    // Cache only the pinned speech runtime requested by an explicit model load.
+    if (url.origin === 'https://cdn.jsdelivr.net' && url.pathname.startsWith('/npm/@huggingface/transformers@3.0.2/')) {
+      event.respondWith((async () => {
+        const cache = await caches.open('workspace-speech');
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        const response = await fetch(request);
+        if (response.ok) await cache.put(request, response.clone());
+        return response;
+      })());
+    }
+    return;
+  }
+  if (url.pathname.startsWith('/duckdb/')) {
+    event.respondWith((async () => {
+      const cache = await caches.open('workspace-engines');
+      const cached = await cache.match(request, MATCH);
+      if (cached) return cached;
+      const response = await fetch(request);
+      if (response.ok) await cache.put(request, response.clone());
+      return response;
+    })());
+    return;
+  }
 
   // Navigations: serve the cached page, and fall back to the home page so a
   // deep link still opens something useful when offline.

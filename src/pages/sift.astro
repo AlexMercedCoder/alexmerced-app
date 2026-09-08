@@ -77,9 +77,11 @@ const app = getApp('sift');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountSift } from '../apps/sift/ui';
   const root = document.getElementById('sift-root');
-  if (root) void mountSift(root as HTMLElement);
+  if (root) void mountWorkspace('sift', async () => { await mountSift(root as HTMLElement); await receiveInput('sift'); });
 </script>
 
 <style is:global>

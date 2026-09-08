@@ -59,7 +59,7 @@ const app = getApp('quarry');
         </div>
       </aside>
 
-      <main class="qy-main">
+      <section aria-label="Quarry workspace" class="qy-main">
         <div class="qy-editor">
           <textarea id="qy-sql" spellcheck="false" aria-label="SQL" placeholder="SELECT * FROM trips LIMIT 20;"></textarea>
           <div class="qy-toolbar">
@@ -79,15 +79,17 @@ const app = getApp('quarry');
 
         <p class="qy-status" id="qy-status" data-state="idle">Ready.</p>
         <div class="qy-table" id="qy-table"></div>
-      </main>
+      </section>
     </div>
   </div>
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountQuarry } from '../apps/quarry/ui';
   const root = document.getElementById('quarry-root');
-  if (root) void mountQuarry(root as HTMLElement);
+  if (root) void mountWorkspace('quarry', async () => { await mountQuarry(root as HTMLElement); await receiveInput('quarry'); });
 </script>
 
 <style is:global>

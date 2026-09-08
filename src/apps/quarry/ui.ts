@@ -1,3 +1,4 @@
+import { sendButton } from '../../lib/workspace/handoff';
 import { formatBytes } from '../../lib/bytes';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadBlob, downloadFile } from '../../lib/portable';
@@ -337,6 +338,10 @@ export async function mountQuarry(root: HTMLElement): Promise<void> {
     }
   }
 
+  sendButton($('qy-csv').parentElement!, 'Chart results', 'ordinate', async () => {
+    if (!current || !current.rows.length) throw new Error('Run a query with results first.');
+    return [new File([toCsv(current.columns.map(column => column.name), current.rows)], 'query-results.csv', { type: 'text/csv' })];
+  });
   const exports: [string, () => void][] = [
     ['qy-csv', () => {
       if (!current) return;

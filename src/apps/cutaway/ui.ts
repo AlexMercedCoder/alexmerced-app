@@ -1,3 +1,4 @@
+import { runJob } from '../../lib/workspace/jobs';
 import { formatBytes } from '../../lib/bytes';
 import { downloadBlob } from '../../lib/portable';
 import { readPref, writePref } from '../../lib/prefs';
@@ -349,16 +350,21 @@ export async function mountCutaway(root: HTMLElement): Promise<void> {
 
     const started = performance.now();
     try {
-      const result = await run({
-        video: source.video,
-        file: source.file,
-        job,
-        signal: controller.signal,
+      const activeSource = source; const activeJob = job; const activeController = controller;
+      const result = await runJob('Export video', async (signal, report) => {
+        signal.addEventListener('abort', () => activeController.abort(), { once: true });
+        return run({
+        video: activeSource.video,
+        file: activeSource.file,
+        job: activeJob,
+        signal: activeController.signal,
         onProgress: (progress: Progress) => {
+          report(`${progress.stage}: ${progress.done} of ${progress.total}`);
           const percent = progress.total > 0 ? (progress.done / progress.total) * 100 : 0;
           $<HTMLDivElement>('cw-bar-fill').style.width = `${percent}%`;
           setStatus(`${progress.stage}: ${progress.done} of ${progress.total}.`, 'busy');
         },
+      });
       });
 
       downloadBlob(outputName(source.info.name, job.format), result.blob);

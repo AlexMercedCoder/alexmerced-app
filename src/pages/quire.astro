@@ -50,9 +50,11 @@ const app = getApp('quire');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountQuire } from '../apps/quire/ui';
   const root = document.getElementById('quire-root');
-  if (root) void mountQuire(root as HTMLElement);
+  if (root) void mountWorkspace('quire', async () => { await mountQuire(root as HTMLElement); await receiveInput('quire'); });
 </script>
 
 <style is:global>

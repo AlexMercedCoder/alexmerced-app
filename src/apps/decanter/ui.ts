@@ -1,3 +1,4 @@
+import { receiveFiles, sendButton } from '../../lib/workspace/handoff';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
@@ -299,6 +300,17 @@ export async function mountDecanter(root: HTMLElement): Promise<void> {
   renderSnippets();
   run();
 
+  sendButton(root.querySelector('#dc-download')!.parentElement!, 'Query output in Quarry', 'quarry', async () => {
+    if (!['csv', 'json', 'ndjson'].includes(workbench.outputFormat)) throw new Error('Choose CSV, JSON, or NDJSON output first.');
+    const text = output.textContent ?? ''; if (!text.trim()) throw new Error('Convert some data first.');
+    return [new File([text], `decanter.${EXTENSIONS[workbench.outputFormat]}`, { type: 'text/plain' })];
+  });
+  await receiveFiles('decanter', async files => {
+    const text = await files[0].text();
+    if (workbench.input.trim()) { snippets.push(createSnippet('Before file transfer', workbench.input, workbench.inputFormat)); saveSnippets(snippets); }
+    workbench.input = text; workbench.inputFormat = 'auto'; input.value = text;
+    renderControls(); renderSnippets(); run();
+  });
   // Everything this app can do, offered to an agent on this page.
   registerTools(decanterTools());
 }

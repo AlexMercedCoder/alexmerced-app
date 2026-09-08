@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import FileInbox from '../components/FileInbox.astro';
 import { apps, appsByCategory } from '../data/apps';
 
 const jsonLd = [
@@ -42,8 +43,7 @@ const jsonLd = [
       <p class="eyebrow">alexmerced.app</p>
       <h1>{apps.length} small tools that keep your data on your machine.</h1>
       <p class="hero__lede">
-        A shelf of things I wanted and could not find in a shape I liked. Each one runs entirely in
-        your browser. Nothing is uploaded, nothing needs an account, and you can export saved work or download the files you make.
+        Write notes, organize projects, work with data, and edit files in your browser. Nothing is uploaded, nothing needs an account, and you can export saved work or download the files you make.
       </p>
 
       <ul class="promises">
@@ -55,6 +55,8 @@ const jsonLd = [
       </ul>
     </div>
   </section>
+
+  <FileInbox />
 
   {appsByCategory().map((group) => (
   <section class="shell shell--wide shelf" aria-labelledby={`cat-${group.category.id}`}>

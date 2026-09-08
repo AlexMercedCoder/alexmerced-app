@@ -1,3 +1,4 @@
+import { runJob } from '../../lib/workspace/jobs';
 import { formatBytes } from '../../lib/bytes';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadBlob } from '../../lib/portable';
@@ -374,7 +375,7 @@ export async function mountFoolscap(root: HTMLElement): Promise<void> {
     if (!pages.length) return;
     try {
       const title = $<HTMLInputElement>('fs-title').value.trim() || 'Scan';
-      const bytes = await toPdf(pages, settings.pageSize, title);
+      const bytes = await runJob('Build scanned PDF', async (signal, progress) => { progress(`Preparing ${pages.length} pages. Cancellation stops the download after assembly.`); const bytes = await toPdf(pages, settings.pageSize, title); signal.throwIfAborted(); return bytes; });
       downloadBlob(`${safeName(title)}.pdf`, new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }));
       toast(`PDF saved with ${pages.length} page${pages.length === 1 ? '' : 's'}.`, { kind: 'good' });
     } catch (error) {

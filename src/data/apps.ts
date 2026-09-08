@@ -32,7 +32,7 @@ export const apps: AppEntry[] = [
     slug: 'warren',
     category: 'write',
     name: 'Warren',
-    tagline: 'Nested pages that go as deep as you do',
+    tagline: 'Nested notes and pages',
     description:
       'A writing workspace built out of blocks. Pages nest inside pages without a depth limit, blocks respond to markdown shortcuts as you type, and a slash menu turns any line into a heading, list, to-do, quote, callout, or code block.',
     action: 'Open Warren',
@@ -72,7 +72,7 @@ export const apps: AppEntry[] = [
     slug: 'jotterbug',
     category: 'write',
     name: 'Jotterbug',
-    tagline: 'Catch it before it gets away',
+    tagline: 'Quick notes and checklists',
     description:
       'Quick notes on a coloured board. Type a thought, pin it, tag it, or flip it into a checklist. Search narrows as you type, pinned notes float to the top, and anything you delete waits in the trash long enough to change your mind.',
     action: 'Open Jotterbug',
@@ -112,7 +112,7 @@ export const apps: AppEntry[] = [
     slug: 'rostrum',
     category: 'make',
     name: 'Rostrum',
-    tagline: 'Build the deck, then stand behind it',
+    tagline: 'Create and present slides',
     description:
       'Slides made of blocks, with a presenter view in a second window carrying your notes, a timer and the next slide. Import from Markdown, export to Markdown, a PDF, or one self-contained HTML file that runs on any machine with no network at all.',
     action: 'Open Rostrum',
@@ -152,7 +152,7 @@ export const apps: AppEntry[] = [
     slug: 'fabler',
     category: 'data',
     name: 'Fabler',
-    tagline: 'Believable data, reproducible every time',
+    tagline: 'Generate sample data from a seed',
     description:
       'Describe a schema and get realistic rows out of it. Everything is generated from a seed, so the same schema produces the same data every run, and foreign keys draw only from ids that actually exist in the table they point at.',
     action: 'Open Fabler',
@@ -172,7 +172,7 @@ export const apps: AppEntry[] = [
     slug: 'decanter',
     category: 'data',
     name: 'Decanter',
-    tagline: 'Pour data from one shape into another',
+    tagline: 'Convert and reshape structured data',
     description:
       'Convert between JSON, NDJSON, CSV, YAML and TOML, with every parser written from scratch so none of it leaves your machine. Then the parts that make it more than a converter: flatten and unflatten nesting, query by path, and generate a SQL, Iceberg or JSON Schema from whatever you pasted.',
     action: 'Open Decanter',
@@ -332,7 +332,7 @@ export const apps: AppEntry[] = [
     slug: 'ordinate',
     category: 'data',
     name: 'Ordinate',
-    tagline: 'Paste data, get a chart worth publishing',
+    tagline: 'Create charts from pasted data',
     description:
       'Drop in CSV, tab separated text from a spreadsheet, or JSON, and get a chart back. Eight chart types, axis ticks that land on numbers people recognise, five palettes, and an SVG that opens anywhere because every colour and every coordinate is written into the file.',
     action: 'Open Ordinate',
@@ -352,7 +352,7 @@ export const apps: AppEntry[] = [
     slug: 'limelight',
     category: 'make',
     name: 'Limelight',
-    tagline: 'Record your screen and make it look deliberate',
+    tagline: 'Record and edit screen videos',
     description:
       'Capture a window, then let it be polished: inset on a coloured field with rounded corners and a shadow, and zoomed in on whatever is actually happening. A browser is never told where your pointer is over another window, so the zoom follows where the picture changed instead, and the app says which of the two it is using.',
     action: 'Open Limelight',

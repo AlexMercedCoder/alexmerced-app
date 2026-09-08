@@ -420,9 +420,9 @@ export function buildSkill(options: { task?: string; apps?: string[] } = {}): st
   lines.push('## The tools');
   lines.push('');
   for (const entry of relevant) {
-    lines.push(`### ${entry.app} — \`${entry.page}\``);
+    lines.push(`### ${entry.app}: \`${entry.page}\``);
     lines.push('');
-    for (const tool of entry.tools) lines.push(`- \`${tool.name}\` — ${tool.summary}`);
+    for (const tool of entry.tools) lines.push(`- \`${tool.name}\`: ${tool.summary}`);
     lines.push('');
   }
 

@@ -48,13 +48,13 @@ const app = getApp('rostrum');
         </div>
       </aside>
 
-      <main class="rs-main">
+      <section aria-label="Rostrum workspace" class="rs-main">
         <div class="rs-stage" id="rs-stage">
           <div class="rs-slide" id="rs-canvas"></div>
         </div>
         <p class="rs-counter" id="rs-counter"></p>
         <p class="rs-hint">Arrow keys move between slides. <kbd>F</kbd> presents fullscreen, <kbd>P</kbd> opens the presenter view in a second window, <kbd>Esc</kbd> leaves.</p>
-      </main>
+      </section>
 
       <aside class="rs-right">
         <label class="rs-field"><span>Layout</span>
@@ -86,9 +86,11 @@ const app = getApp('rostrum');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountRostrum } from '../apps/rostrum/ui';
   const root = document.getElementById('rostrum-root');
-  if (root) void mountRostrum(root as HTMLElement);
+  if (root) void mountWorkspace('rostrum', async () => { await mountRostrum(root as HTMLElement); await receiveInput('rostrum'); });
 </script>
 
 <style is:global>

@@ -7,8 +7,8 @@ const app = getApp('cadence');
 <Base title="Cadence, record and edit audio without uploading it" description={app.description} app="cadence" chrome="app" keywords={app.keywords}>
   <div class="app-frame" id="cadence-root">
     <AppBar app="cadence">
-      <button class="btn btn--sm" id="cd-download-source">Save original</button>
-      <button class="btn btn--sm btn--primary" id="cd-download">Save as WAV</button>
+      <button class="btn btn--sm" id="cd-download-source" disabled>Save original</button>
+      <button class="btn btn--sm btn--primary" id="cd-download" disabled>Save as WAV</button>
     </AppBar>
 
     <div class="shell shell--wide cd">
@@ -35,7 +35,7 @@ const app = getApp('cadence');
         <p class="cd-storage" id="cd-storage"></p>
       </aside>
 
-      <main class="cd-work" id="cd-work" hidden>
+      <section aria-label="Cadence workspace" class="cd-work" id="cd-work" hidden>
         <input class="field cd-name" id="cd-name" aria-label="Clip name" />
 
         <div class="cd-wavewrap">
@@ -83,15 +83,17 @@ const app = getApp('cadence');
           </div>
           <p class="cd-hint">Changing speed moves the pitch with it. That is what happens without a pitch shifter, and there is no honest way to hide it.</p>
         </section>
-      </main>
+      </section>
     </div>
   </div>
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountCadence } from '../apps/cadence/ui';
   const root = document.getElementById('cadence-root');
-  if (root) void mountCadence(root as HTMLElement);
+  if (root) void mountWorkspace('cadence', async () => { await mountCadence(root as HTMLElement); await receiveInput('cadence'); });
 </script>
 
 <style is:global>

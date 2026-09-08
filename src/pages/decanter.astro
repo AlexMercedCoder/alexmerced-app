@@ -105,9 +105,11 @@ const app = getApp('decanter');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountDecanter } from '../apps/decanter/ui';
   const root = document.getElementById('decanter-root');
-  if (root) void mountDecanter(root as HTMLElement);
+  if (root) void mountWorkspace('decanter', async () => { await mountDecanter(root as HTMLElement); await receiveInput('decanter'); });
 </script>
 
 <style is:global>

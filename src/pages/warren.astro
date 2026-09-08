@@ -25,7 +25,7 @@ const app = getApp('warren');
       <aside class="wr-sidebar" id="wr-sidebar" aria-label="Pages">
         <label class="wr-search">
           <span class="sr-only">Search pages</span>
-          <input id="wr-search" class="field field--sm" type="search" placeholder="Search (press /)" autocomplete="off" />
+          <input id="wr-search" class="field field--sm" type="search" placeholder="Search (press /)" title="Search pages: Ctrl or Command + Shift + F, or / outside text" autocomplete="off" />
         </label>
 
         <div class="wr-results" id="wr-search-results" hidden></div>
@@ -40,7 +40,7 @@ const app = getApp('warren');
         </div>
       </aside>
 
-      <main class="wr-main">
+      <section aria-label="Warren workspace" class="wr-main">
         <article class="wr-editor" id="wr-editor" hidden>
           <nav class="wr-crumbs" id="wr-crumbs" aria-label="Breadcrumb"></nav>
 
@@ -64,15 +64,17 @@ const app = getApp('warren');
           <strong>No page open</strong>
           <p>Pick one from the sidebar, or make a new one. Warren keeps everything in this browser, so the pages you see here are only on this device.</p>
         </div>
-      </main>
+      </section>
     </div>
   </div>
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountWarren } from '../apps/warren/ui';
   const root = document.getElementById('warren-root');
-  if (root) void mountWarren(root as HTMLElement);
+  if (root) void mountWorkspace('warren', async () => { await mountWarren(root as HTMLElement); await receiveInput('warren'); });
 </script>
 
 <style is:global>

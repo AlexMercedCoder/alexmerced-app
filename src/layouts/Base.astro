@@ -2,6 +2,7 @@
 import '../styles/global.css';
 import { apps } from '../data/apps';
 import WebMCP from '../components/WebMCP.astro';
+import Workspace from '../components/Workspace.astro';
 
 export interface Props {
   title: string;
@@ -148,6 +149,7 @@ const graph = { '@context': 'https://schema.org', '@graph': [...baseGraph, ...ap
         </a>
         <span class="offline-badge" id="offline-badge" hidden>Offline</span>
         <button class="btn btn--sm install-btn" id="install-app" hidden>Install</button>
+        <Workspace />
         <nav class="header-nav" aria-label="Apps">
           {apps.map((item) => (
             <a href={`/${item.slug}`} aria-current={item.slug === app ? 'page' : undefined}>{item.name}</a>
@@ -179,6 +181,8 @@ const graph = { '@context': 'https://schema.org', '@graph': [...baseGraph, ...ap
     <script>
       import { setupPwa } from '../lib/pwa';
       setupPwa();
+      const header = document.querySelector('header.site-header');
+      if (header) new ResizeObserver(() => document.documentElement.style.setProperty('--header-h', `${header.getBoundingClientRect().height}px`)).observe(header);
     </script>
   </body>
 </html>

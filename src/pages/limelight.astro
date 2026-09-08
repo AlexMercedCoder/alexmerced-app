@@ -473,9 +473,11 @@ const app = getApp('limelight');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountLimelight } from '../apps/limelight/ui';
   const root = document.getElementById('limelight-root');
-  if (root) void mountLimelight(root as HTMLElement);
+  if (root) void mountWorkspace('limelight', async () => { await mountLimelight(root as HTMLElement); await receiveInput('limelight'); });
 </script>
 
 <style is:global>

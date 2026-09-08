@@ -74,9 +74,11 @@ const app = getApp('reckoner');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountReckoner } from '../apps/reckoner/ui';
   const root = document.getElementById('reckoner-root');
-  if (root) mountReckoner(root as HTMLElement);
+  if (root) void mountWorkspace('reckoner', async () => { await mountReckoner(root as HTMLElement); await receiveInput('reckoner'); });
 </script>
 
 <style is:global>

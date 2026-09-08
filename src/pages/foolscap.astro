@@ -41,7 +41,7 @@ const app = getApp('foolscap');
         <p class="fs-storage" id="fs-storage"></p>
       </aside>
 
-      <main class="fs-main">
+      <section aria-label="Foolscap workspace" class="fs-main">
         <div class="fs-camera" id="fs-camera" hidden>
           <video id="fs-video" playsinline muted></video>
           <button class="btn btn--primary fs-shutter" id="fs-shutter">Capture</button>
@@ -67,15 +67,17 @@ const app = getApp('foolscap');
           <strong>No pages yet</strong>
           <p>Point the camera at a document, or add a photo you already have. Everything is processed here in the browser.</p>
         </div>
-      </main>
+      </section>
     </div>
   </div>
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountFoolscap } from '../apps/foolscap/ui';
   const root = document.getElementById('foolscap-root');
-  if (root) void mountFoolscap(root as HTMLElement);
+  if (root) void mountWorkspace('foolscap', async () => { await mountFoolscap(root as HTMLElement); await receiveInput('foolscap'); });
 </script>
 
 <style is:global>

@@ -158,9 +158,11 @@ const app = getApp('tessera');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountTessera } from '../apps/tessera/ui';
   const root = document.getElementById('tessera-root');
-  if (root) void mountTessera(root as HTMLElement);
+  if (root) void mountWorkspace('tessera', async () => { await mountTessera(root as HTMLElement); await receiveInput('tessera'); });
 </script>
 
 <style is:global>

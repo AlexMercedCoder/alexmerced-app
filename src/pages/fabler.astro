@@ -53,9 +53,11 @@ const app = getApp('fabler');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountFabler } from '../apps/fabler/ui';
   const root = document.getElementById('fabler-root');
-  if (root) void mountFabler(root as HTMLElement);
+  if (root) void mountWorkspace('fabler', async () => { await mountFabler(root as HTMLElement); await receiveInput('fabler'); });
 </script>
 
 <style is:global>

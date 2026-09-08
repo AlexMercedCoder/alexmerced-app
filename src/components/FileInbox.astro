@@ -1,0 +1,21 @@
+<section class="shell shell--wide workspace-panel" aria-labelledby="home-inbox-title">
+<h2 id="home-inbox-title">Open a file</h2>
+<p>Choose a file to see compatible tools. Your file stays in this browser.</p>
+<div id="home-drop" class="workspace-drop"><label for="home-file">Drop a file here or choose one</label><input id="home-file" class="field" type="file" /></div>
+<div id="home-file-actions" class="workspace-actions"></div><p id="home-file-status" role="status"></p>
+<p>Try an <a href="/workspace#examples-title">editable example</a> or <a href="/workspace#backup-title">back up your work</a>.</p>
+</section>
+<script>
+import { compatible, sendFiles } from '../lib/workspace/handoff';
+import { apps } from '../data/apps';
+const picker = document.querySelector<HTMLInputElement>('#home-file')!;
+const drop = document.querySelector<HTMLElement>('#home-drop')!;
+const actions = document.querySelector('#home-file-actions')!;
+const status = document.querySelector('#home-file-status')!;
+function choose(file?: File) {
+  actions.replaceChildren(); if (!file) return;
+  const slugs = compatible(file); status.textContent = `${file.name}: ${slugs.length ? 'choose a tool.' : 'no compatible tool found.'}`;
+  for (const slug of slugs) { const button = document.createElement('button'); button.className = 'btn'; button.textContent = `Open in ${apps.find(a => a.slug === slug)!.name}`; button.onclick = async () => { button.disabled = true; try { await sendFiles(slug, [file]); } catch (e) { status.textContent = e instanceof Error ? e.message : 'The transfer failed.'; button.disabled = false; } }; actions.append(button); }
+}
+picker.onchange = () => choose(picker.files?.[0]); drop.ondragover = e => e.preventDefault(); drop.ondrop = e => { e.preventDefault(); choose(e.dataTransfer?.files[0]); };
+</script>

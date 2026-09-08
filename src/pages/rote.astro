@@ -62,9 +62,11 @@ const app = getApp('rote');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountRote } from '../apps/rote/ui';
   const root = document.getElementById('rote-root');
-  if (root) void mountRote(root as HTMLElement);
+  if (root) void mountWorkspace('rote', async () => { await mountRote(root as HTMLElement); await receiveInput('rote'); });
 </script>
 
 <style is:global>

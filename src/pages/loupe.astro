@@ -87,9 +87,11 @@ const app = getApp('loupe');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountLoupe } from '../apps/loupe/ui';
   const root = document.getElementById('loupe-root');
-  if (root) void mountLoupe(root as HTMLElement);
+  if (root) void mountWorkspace('loupe', async () => { await mountLoupe(root as HTMLElement); await receiveInput('loupe'); });
 </script>
 
 <style is:global>

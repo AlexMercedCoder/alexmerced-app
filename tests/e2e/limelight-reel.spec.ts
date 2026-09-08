@@ -29,6 +29,13 @@ test('add, reorder, edit, split, remove, undo, save and reload a reel', async ({
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
 
+  await page.getByRole('button', { name: 'Move clip 2 earlier', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#ll-status')).toContainText('Moved a clip earlier');
+  await page.getByRole('button', { name: 'Move clip 1 later', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#ll-status')).toContainText('Moved a clip later');
+
   await page.locator('.ll-clip').nth(1).dragTo(page.locator('.ll-clip').first());
   await expect(page.locator('#ll-status')).toContainText('Reordered the clips');
 

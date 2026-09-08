@@ -262,3 +262,8 @@ export async function transcribe(
 export function releaseModel(): void {
   cached = null;
 }
+
+/** Download and initialize an existing model without supplying any audio. */
+export async function prepareModel(size: WhisperSize, onProgress: (progress: TranscribeProgress) => void): Promise<void> {
+  await loadPipeline(size, onProgress);
+}

@@ -810,7 +810,7 @@ export async function mountWarren(root: HTMLElement): Promise<void> {
   document.addEventListener('keydown', (event) => {
     const typing = ['INPUT', 'TEXTAREA'].includes((document.activeElement as HTMLElement)?.tagName)
       || (document.activeElement as HTMLElement)?.isContentEditable;
-    if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'f') {
       event.preventDefault();
       if (!view.sidebarOpen) { view = { ...view, sidebarOpen: true }; saveView(view); renderTree(); }
       searchInput.focus();

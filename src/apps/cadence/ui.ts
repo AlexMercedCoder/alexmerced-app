@@ -1,3 +1,4 @@
+import { runJob } from '../../lib/workspace/jobs';
 import { formatBytes } from '../../lib/bytes';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadBlob } from '../../lib/portable';
@@ -345,6 +346,7 @@ export async function mountCadence(root: HTMLElement): Promise<void> {
   // ------------------------------------------------------------------ clip list
 
   function renderList(): void {
+    for (const id of ['cd-download', 'cd-download-source']) $<HTMLButtonElement>(id).disabled = !current || clips.length === 0;
     listEl.innerHTML = '';
     for (const clip of clips) {
       const row = document.createElement('div');
@@ -617,12 +619,26 @@ export async function mountCadence(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ download
 
-  $<HTMLButtonElement>('cd-download').addEventListener('click', () => {
+  $<HTMLButtonElement>('cd-download').addEventListener('click', async () => {
     if (!current) return;
     const depth = EXPORT_FORMATS.find((entry) => entry.id === settings.format)?.depth ?? 16;
     const window = selection ? trim(current.samples, selection.start, selection.end) : current.samples;
-    downloadBlob(`${fileStem(current.clip.name)}.wav`, new Blob([encodeWav(window, depth) as unknown as BlobPart], { type: 'audio/wav' }));
-    toast(selection ? 'Selection saved as WAV.' : 'Saved as WAV.', { kind: 'good' });
+    const name = current.clip.name;
+    try {
+      const bytes = await runJob('Export WAV', async (signal, progress) => {
+        progress(`Encoding ${window.channels.length} audio channels. Your source stays available if you cancel.`);
+        const worker = new Worker(new URL('./exportWorker.ts', import.meta.url), { type: 'module' });
+        try { return await new Promise<Uint8Array>((resolve, reject) => {
+          signal.addEventListener('abort', () => { worker.terminate(); reject(new Error('Export cancelled.')); }, { once: true });
+          worker.onerror = () => reject(new Error('WAV export failed. Try a shorter selection.'));
+          worker.onmessage = ({ data }) => data.error ? reject(new Error(data.error)) : resolve(data.bytes);
+          worker.postMessage({ samples: window, depth });
+        }); } finally { worker.terminate(); }
+      });
+      downloadBlob(`${fileStem(name)}.wav`, new Blob([bytes as unknown as BlobPart], { type: 'audio/wav' }));
+      toast('Saved as WAV.', { kind: 'good' });
+    } catch (error) { toast(error instanceof Error ? error.message : 'WAV export failed.', { kind: 'error' }); }
+
   });
 
   $<HTMLButtonElement>('cd-download-source').addEventListener('click', () => {

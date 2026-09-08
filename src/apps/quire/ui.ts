@@ -1,3 +1,4 @@
+import { runJob } from '../../lib/workspace/jobs';
 import { downloadBlob } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { zipBlob } from '../../lib/zip';
@@ -212,7 +213,7 @@ export async function mountQuire(root: HTMLElement): Promise<void> {
     if (!selected().length) { preview.removeAttribute('src'); previewWrap.hidden = true; return; }
 
     try {
-      const bytes = await buildSelected();
+      const bytes = await runJob('Build PDF', async (signal, progress) => { progress('Assembling selected pages. Cancellation stops the download when assembly finishes.'); const bytes = await buildSelected(); signal.throwIfAborted(); return bytes; });
       previewUrl = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
       preview.src = previewUrl;
       previewWrap.hidden = false;
@@ -344,7 +345,7 @@ export async function mountQuire(root: HTMLElement): Promise<void> {
 
   root.querySelector('#qr-save')?.addEventListener('click', async () => {
     try {
-      const bytes = await buildSelected();
+      const bytes = await runJob('Build PDF', async (signal, progress) => { progress('Assembling selected pages. Cancellation stops the download when assembly finishes.'); const bytes = await buildSelected(); signal.throwIfAborted(); return bytes; });
       const name = outputName(documents[0]?.name ?? 'document', documents.length > 1 ? '-merged' : '-edited');
       downloadBlob(name, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
       toast(`Saved ${selected().length} page${selected().length === 1 ? '' : 's'}.`, { kind: 'good' });
@@ -363,14 +364,15 @@ export async function mountQuire(root: HTMLElement): Promise<void> {
 
     try {
       const groups = chunk(chosen, size);
-      const entries = await Promise.all(groups.map(async (group, index) => ({
-        name: outputName(documents[0]?.name ?? 'document', `-${String(index + 1).padStart(2, '0')}`),
-        bytes: await assemble(group.map((slot) => ({
-          file: documents[slot.documentIndex].file,
-          pageIndex: slot.pageIndex,
-          rotate: slot.rotate,
-        }))),
-      })));
+      const entries = await runJob('Split PDF', async (signal, progress) => {
+        const output = [];
+        for (const [index, group] of groups.entries()) {
+          signal.throwIfAborted(); progress(`File ${index + 1} of ${groups.length}`);
+          output.push({ name: outputName(documents[0]?.name ?? 'document', `-${String(index + 1).padStart(2, '0')}`), bytes: await assemble(group.map(slot => ({ file: documents[slot.documentIndex].file, pageIndex: slot.pageIndex, rotate: slot.rotate }))) });
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        signal.throwIfAborted(); return output;
+      });
 
       if (entries.length === 1) {
         downloadBlob(entries[0].name, new Blob([entries[0].bytes as BlobPart], { type: 'application/pdf' }));

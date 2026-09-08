@@ -1,3 +1,5 @@
+import { sendButton } from '../../lib/workspace/handoff';
+import { runJob } from '../../lib/workspace/jobs';
 import { wireDataMenu } from '../../lib/dataMenu';
 import { downloadBlob } from '../../lib/portable';
 import { toast } from '../../lib/toast';
@@ -243,7 +245,10 @@ export async function mountLoupe(root: HTMLElement): Promise<void> {
     processing = true;
     root.dataset.busy = 'true';
     try {
-      for (const item of items) await processItem(item);
+      await runJob('Process images', async (signal, progress) => {
+        for (const [index, item] of items.entries()) { signal.throwIfAborted(); progress(`Image ${index + 1} of ${items.length}: ${item.file.name}`); await processItem(item); }
+        signal.throwIfAborted();
+      });
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Something went wrong processing an image.', { kind: 'error' });
     } finally {
@@ -252,6 +257,13 @@ export async function mountLoupe(root: HTMLElement): Promise<void> {
       renderList();
     }
   }
+
+  sendButton(root.querySelector('#lp-save-all')!.parentElement!, 'Make a PDF in Quire', 'quire', async () => {
+    if (processing) throw new Error('Wait for image processing to finish.');
+    const ready = items.filter(item => item.outputBlob);
+    if (!ready.length) throw new Error('Process an image first.');
+    return ready.map(item => new File([item.outputBlob!], item.outputName, { type: item.outputBlob!.type }));
+  });
 
   async function addFiles(files: FileList | File[]): Promise<void> {
     const accepted = [...files].filter((file) => file.type.startsWith('image/'));

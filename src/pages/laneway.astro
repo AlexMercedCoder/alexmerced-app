@@ -105,9 +105,11 @@ const app = getApp('laneway');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountLaneway } from '../apps/laneway/ui';
   const root = document.getElementById('laneway-root');
-  if (root) void mountLaneway(root as HTMLElement);
+  if (root) void mountWorkspace('laneway', async () => { await mountLaneway(root as HTMLElement); await receiveInput('laneway'); });
 </script>
 
 <style is:global>

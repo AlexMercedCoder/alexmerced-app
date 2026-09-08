@@ -90,8 +90,8 @@ const app = getApp('tally');
 
           <section class="card ty-card">
             <h2 class="ty-subhead">Notes and terms</h2>
-            <textarea class="field" id="ty-notes" rows="3" placeholder="Thank you. Bank details on request."></textarea>
-            <textarea class="field" id="ty-terms" rows="3" placeholder="Payment due within 30 days."></textarea>
+            <textarea class="field" id="ty-notes" aria-label="Invoice notes" rows="3" placeholder="Thank you. Bank details on request."></textarea>
+            <textarea class="field" id="ty-terms" aria-label="Payment terms" rows="3" placeholder="Payment due within 30 days."></textarea>
             <h2 class="ty-subhead ty-subhead--spaced">Look</h2>
             <div class="ty-accents" id="ty-accents"></div>
             <label class="field-row"><span>Typeface</span>
@@ -118,9 +118,11 @@ const app = getApp('tally');
 </Base>
 
 <script>
+  import { mountWorkspace } from '../lib/workspace/locks';
+  import { receiveInput } from '../lib/workspace/handoff';
   import { mountTally } from '../apps/tally/ui';
   const root = document.getElementById('tally-root');
-  if (root) void mountTally(root as HTMLElement);
+  if (root) void mountWorkspace('tally', async () => { await mountTally(root as HTMLElement); await receiveInput('tally'); });
 </script>
 
 <style is:global>
