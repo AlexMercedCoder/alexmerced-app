@@ -1,3 +1,4 @@
+import { decodeAscii85 } from './ascii85';
 /**
  * A PDF reader, enough of one to move pages around.
  *
@@ -339,6 +340,7 @@ export class PdfFile {
       const resolved = this.resolve(entry);
       if (!isName(resolved)) continue;
       if (resolved.name === 'FlateDecode') data = await inflate(data);
+      else if (resolved.name === 'ASCII85Decode' || resolved.name === 'A85') data = decodeAscii85(data);
       else if (resolved.name === 'DCTDecode' || resolved.name === 'JPXDecode') return data;
       else throw new PdfReadError(`That PDF uses the ${resolved.name} filter, which this tool does not read.`);
     }

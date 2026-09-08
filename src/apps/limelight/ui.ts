@@ -1,93 +1,96 @@
 import { formatBytes } from '../../lib/bytes';
 import { createId } from '../../lib/id';
-import { readPref, writePref } from '../../lib/prefs';
 import { downloadBlob, downloadFile } from '../../lib/portable';
 import { toast } from '../../lib/toast';
 import { registerTools } from '../../lib/webmcp';
+import { mountSpeaker } from './announce';
 import type { Interest } from './attention';
-import {
-  canCapture, CaptureError, listDevices, recordingMime, Session,
-  type CaptureDevice, type Recording, type Source,
-} from './capture';
-import {
-  CAMERA_SHAPES, cameraRect, CROP_ASPECTS, cropRect, cropToAspect, defaultComposition, FULL_CROP,
-  isFullCrop, MIN_CROP, normaliseCrop, OUTPUT_SIZES, PRESETS, QUALITY,
-  type CameraCorner, type CameraShape, type Composition, type Crop,
-} from './layout';
-import { countdown } from './countdown';
-import { History } from './history';
-import { defaultTilt, MOTIONS, type Motion } from './plate';
-import { limelightTools } from './mcp';
-import {
-  capabilities, drawFrame, findInterest, render, RenderError,
-  type ExportResult, type OutputFormat, type Progress, type Project,
-} from './render';
-import { canExportInWorker, renderInWorker } from './offload';
-import {
-  applyLook, createProject, deleteLook, deleteProject, loadCurrentId, loadLooks, loadProject,
-  loadProjects, loadSettings, lookFrom, oldestProjects, openScratch, saveCurrentId, saveLook,
-  saveProject, saveSettings, storageRoom, StorageFullError, storedBytes,
-  type Look, type Project as StoredProject, type ScratchSession, type Settings,
-} from './store';
-import {
-  addText, constrainText, duplicateText, MIN_TEXT, removeText, splitText, updateText,
-  type TextBlock,
-} from './text';
-import { defaultZoom, viewRect, zoomAt, type ZoomSettings } from './zoom';
-import {
-  analyseAudio, findSilences, joinWaves, keptDuration, mergeSpans,
-  type Peak, type Span, type Wave,
-} from './waveform';
-import {
-  addSpeed, clampSpeed, editedAt, editedDuration, removeSpeed, segmentsOf, sortSpeeds,
-  type SpeedRegion,
-} from './timeline';
-import {
-  addRedaction, rectAt, redactionsAt, removeRedaction, REDACT_STYLES, setPoint, sortRedactions,
-  type RedactBlock, type RedactStyle,
-} from './redact';
+import { mountBlockTrack } from './blockTrack';
 import {
   alignToEdit, parseCaptions, sortCues, spansOf, toSrt, toVtt, type Cue,
 } from './captions';
 import {
-  addShape, removeShape, SHAPE_COLOURS, SHAPE_KINDS, sortShapes, updateShape,
-  type Shape, type ShapeKind,
-} from './shapes';
-import { canTranscribe, transcribe, WHISPER_MODELS, type WhisperSize } from './transcribe';
-import { mountBlockTrack } from './blockTrack';
-import { mountSpeaker } from './announce';
-import { mountHelp } from './helpSheet';
-import { mountPopout } from './popout';
+  canCapture, CaptureError, listDevices, recordingMime, Session,
+  type CaptureDevice, type Recording, type Source,
+} from './capture';
 import { mountChapters } from './chapters';
+import { mountControls } from './controls';
+import { countdown } from './countdown';
+import { createEditorState, type EditorState } from './editorState';
 import { mountFilmstrip } from './filmstrip';
 import {
-  applySidecar, readSidecar, sidecarFilename, sidecarLoses, sidecarMismatch, sidecarSize,
-  sidecarTakes, sidecarVideo, writeSidecar,
-} from './sidecar';
-import { describeTidy, planTidy, tidyChangesAnything } from './tidy';
+  shortcutFor, TRACK_HELP,
+  type ShortcutId, type TrackName
+} from './help';
+import { mountHelp } from './helpSheet';
+import { History } from './history';
+import {
+  CROP_ASPECTS, cropRect, cropToAspect,
+  FULL_CROP,
+  isFullCrop, MIN_CROP, normaliseCrop,
+  QUALITY,
+  type Crop
+} from './layout';
+import { limelightTools } from './mcp';
+import { canExportInWorker, renderInWorker } from './offload';
+import { createAutosave, projectEdits, readTakeRecords } from './persistence';
+import { mountPlayback } from './playback';
+import { mountPopout } from './popout';
+import {
+  addRedaction, rectAt,
+  REDACT_STYLES,
+  removeRedaction,
+  setPoint, sortRedactions,
+  type RedactBlock, type RedactStyle
+} from './redact';
 import {
   isPlainRecording, joins, layout, moveClip, moveClipTo, reelDuration, remapBlocks,
   removeClip, shiftAfter, singleClip, sourceOf, splice, splitAt, updateClip,
   type Clip, type Placed,
 } from './reel';
 import {
-  GENERAL_HELP, SHORTCUT_GROUPS, SHORTCUTS, shortcutFor, TRACK_HELP, trackHelp,
-  type ShortcutId, type TrackName,
-} from './help';
+  drawFrame, findInterest, render, RenderError,
+  type Project
+} from './render';
+import {
+  addShape, removeShape, SHAPE_COLOURS, SHAPE_KINDS, sortShapes, updateShape,
+  type Shape, type ShapeKind,
+} from './shapes';
+import {
+  applySidecar, readSidecar, sidecarFilename, sidecarLoses, sidecarMismatch, sidecarSize,
+  sidecarTakes, sidecarVideo, writeSidecar,
+} from './sidecar';
+import {
+  applyLook, createProject, deleteLook, deleteProject, loadCurrentId, loadLooks, loadProject,
+  loadProjects, loadSettings, lookFrom, oldestProjects, openScratch, saveCurrentId, saveLook,
+  saveProject, saveSettings,
+  StorageFullError,
+  storageRoom,
+  storedBytes,
+  type Look,
+  type ScratchSession,
+  type Project as StoredProject
+} from './store';
+import {
+  addText, constrainText, duplicateText, MIN_TEXT, removeText, splitText, updateText,
+  type TextBlock,
+} from './text';
+import { describeTidy, planTidy, tidyChangesAnything } from './tidy';
+import {
+  addSpeed, clampSpeed, editedAt, editedDuration, removeSpeed, segmentsOf, sortSpeeds,
+  type SpeedRegion,
+} from './timeline';
+import { canTranscribe, transcribe, WHISPER_MODELS, type WhisperSize } from './transcribe';
+import { once, seekSafely } from './videoEvents';
+import {
+  analyseAudio, findSilences, joinWaves, keptDuration, mergeSpans,
+  type Peak, type Span, type Wave,
+} from './waveform';
+import { viewRect, zoomAt } from './zoom';
 import {
   addBlock, blocksFromInterest, constrain, duplicateBlock, mergeBlocks, MIN_BLOCK, removeBlock,
-  reviveBlocks, splitBlock, trackFromBlocks, type ZoomBlock,
+  splitBlock, trackFromBlocks, type ZoomBlock
 } from './zooms';
-
-
-/**
- * requestVideoFrameCallback is not in the DOM lib everywhere yet, and Firefox
- * still does not ship it, so it is described here and treated as optional.
- */
-type VideoWithFrameCallback = HTMLVideoElement & {
-  requestVideoFrameCallback?: (callback: () => void) => number;
-  cancelVideoFrameCallback?: (handle: number) => void;
-};
 
 export async function mountLimelight(root: HTMLElement): Promise<void> {
   const $ = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!;
@@ -110,20 +113,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   const aimButton = $<HTMLButtonElement>('ll-zoom-aim');
   const aimNote = $<HTMLParagraphElement>('ll-aim-note');
 
-  let settings = loadSettings();
+  const editor = createEditorState(loadSettings());
   let session: Session | null = null;
   let recording: Recording | null = null;
   let video: HTMLVideoElement | null = null;
   let cameraVideo: HTMLVideoElement | null = null;
-  /**
-   * The reel, and an element for each recording on it.
-   *
-   * One clip is the ordinary case and everything behaves as it always did. More
-   * than one and the seconds every other part of the editor works in belong to
-   * the reel rather than to any one recording, so only the two places that
-   * actually touch pixels or samples look inside.
-   */
-  let clips: Clip[] = [];
   /**
    * Where the take now being recorded is going.
    *
@@ -139,17 +133,17 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   const FIRST_TAKE = 'take-1';
 
   /** Whether clips still describe the untouched first recording. */
-  function hasEditedReel(value: Clip[] = clips): boolean {
+  function hasEditedReel(value: Clip[] = editor.clips): boolean {
     const firstDuration = takes.get(FIRST_TAKE)?.duration ?? recording?.duration ?? 0;
     return !isPlainRecording(value, FIRST_TAKE, firstDuration);
   }
 
   /** Only recordings named by the current reel affect saving and sound. */
-  function activeTakeIds(value: Clip[] = clips): Set<string> {
+  function activeTakeIds(value: Clip[] = editor.clips): Set<string> {
     return new Set(value.map((clip) => clip.source));
   }
 
-  function reelHasAudio(value: Clip[] = clips): boolean {
+  function reelHasAudio(value: Clip[] = editor.clips): boolean {
     const active = activeTakeIds(value);
     return [...active].some((id) => takes.get(id)?.hasAudio === true);
   }
@@ -159,32 +153,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let controller: AbortController | null = null;
   let previewTime = 0;
   let stored: StoredProject | null = null;
-  let zooms: ZoomBlock[] = [];
-  let texts: TextBlock[] = [];
-  let crop: Crop = { ...FULL_CROP };
-  let trim = { start: 0, end: 0 };
+
   /** Playback state. The video element carries the position; these carry intent. */
   let playing = false;
-  let looping = false;
-  let muted = false;
-  let frameHandle = 0;
-  let rafHandle = 0;
   /** The zoom whose focal point is being shown on the canvas, if any. */
   let focusTarget: ZoomBlock | null = null;
   let draggingFocus = false;
-  /** Stretches removed from the middle, and the decoded sound they came from. */
-  let cuts: Span[] = [];
+
   /** The zoom being edited, if any. */
   let selected: string | null = null;
-  /** Stretches that run at a different pace, and the one being edited. */
-  let speeds: SpeedRegion[] = [];
+
   let selectedSpeed: string | null = null;
-  /** Rectangles covered over, and the one being edited. */
-  let redactions: RedactBlock[] = [];
-  /** Subtitles, and which lines are selected for cutting. */
-  let captions: Cue[] = [];
-  /** Arrows, boxes and highlights, and the one being edited. */
-  let shapes: Shape[] = [];
+
   let selectedShape: string | null = null;
   let draggingShape: { x: number; y: number } | null = null;
   const pickedCues = new Set<string>();
@@ -194,35 +174,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let selection: { start: number; end: number } | null = null;
   let selectingWave = false;
   /** Everything an undo has to put back. The recording itself never changes. */
-  type EditorState = {
-    settings: Settings;
-    zooms: ZoomBlock[];
-    texts: TextBlock[];
-    cuts: Span[];
-    speeds: SpeedRegion[];
-    redactions: RedactBlock[];
-    captions: Cue[];
-    shapes: Shape[];
-    crop: Crop;
-    trim: { start: number; end: number };
-    wallpaper: Uint8Array | null;
-    wallpaperMime: string;
-    /**
-     * The reel, because adding a clip or taking one again is an edit.
-     *
-     * Leaving it out was worse than an undo that did nothing: the blocks moved
-     * back to where they were before the splice while the timeline stayed the
-     * new length, so everything landed in the wrong place.
-     */
-    clips: Clip[];
-  };
-  const history = new History<EditorState>({
-    settings, zooms, texts, cuts: [], speeds: [], redactions: [], captions: [], shapes: [],
-    crop, trim, wallpaper: null, wallpaperMime: 'image/png', clips: [],
-  });
+  const history = new History<EditorState>(editor);
   /** Set while a state is being put back, so restoring does not record itself. */
   let restoring = false;
-  let saveTimer = 0;
 
   /**
    * The live region, which is how any of this reaches somebody not watching.
@@ -251,28 +205,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   const remember = (label = '') => {
     record(label);
     invalidateTrack();
-    saveSettings(settings);
+    saveSettings(editor.settings);
     if (stored) {
-      stored.settings = settings;
-      stored.start = trim.start;
-      stored.end = trim.end;
-      stored.crop = crop;
-      stored.zooms = zooms;
-      stored.texts = texts;
-      stored.cuts = cuts;
-      stored.speeds = speeds;
-      stored.redactions = redactions;
-      stored.captions = captions;
-      stored.shapes = shapes;
-      // Derived from the blocks, and stored alongside them so a reopened
-      // project renders exactly as it did.
-      stored.keyframes = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
-      // The reel, and the recordings it names. A project of one take writes
-      // neither, so nothing changes for the ordinary case or for a file written
-      // before clips existed.
-      // The clips are cheap and go now. The recordings they name are read from
-      // their blobs by the save itself, which is already asynchronous.
-      stored.clips = hasEditedReel() ? clips : [];
+      Object.assign(stored, projectEdits(snapshot(), recording?.duration ?? 0, hasEditedReel()));
       queueSave();
     }
   };
@@ -280,10 +215,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // ------------------------------------------------------------------ history
 
   function snapshot(): EditorState {
-    return {
-      settings, zooms, texts, cuts, speeds, redactions, captions, shapes,
-      crop, trim, wallpaper: wallpaperBytes, wallpaperMime, clips,
-    };
+    return { ...editor };
   }
 
   /**
@@ -304,25 +236,25 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // filmstrip and the joins are all measured against.
     let reelChanged = false;
     try {
-      settings = state.settings;
-      zooms = state.zooms;
-      texts = state.texts;
-      cuts = state.cuts;
-      speeds = state.speeds;
-      redactions = state.redactions;
-      captions = state.captions;
-      shapes = state.shapes;
-      crop = state.crop;
-      trim = { ...state.trim };
+      editor.settings = state.settings;
+      editor.zooms = state.zooms;
+      editor.texts = state.texts;
+      editor.cuts = state.cuts;
+      editor.speeds = state.speeds;
+      editor.redactions = state.redactions;
+      editor.captions = state.captions;
+      editor.shapes = state.shapes;
+      editor.crop = state.crop;
+      editor.trim = { ...state.trim };
 
       // The reel comes back with everything else. Its length is what the
       // scrubber, the trim bar and every track measure against, so restoring
       // the blocks without it puts them all in the wrong place.
       if (state.clips.length > 0 && recording) {
         const wasLength = recording.duration;
-        clips = state.clips;
-        recording.duration = reelDuration(clips);
-        recording.hasAudio = reelHasAudio(clips);
+        editor.clips = state.clips;
+        recording.duration = reelDuration(editor.clips);
+        recording.hasAudio = reelHasAudio(editor.clips);
         if (Math.abs(wasLength - recording.duration) > 0.001) {
           scrubber.max = String(Math.max(0.1, recording.duration));
           $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
@@ -333,15 +265,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       // The picture is held as bytes in the snapshot, so an undo across a
       // change of background has to decode it again rather than assume the
       // one already loaded is the right one.
-      if (state.wallpaper !== wallpaperBytes) {
+      if (state.wallpaper !== editor.wallpaper) {
         if (state.wallpaper) await useWallpaper(state.wallpaper, state.wallpaperMime);
         else dropWallpaper();
       }
-      if (settings.composition.background === 'image' && !wallpaper) {
-        settings.composition.background = 'gradient';
+      if (editor.settings.composition.background === 'image' && !wallpaper) {
+        editor.settings.composition.background = 'gradient';
       }
-      if (selected && !zooms.some((zoom) => zoom.id === selected)) selected = null;
-      if (selectedText && !texts.some((text) => text.id === selectedText)) selectedText = null;
+      if (selected && !editor.zooms.some((zoom) => zoom.id === selected)) selected = null;
+      if (selectedText && !editor.texts.some((text) => text.id === selectedText)) selectedText = null;
 
       if (stored) {
         stored.wallpaper = state.wallpaper;
@@ -404,39 +336,32 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * them, so a session with three retakes in it holds three recordings and not
    * six. The read is cheap next to the write it precedes.
    */
-  async function takeRecords(): Promise<{ id: string; bytes: Uint8Array; mime: string }[]> {
-    if (!hasEditedReel()) return [];
-    const active = activeTakeIds();
-    const out: { id: string; bytes: Uint8Array; mime: string }[] = [];
-    for (const [id, take] of takes) {
-      if (id === FIRST_TAKE || !active.has(id)) continue;
-      const bytes = await take.blob.arrayBuffer().catch(() => null);
-      // A take whose bytes cannot be read is left out rather than written as an
-      // empty record the reel would point at and find nothing behind.
-      if (bytes) out.push({ id, bytes: new Uint8Array(bytes), mime: take.blob.type || 'video/webm' });
-    }
-    return out;
+  function takeRecords() {
+    return readTakeRecords(takes, activeTakeIds(), FIRST_TAKE, hasEditedReel());
   }
+
+  const autosave = createAutosave<StoredProject>(saveProject, (error) => {
+    setStatus(error instanceof Error ? `Could not save: ${error.message}` : 'Could not save this project.', 'bad');
+  });
 
   function queueSave(): void {
     if (!stored) return;
-    window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => {
-      void (async () => {
-        if (!stored) return;
-        // Filled in here rather than in `remember`, which is synchronous and
-        // runs on every slider nudge.
-        stored.takes = await takeRecords();
-        if (stored) await saveProject(stored);
-      })();
-    }, 600);
+    // Capture the target and its media before asynchronous reads. Switching
+    // projects must never attach one project's recordings to another project.
+    const target = { ...stored };
+    const media = new Map(takes);
+    const active = activeTakeIds();
+    const edited = hasEditedReel();
+    autosave.queue(target.id, async () => ({
+      ...target, takes: await readTakeRecords(media, active, FIRST_TAKE, edited),
+    }));
   }
 
   // ------------------------------------------------------------------ project
 
   /** The reel, laid out. Empty for the ordinary one recording case. */
   function placedClips(): Placed[] {
-    return hasEditedReel() ? layout(clips) : [];
+    return hasEditedReel() ? layout(editor.clips) : [];
   }
 
   /**
@@ -473,7 +398,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function project(): Project | null {
     if (!video || !recording) return null;
     return {
-      clips: hasEditedReel() ? clips : undefined,
+      clips: hasEditedReel() ? editor.clips : undefined,
       takes: hasEditedReel() ? takesForRender() : undefined,
       video,
       camera: cameraVideo,
@@ -483,43 +408,43 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       sourceHeight: video.videoHeight || recording.height,
       pointer: recording.pointer,
       clicks: recording.clicks,
-      crop,
-      texts,
+      crop: editor.crop,
+      texts: editor.texts,
       wallpaper,
-      composition: settings.composition,
-      zoom: settings.zoom,
-      tilt: settings.tilt,
-      motion: settings.motion,
-      frameRate: settings.frameRate,
+      composition: editor.settings.composition,
+      zoom: editor.settings.zoom,
+      tilt: editor.settings.tilt,
+      motion: editor.settings.motion,
+      frameRate: editor.settings.frameRate,
       bitrate: suggestBitrate(),
-      showClicks: settings.showClicks,
-      showCursor: settings.showCursor && recording.pointer.length > 0,
-      cursorSize: settings.cursorSize,
-      spotlight: recording.pointer.length > 0 ? settings.spotlight : 0,
-      showKeys: settings.showKeys,
+      showClicks: editor.settings.showClicks,
+      showCursor: editor.settings.showCursor && recording.pointer.length > 0,
+      cursorSize: editor.settings.cursorSize,
+      spotlight: recording.pointer.length > 0 ? editor.settings.spotlight : 0,
+      showKeys: editor.settings.showKeys,
       keys: recording.keys,
       // Aligned to the finished video, since a cut moves every later line.
-      captions: settings.burnCaptions ? alignedCaptions() : [],
-      captionSize: settings.captionSize,
-      shapes,
-      voice: settings.voice,
+      captions: editor.settings.burnCaptions ? alignedCaptions() : [],
+      captionSize: editor.settings.captionSize,
+      shapes: editor.shapes,
+      voice: editor.settings.voice,
       music: musicSamples,
-      musicSettings: settings.music,
-      format: settings.format,
+      musicSettings: editor.settings.music,
+      format: editor.settings.format,
       gifColours: 128,
-      keepAudio: settings.keepAudio && recording.hasAudio,
-      cuts,
-      speeds,
-      redactions,
-      start: trim.start,
-      end: trim.end > trim.start ? trim.end : recording.duration,
+      keepAudio: editor.settings.keepAudio && recording.hasAudio,
+      cuts: editor.cuts,
+      speeds: editor.speeds,
+      redactions: editor.redactions,
+      start: editor.trim.start,
+      end: editor.trim.end > editor.trim.start ? editor.trim.end : recording.duration,
     };
   }
 
   function suggestBitrate(): number {
-    const { width, height } = settings.composition;
-    const factor = QUALITY.find((entry) => entry.id === settings.quality)?.factor ?? 1;
-    const base = width * height * settings.frameRate * 0.09;
+    const { width, height } = editor.settings.composition;
+    const factor = QUALITY.find((entry) => entry.id === editor.settings.quality)?.factor ?? 1;
+    const base = width * height * editor.settings.frameRate * 0.09;
     return Math.max(800_000, Math.min(80_000_000, Math.round(base * factor)));
   }
 
@@ -564,11 +489,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     devices = await listDevices();
     fillDevicePicker(
       $<HTMLSelectElement>('ll-mic-device'), $<HTMLLabelElement>('ll-mic-pick'),
-      devices.microphones, settings.microphoneId,
+      devices.microphones, editor.settings.microphoneId,
     );
     fillDevicePicker(
       $<HTMLSelectElement>('ll-camera-device'), $<HTMLLabelElement>('ll-camera-pick'),
-      devices.cameras, settings.cameraId,
+      devices.cameras, editor.settings.cameraId,
     );
     const anyPicker = devices.microphones.length > 1 || devices.cameras.length > 1;
     $<HTMLDivElement>('ll-devices').hidden = !anyPicker;
@@ -578,11 +503,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   $<HTMLSelectElement>('ll-mic-device').addEventListener('change', (event) => {
-    settings.microphoneId = (event.target as HTMLSelectElement).value;
+    editor.settings.microphoneId = (event.target as HTMLSelectElement).value;
     remember();
   });
   $<HTMLSelectElement>('ll-camera-device').addEventListener('change', (event) => {
-    settings.cameraId = (event.target as HTMLSelectElement).value;
+    editor.settings.cameraId = (event.target as HTMLSelectElement).value;
     remember();
   });
   $<HTMLButtonElement>('ll-devices-refresh').addEventListener('click', () => { void renderDevices(); });
@@ -647,11 +572,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       microphone: $<HTMLInputElement>('ll-mic').checked,
       systemAudio: $<HTMLInputElement>('ll-system-audio').checked,
       camera: $<HTMLInputElement>('ll-camera').checked,
-      microphoneId: settings.microphoneId,
-      cameraId: settings.cameraId,
-      cameraBlur: settings.cameraBlur,
+      microphoneId: editor.settings.microphoneId,
+      cameraId: editor.settings.cameraId,
+      cameraBlur: editor.settings.cameraBlur,
       onTick: (seconds) => { clockEl.textContent = formatClock(seconds); },
-      onReady: () => countdown({ seconds: settings.countdown, sound: settings.countdownSound }),
+      onReady: () => countdown({ seconds: editor.settings.countdown, sound: editor.settings.countdownSound }),
     });
 
     try {
@@ -659,7 +584,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       await session.start();
       recordButton.textContent = 'Stop';
       recordButton.classList.add('is-recording');
-      if (settings.cameraBlur && $<HTMLInputElement>('ll-camera').checked && !session.cameraBlurred) {
+      if (editor.settings.cameraBlur && $<HTMLInputElement>('ll-camera').checked && !session.cameraBlurred) {
         toast('This device will not blur behind the camera, so it is being recorded as it is.');
       }
       setStatus(
@@ -692,7 +617,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       clicks: result.clicks,
       keys: result.keys,
       marks: result.marks,
-      settings,
+      settings: editor.settings,
     });
     stored = project;
     saveCurrentId(project.id);
@@ -727,6 +652,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
           + `Remove the oldest one, "${oldest.name}" (${formatBytes(size)}), to make space?`,
         );
         if (!room) throw error;
+        await autosave.cancel(oldest.id);
         await deleteProject(oldest.id).catch(() => {});
         toast(`Removed ${oldest.name} to make room.`);
       }
@@ -739,16 +665,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const project = await loadProject(id);
     if (!project) return;
     stored = project;
-    settings = project.settings;
-    zooms = project.zooms;
-    texts = project.texts;
-    cuts = project.cuts;
-    speeds = project.speeds;
-    redactions = project.redactions;
-    captions = project.captions;
-    shapes = project.shapes;
+    editor.settings = project.settings;
+    editor.zooms = project.zooms;
+    editor.texts = project.texts;
+    editor.cuts = project.cuts;
+    editor.speeds = project.speeds;
+    editor.redactions = project.redactions;
+    editor.captions = project.captions;
+    editor.shapes = project.shapes;
     musicSamples = project.music ? await decodeMusic(project.music) : null;
-    crop = project.crop;
+    editor.crop = project.crop;
     dropWallpaper();
     if (project.wallpaper) await useWallpaper(project.wallpaper, project.wallpaperMime);
     saveCurrentId(project.id);
@@ -765,7 +691,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       marks: project.marks,
       camera: project.cameraBytes ? new Blob([project.cameraBytes as unknown as BlobPart], { type: project.mime }) : null,
       hasAudio: project.hasAudio,
-    }, { start: project.start, end: project.end });
+    }, { start: project.start, end: project.end }, false);
 
     // The reel is restored after the recording, because `load` resets it to the
     // single clip it always starts as.
@@ -815,10 +741,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const usable = savedClips.filter((clip) => found.has(clip.source));
     if (usable.length === 0) return;
 
-    clips = usable;
-    recording.duration = reelDuration(clips);
-    recording.hasAudio = reelHasAudio(clips);
-    trim = {
+    editor.clips = usable;
+    recording.duration = reelDuration(editor.clips);
+    recording.hasAudio = reelHasAudio(editor.clips);
+    editor.trim = {
       start: Math.max(0, Math.min(range.start, recording.duration)),
       end: range.end > range.start ? Math.min(range.end, recording.duration) : recording.duration,
     };
@@ -845,7 +771,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderHistory();
   }
 
-  async function load(result: Recording, range?: { start: number; end: number }): Promise<void> {
+  async function load(result: Recording, range?: { start: number; end: number }, analyseSource = true): Promise<void> {
     release();
     recording = result;
 
@@ -874,7 +800,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       duration: recording.duration,
       hasAudio: result.hasAudio,
     });
-    clips = [singleClip(FIRST_TAKE, recording.duration)];
+    editor.clips = [singleClip(FIRST_TAKE, recording.duration)];
 
     if (result.camera) {
       cameraVideo = document.createElement('video');
@@ -884,24 +810,24 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       urls.push(cameraUrl);
       cameraVideo.src = cameraUrl;
       await once(cameraVideo, 'loadedmetadata').catch(() => {});
-      settings.composition.camera.enabled = true;
+      editor.settings.composition.camera.enabled = true;
       remember();
     }
 
     if (!stored) {
-      crop = { ...FULL_CROP }; texts = []; cuts = []; speeds = []; redactions = []; captions = []; shapes = [];
+      editor.crop = { ...FULL_CROP }; editor.texts = []; editor.cuts = []; editor.speeds = []; editor.redactions = []; editor.captions = []; editor.shapes = [];
       dropWallpaper();
     }
 
-    trim = range && range.end > range.start
+    editor.trim = range && range.end > range.start
       ? { start: Math.max(0, range.start), end: Math.min(recording.duration, range.end) }
       : { start: 0, end: recording.duration };
 
     stageEl.hidden = false;
     editorEl.hidden = false;
     scrubber.max = String(Math.max(0.1, recording.duration));
-    scrubber.value = String(trim.start);
-    previewTime = trim.start;
+    scrubber.value = String(editor.trim.start);
+    previewTime = editor.trim.start;
     $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
     renderTransport();
 
@@ -926,8 +852,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     renderPicker();
     showFirstTime(activeTrack);
     await loadWaveform();
-    // A reopened project already has its zooms, so it does not analyse again.
-    if (zooms.length === 0) await analyse();
+    // An empty saved zoom track is valid. Re-analysis during reopening can
+    // save the temporary single-clip state before restoreReel puts edits back.
+    if (analyseSource && editor.zooms.length === 0) await analyse();
     else sourceNote.hidden = true;
 
     // The history starts here, after any analysis. Finding the action is what
@@ -952,7 +879,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       points = found.points;
       interestSource = found.source;
       // A re-analysis must not undo work: anything edited by hand is kept.
-      zooms = mergeBlocks(zooms, blocksFromInterest(points, current.duration, settings.zoom));
+      editor.zooms = mergeBlocks(editor.zooms, blocksFromInterest(points, current.duration, editor.settings.zoom));
       renderZooms();
       persistZooms();
 
@@ -1010,6 +937,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       remove.setAttribute('aria-label', `Delete ${project.name}`);
       remove.addEventListener('click', async () => {
         if (!confirm(`Delete "${project.name}"? The recording cannot be made again.`)) return;
+        await autosave.cancel(project.id);
         await deleteProject(project.id);
         if (stored?.id === project.id) {
           stored = null;
@@ -1062,8 +990,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       if (!recording || !video) { filmstrip.clear(); return; }
       // One piece per clip, which for the ordinary single recording is a list
       // of one covering the whole thing.
-      const pieces = clips.length > 0
-        ? clips.flatMap((clip) => {
+      const pieces = editor.clips.length > 0
+        ? editor.clips.flatMap((clip) => {
           const take = takes.get(clip.source);
           return take ? [{ blob: take.blob, video: take.video, in: clip.in, out: clip.out }] : [];
         })
@@ -1077,8 +1005,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function renderTrim(): void {
     if (!recording) return;
     const duration = Math.max(0.001, recording.duration);
-    trimRange.style.left = `${(trim.start / duration) * 100}%`;
-    trimRange.style.width = `${((trim.end - trim.start) / duration) * 100}%`;
+    trimRange.style.left = `${(editor.trim.start / duration) * 100}%`;
+    trimRange.style.width = `${((editor.trim.end - editor.trim.start) / duration) * 100}%`;
 
     // The joins. Without a mark there, a reel looks like one take that changes
     // shot for no reason, and a retake looks like a glitch.
@@ -1090,7 +1018,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       joinsEl.append(mark);
     }
     $<HTMLSpanElement>('ll-trim-label').textContent =
-      `${formatClock(trim.start)} to ${formatClock(trim.end)}, ${formatClock(trim.end - trim.start)} long`;
+      `${formatClock(editor.trim.start)} to ${formatClock(editor.trim.end)}, ${formatClock(editor.trim.end - editor.trim.start)} long`;
   }
 
   let trimming: 'start' | 'end' | null = null;
@@ -1105,7 +1033,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!recording) return;
     const time = trimTimeAt(event);
     // Grab whichever handle is nearer, so a drag anywhere moves the closer end.
-    trimming = Math.abs(time - trim.start) <= Math.abs(time - trim.end) ? 'start' : 'end';
+    trimming = Math.abs(time - editor.trim.start) <= Math.abs(time - editor.trim.end) ? 'start' : 'end';
     try { trimEl.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
     applyTrim(time);
   });
@@ -1118,7 +1046,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!trimming) return;
     trimming = null;
     remember();
-    previewTime = trim.start;
+    previewTime = editor.trim.start;
     scrubber.value = String(previewTime);
     void drawPreview();
   };
@@ -1127,23 +1055,23 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function applyTrim(time: number): void {
     if (!recording || !trimming) return;
-    if (trimming === 'start') trim.start = Math.min(time, trim.end - 0.1);
-    else trim.end = Math.max(time, trim.start + 0.1);
-    trim.start = Math.max(0, trim.start);
-    trim.end = Math.min(recording.duration, trim.end);
+    if (trimming === 'start') editor.trim.start = Math.min(time, editor.trim.end - 0.1);
+    else editor.trim.end = Math.max(time, editor.trim.start + 0.1);
+    editor.trim.start = Math.max(0, editor.trim.start);
+    editor.trim.end = Math.min(recording.duration, editor.trim.end);
     renderTrim();
   }
 
   $<HTMLButtonElement>('ll-trim-start').addEventListener('click', () => {
     if (!recording) return;
-    trim.start = Math.min(previewTime, trim.end - 0.1);
+    editor.trim.start = Math.min(previewTime, editor.trim.end - 0.1);
     renderTrim();
     remember();
   });
 
   $<HTMLButtonElement>('ll-trim-end').addEventListener('click', () => {
     if (!recording) return;
-    trim.end = Math.max(previewTime, trim.start + 0.1);
+    editor.trim.end = Math.max(previewTime, editor.trim.start + 0.1);
     renderTrim();
     remember();
   });
@@ -1217,7 +1145,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       if (!take) continue;
       if (!takeWaves.has(id)) takeWaves.set(id, await analyseAudio(take.blob).catch(() => null));
     }
-    wave = joinWaves(clips.map((clip) => ({
+    wave = joinWaves(editor.clips.map((clip) => ({
       wave: takeWaves.get(clip.source) ?? null,
       in: clip.in,
       out: clip.out,
@@ -1240,35 +1168,35 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    */
   function shiftEverything(from: number, by: number): void {
     if (by === 0) return;
-    zooms = shiftAfter(zooms, from, by);
-    texts = shiftAfter(texts, from, by);
-    speeds = shiftAfter(speeds, from, by);
-    redactions = shiftAfter(redactions, from, by);
-    shapes = shiftAfter(shapes, from, by);
-    captions = shiftAfter(captions, from, by);
-    cuts = shiftAfter(cuts, from, by);
+    editor.zooms = shiftAfter(editor.zooms, from, by);
+    editor.texts = shiftAfter(editor.texts, from, by);
+    editor.speeds = shiftAfter(editor.speeds, from, by);
+    editor.redactions = shiftAfter(editor.redactions, from, by);
+    editor.shapes = shiftAfter(editor.shapes, from, by);
+    editor.captions = shiftAfter(editor.captions, from, by);
+    editor.cuts = shiftAfter(editor.cuts, from, by);
   }
 
   /** Applies a new reel: length, trim, tracks and the picture. */
   async function adoptReel(next: Clip[], said: string): Promise<void> {
     if (!recording) return;
-    const wasWhole = Math.abs(trim.end - recording.duration) < 0.05 && trim.start < 0.05;
-    clips = next;
-    recording.duration = reelDuration(clips);
-    recording.hasAudio = reelHasAudio(clips);
+    const wasWhole = Math.abs(editor.trim.end - recording.duration) < 0.05 && editor.trim.start < 0.05;
+    editor.clips = next;
+    recording.duration = reelDuration(editor.clips);
+    recording.hasAudio = reelHasAudio(editor.clips);
 
     // A trim nobody had touched follows the reel. One that was set by hand is
     // clamped instead, because moving it would throw away a deliberate choice.
-    trim = wasWhole
+    editor.trim = wasWhole
       ? { start: 0, end: recording.duration }
       : {
-        start: Math.min(trim.start, Math.max(0, recording.duration - 0.1)),
-        end: Math.min(trim.end, recording.duration),
+        start: Math.min(editor.trim.start, Math.max(0, recording.duration - 0.1)),
+        end: Math.min(editor.trim.end, recording.duration),
       };
 
     scrubber.max = String(Math.max(0.1, recording.duration));
     $<HTMLSpanElement>('ll-total').textContent = `/ ${formatClock(recording.duration)}`;
-    previewTime = Math.min(previewTime, trim.end);
+    previewTime = Math.min(previewTime, editor.trim.end);
 
     // Structural edits are deliberate steps. Coalescing two quick operations
     // (for example split, then remove) makes Undo jump over both of them.
@@ -1305,7 +1233,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     holder.hidden = !hasEditedReel();
     if (holder.hidden) return;
 
-    for (const [index, clip] of layout(clips).entries()) {
+    for (const [index, clip] of layout(editor.clips).entries()) {
       const chip = document.createElement('div');
       chip.className = 'll-clip';
       chip.draggable = true;
@@ -1360,7 +1288,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         move.textContent = glyph;
         move.title = `Move clip ${index + 1} ${says}`;
         move.setAttribute('aria-label', move.title);
-        move.disabled = by === -1 ? index === 0 : index === clips.length - 1;
+        move.disabled = by === -1 ? index === 0 : index === editor.clips.length - 1;
         move.addEventListener('click', () => { void reorderClip(clip.id, by); });
         actions.append(move);
       }
@@ -1415,7 +1343,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       normalise.type = 'button'; normalise.textContent = 'Normalise clip';
       normalise.addEventListener('click', () => { void normaliseClipAudio(clip.id); });
       controls.append(normalise);
-      if (index < clips.length - 1) {
+      if (index < editor.clips.length - 1) {
         const smooth = document.createElement('button');
         smooth.type = 'button'; smooth.textContent = 'Smooth next join';
         smooth.title = 'Fade this clip out while the next clip fades in';
@@ -1440,7 +1368,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    */
   async function adoptReorder(next: Clip[], said: string): Promise<void> {
     if (!recording) return;
-    const before = layout(clips);
+    const before = layout(editor.clips);
     const after = layout(next);
 
     let dropped = 0;
@@ -1449,13 +1377,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       dropped += out.dropped;
       return out.blocks;
     };
-    zooms = move(zooms);
-    texts = move(texts);
-    speeds = move(speeds);
-    redactions = move(redactions);
-    shapes = move(shapes);
-    captions = move(captions);
-    cuts = move(cuts);
+    editor.zooms = move(editor.zooms);
+    editor.texts = move(editor.texts);
+    editor.speeds = move(editor.speeds);
+    editor.redactions = move(editor.redactions);
+    editor.shapes = move(editor.shapes);
+    editor.captions = move(editor.captions);
+    editor.cuts = move(editor.cuts);
 
     await adoptReel(next, dropped > 0
       ? `${said} ${dropped} ${dropped === 1 ? 'edit' : 'edits'} on it went too.`
@@ -1463,34 +1391,34 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   async function dropClip(id: string): Promise<void> {
-    const next = removeClip(clips, id);
-    if (next.length === clips.length) return;
+    const next = removeClip(editor.clips, id);
+    if (next.length === editor.clips.length) return;
     if (next.length === 0) {
       setStatus('That is the only clip left. Discard the recording instead.', 'bad');
       return;
     }
-    const gone = clips.find((clip) => clip.id === id);
+    const gone = editor.clips.find((clip) => clip.id === id);
     await adoptReorder(next, `Removed a clip of ${formatClock(gone ? gone.out - gone.in : 0)}.`);
   }
 
   async function reorderClip(id: string, by: -1 | 1): Promise<void> {
-    const next = moveClip(clips, id, by);
-    if (next === clips) return;
+    const next = moveClip(editor.clips, id, by);
+    if (next === editor.clips) return;
     await adoptReorder(next, `Moved a clip ${by === -1 ? 'earlier' : 'later'}.`);
   }
 
   async function reorderClipTo(id: string, index: number): Promise<void> {
-    const next = moveClipTo(clips, id, index);
-    if (next === clips) return;
+    const next = moveClipTo(editor.clips, id, index);
+    if (next === editor.clips) return;
     await adoptReorder(next, 'Reordered the clips.');
   }
 
   async function editClipWindow(
     id: string, change: Partial<Pick<Clip, 'in' | 'out'>>,
   ): Promise<void> {
-    const clip = clips.find((entry) => entry.id === id);
+    const clip = editor.clips.find((entry) => entry.id === id);
     if (!clip) return;
-    const next = updateClip(clips, id, change, takes.get(clip.source)?.duration);
+    const next = updateClip(editor.clips, id, change, takes.get(clip.source)?.duration);
     await adoptReorder(next, 'Trimmed the clip.');
   }
 
@@ -1499,9 +1427,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     change: Partial<Pick<Clip, 'name' | 'gain' | 'muted' | 'fadeIn' | 'fadeOut'>>,
     said: string,
   ): void {
-    const clip = clips.find((entry) => entry.id === id);
+    const clip = editor.clips.find((entry) => entry.id === id);
     if (!clip) return;
-    clips = updateClip(clips, id, change, takes.get(clip.source)?.duration);
+    editor.clips = updateClip(editor.clips, id, change, takes.get(clip.source)?.duration);
     const field = Object.keys(change)[0] ?? 'detail';
     remember(`clip:${id}:${field}`);
     renderClips();
@@ -1511,7 +1439,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   async function normaliseClipAudio(id: string): Promise<void> {
-    const clip = clips.find((entry) => entry.id === id);
+    const clip = editor.clips.find((entry) => entry.id === id);
     const take = clip ? takes.get(clip.source) : null;
     if (!clip || !take) return;
     let analysed = takeWaves.get(clip.source);
@@ -1534,13 +1462,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   function smoothClipJoin(id: string): void {
-    const index = clips.findIndex((clip) => clip.id === id);
-    const current = clips[index];
-    const next = clips[index + 1];
+    const index = editor.clips.findIndex((clip) => clip.id === id);
+    const current = editor.clips[index];
+    const next = editor.clips[index + 1];
     if (!current || !next) return;
     const duration = Math.min(0.25, (current.out - current.in) / 2, (next.out - next.in) / 2);
-    clips = updateClip(clips, current.id, { fadeOut: duration }, takes.get(current.source)?.duration);
-    clips = updateClip(clips, next.id, { fadeIn: duration }, takes.get(next.source)?.duration);
+    editor.clips = updateClip(editor.clips, current.id, { fadeOut: duration }, takes.get(current.source)?.duration);
+    editor.clips = updateClip(editor.clips, next.id, { fadeIn: duration }, takes.get(next.source)?.duration);
     remember(`clip:${current.id}:join`);
     renderClips();
     renderTransport();
@@ -1550,8 +1478,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   async function splitClipHere(): Promise<void> {
     if (!recording) return;
-    const next = splitAt(clips, previewTime, () => createId('clip'));
-    if (next.length === clips.length) {
+    const next = splitAt(editor.clips, previewTime, () => createId('clip'));
+    if (next.length === editor.clips.length) {
       setStatus('Move the playhead inside a clip to split it.', 'bad');
       return;
     }
@@ -1568,7 +1496,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
     warnIfDifferentShape(take);
     await adoptReel(
-      [...clips, { id: createId('clip'), source: take.id, in: 0, out: take.duration }],
+      [...editor.clips, { id: createId('clip'), source: take.id, in: 0, out: take.duration }],
       `Added ${formatClock(take.duration)} to the end.`,
     );
   }
@@ -1589,7 +1517,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     warnIfDifferentShape(take);
 
     const out = splice(
-      clips, span,
+      editor.clips, span,
       { id: createId('clip'), source: take.id, in: 0, out: take.duration },
       () => createId('clip'),
     );
@@ -1673,10 +1601,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
       const plan = planTidy({
         silences: wave ? findSilences(wave.loudness, recording.duration) : [],
-        cuts,
-        trim,
-        zooms,
-        suggested: blocksFromInterest(points, recording.duration, settings.zoom),
+        cuts: editor.cuts,
+        trim: editor.trim,
+        zooms: editor.zooms,
+        suggested: blocksFromInterest(points, recording.duration, editor.settings.zoom),
       });
 
       if (!tidyChangesAnything(plan)) {
@@ -1684,8 +1612,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         return;
       }
 
-      cuts = plan.cuts;
-      zooms = plan.zooms;
+      editor.cuts = plan.cuts;
+      editor.zooms = plan.zooms;
       selection = null;
       remember('tidy');
 
@@ -1693,7 +1621,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       renderTrim();
       renderZooms();
       renderPicker();
-      if (previewTime > trim.end) { previewTime = trim.end; syncScrub(); }
+      if (previewTime > editor.trim.end) { previewTime = editor.trim.end; syncScrub(); }
       await drawPreview();
 
       const said = describeTidy(plan, formatClock);
@@ -1708,7 +1636,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   $<HTMLButtonElement>('ll-trim-reset').addEventListener('click', () => {
     if (!recording) return;
-    trim = { start: 0, end: recording.duration };
+    editor.trim = { start: 0, end: recording.duration };
     renderTrim();
     remember();
   });
@@ -1739,14 +1667,14 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const entry = CROP_ASPECTS.find((item) => item.id === cropAspect);
     if (!entry || entry.ratio === null) return null;
     // "Match output" follows whatever output size is selected.
-    if (entry.ratio === 0) return settings.composition.width / settings.composition.height;
+    if (entry.ratio === 0) return editor.settings.composition.width / editor.settings.composition.height;
     return entry.ratio;
   }
 
   function renderCrop(): void {
     cropRow.hidden = !cropping;
     cropButton.setAttribute('aria-pressed', String(cropping));
-    cropButton.textContent = cropping ? 'Cropping' : isFullCrop(crop) ? 'Crop' : 'Cropped';
+    cropButton.textContent = cropping ? 'Cropping' : isFullCrop(editor.crop) ? 'Crop' : 'Cropped';
     canvas.classList.toggle('is-cropping', cropping);
     if (!cropping) canvas.style.cursor = '';
 
@@ -1754,9 +1682,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       button.setAttribute('aria-pressed', String(button.dataset.aspect === cropAspect));
     }
 
-    const width = Math.round((video?.videoWidth ?? recording?.width ?? 0) * crop.width);
-    const height = Math.round((video?.videoHeight ?? recording?.height ?? 0) * crop.height);
-    cropLabel.textContent = isFullCrop(crop)
+    const width = Math.round((video?.videoWidth ?? recording?.width ?? 0) * editor.crop.width);
+    const height = Math.round((video?.videoHeight ?? recording?.height ?? 0) * editor.crop.height);
+    cropLabel.textContent = isFullCrop(editor.crop)
       ? 'The whole picture'
       : `Keeping ${width} by ${height} of the recording`;
   }
@@ -1772,7 +1700,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       cropAspect = entry.id;
       const ratio = aspectRatio();
       if (ratio !== null && video) {
-        crop = cropToAspect(crop, ratio, video.videoWidth, video.videoHeight);
+        editor.crop = cropToAspect(editor.crop, ratio, video.videoWidth, video.videoHeight);
         remember();
       }
       renderCrop();
@@ -1794,7 +1722,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   });
 
   $<HTMLButtonElement>('ll-crop-reset').addEventListener('click', () => {
-    crop = { ...FULL_CROP };
+    editor.crop = { ...FULL_CROP };
     cropAspect = 'free';
     remember();
     renderCrop();
@@ -1821,19 +1749,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** Which part of the rectangle a point is on. */
   function cropHandleAt(point: { x: number; y: number }): string {
     const near = (value: number, edge: number) => Math.abs(value - edge) <= GRIP;
-    const vertical = near(point.y, crop.y) ? 'n' : near(point.y, crop.y + crop.height) ? 's' : '';
-    const horizontal = near(point.x, crop.x) ? 'w' : near(point.x, crop.x + crop.width) ? 'e' : '';
+    const vertical = near(point.y, editor.crop.y) ? 'n' : near(point.y, editor.crop.y + editor.crop.height) ? 's' : '';
+    const horizontal = near(point.x, editor.crop.x) ? 'w' : near(point.x, editor.crop.x + editor.crop.width) ? 'e' : '';
 
-    const insideX = point.x >= crop.x - GRIP && point.x <= crop.x + crop.width + GRIP;
-    const insideY = point.y >= crop.y - GRIP && point.y <= crop.y + crop.height + GRIP;
+    const insideX = point.x >= editor.crop.x - GRIP && point.x <= editor.crop.x + editor.crop.width + GRIP;
+    const insideY = point.y >= editor.crop.y - GRIP && point.y <= editor.crop.y + editor.crop.height + GRIP;
     if ((vertical || horizontal) && insideX && insideY) return vertical + horizontal;
 
     // When nothing has been cropped yet there is no rectangle to move and
     // every point is inside one, so a drag has to mean drawing a new one.
-    if (isFullCrop(crop)) return 'new';
+    if (isFullCrop(editor.crop)) return 'new';
 
-    const inside = point.x > crop.x && point.x < crop.x + crop.width
-      && point.y > crop.y && point.y < crop.y + crop.height;
+    const inside = point.x > editor.crop.x && point.x < editor.crop.x + editor.crop.width
+      && point.y > editor.crop.y && point.y < editor.crop.y + editor.crop.height;
     return inside ? 'move' : 'new';
   }
 
@@ -1845,10 +1773,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     if (handle === 'new') {
       // Dragging on the discarded area starts a fresh rectangle from that corner.
-      crop = normaliseCrop({ x: point.x, y: point.y, width: MIN_CROP, height: MIN_CROP });
-      cropGrab = { handle: 'se', startX: point.x, startY: point.y, from: { ...crop } };
+      editor.crop = normaliseCrop({ x: point.x, y: point.y, width: MIN_CROP, height: MIN_CROP });
+      cropGrab = { handle: 'se', startX: point.x, startY: point.y, from: { ...editor.crop } };
     } else {
-      cropGrab = { handle, startX: point.x, startY: point.y, from: { ...crop } };
+      cropGrab = { handle, startX: point.x, startY: point.y, from: { ...editor.crop } };
     }
     try { canvas.setPointerCapture(event.pointerId); } catch { /* No capture, but the drag still tracks. */ }
     void drawPreview();
@@ -1861,7 +1789,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       return;
     }
     const point = cropPointAt(event);
-    crop = dragCrop(cropGrab, point.x - cropGrab.startX, point.y - cropGrab.startY);
+    editor.crop = dragCrop(cropGrab, point.x - cropGrab.startX, point.y - cropGrab.startY);
     renderCrop();
     void drawPreview();
   });
@@ -1938,8 +1866,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     context.drawImage(video, 0, 0, width, height);
 
     const box = {
-      x: crop.x * width, y: crop.y * height,
-      width: crop.width * width, height: crop.height * height,
+      x: editor.crop.x * width, y: editor.crop.y * height,
+      width: editor.crop.width * width, height: editor.crop.height * height,
     };
 
     // Dim what is being thrown away, using an even-odd fill so the kept part
@@ -2004,12 +1932,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   // Order and labels come from the help, so a track cannot be named one thing
   // on its tab and another in the sheet that explains it.
   const COUNTS: Record<TrackName, () => number> = {
-    zoom: () => zooms.length,
-    sound: () => cuts.length,
-    speed: () => speeds.length,
-    hide: () => redactions.length,
-    shapes: () => shapes.length,
-    text: () => texts.length,
+    zoom: () => editor.zooms.length,
+    sound: () => editor.cuts.length,
+    speed: () => editor.speeds.length,
+    hide: () => editor.redactions.length,
+    shapes: () => editor.shapes.length,
+    text: () => editor.texts.length,
   };
   const TRACKS = TRACK_HELP.map((entry) => ({ ...entry, count: COUNTS[entry.id] }));
   let activeTrack: TrackName = 'zoom';
@@ -2146,7 +2074,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const percent = (time: number) => `${Math.max(0, Math.min(100, (time / duration) * 100))}%`;
 
     cutBandsEl.innerHTML = '';
-    for (const cut of cuts) {
+    for (const cut of editor.cuts) {
       const band = document.createElement('div');
       band.className = 'll-cutband';
       band.style.left = percent(cut.start);
@@ -2165,12 +2093,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
     $<HTMLButtonElement>('ll-cut-selection').disabled = !selection
       || Math.abs(selection.end - selection.start) < 0.05;
-    $<HTMLButtonElement>('ll-cut-clear').disabled = cuts.length === 0;
+    $<HTMLButtonElement>('ll-cut-clear').disabled = editor.cuts.length === 0;
 
     renderPicker();
-    const removed = trim.end - trim.start - keptDuration(cuts, trim.start, trim.end);
-    $<HTMLSpanElement>('ll-cut-label').textContent = cuts.length
-      ? `${cuts.length} cut${cuts.length === 1 ? '' : 's'}, ${formatClock(removed)} removed, ${formatClock(keptDuration(cuts, trim.start, trim.end))} left`
+    const removed = editor.trim.end - editor.trim.start - keptDuration(editor.cuts, editor.trim.start, editor.trim.end);
+    $<HTMLSpanElement>('ll-cut-label').textContent = editor.cuts.length
+      ? `${editor.cuts.length} cut${editor.cuts.length === 1 ? '' : 's'}, ${formatClock(removed)} removed, ${formatClock(keptDuration(editor.cuts, editor.trim.start, editor.trim.end))} left`
       : '';
   }
 
@@ -2219,12 +2147,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   function applyCuts(next: Span[], label: string): void {
-    cuts = mergeSpans(next);
+    editor.cuts = mergeSpans(next);
     selection = null;
     remember(label);
     renderCuts();
     renderTrim();
-    if (recording && previewTime > trim.end) { previewTime = trim.end; syncScrub(); }
+    if (recording && previewTime > editor.trim.end) { previewTime = editor.trim.end; syncScrub(); }
     void drawPreview();
   }
 
@@ -2232,7 +2160,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!selection) return;
     const from = Math.min(selection.start, selection.end);
     const to = Math.max(selection.start, selection.end);
-    applyCuts([...cuts, { start: from, end: to }], 'cut');
+    applyCuts([...editor.cuts, { start: from, end: to }], 'cut');
     toast(`Cut ${formatClock(to - from)}. Undo with Ctrl+Z.`);
   });
 
@@ -2244,21 +2172,21 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const found = findSilences(wave.loudness, recording.duration)
       // Only inside the trimmed range: cutting silence from a part that is
       // already being thrown away achieves nothing and reads as a bug.
-      .map((span) => ({ start: Math.max(span.start, trim.start), end: Math.min(span.end, trim.end) }))
+      .map((span) => ({ start: Math.max(span.start, editor.trim.start), end: Math.min(span.end, editor.trim.end) }))
       .filter((span) => span.end - span.start > 0.05);
 
     if (found.length === 0) {
       setStatus('No silences long enough to be worth cutting.', 'good');
       return;
     }
-    const before = keptDuration(cuts, trim.start, trim.end);
-    applyCuts([...cuts, ...found], 'silences');
-    const saved = before - keptDuration(cuts, trim.start, trim.end);
+    const before = keptDuration(editor.cuts, editor.trim.start, editor.trim.end);
+    applyCuts([...editor.cuts, ...found], 'silences');
+    const saved = before - keptDuration(editor.cuts, editor.trim.start, editor.trim.end);
     toast(`Removed ${found.length} silence${found.length === 1 ? '' : 's'}, ${formatClock(saved)} shorter.`);
   });
 
   $<HTMLButtonElement>('ll-cut-clear').addEventListener('click', () => {
-    if (!cuts.length) return;
+    if (!editor.cuts.length) return;
     applyCuts([], 'cuts-cleared');
     toast('Every cut put back.');
   });
@@ -2276,8 +2204,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const speedTrack = mountBlockTrack<SpeedRegion>({
     element: speedTrackEl,
-    blocks: () => speeds,
-    onChange: (next) => { speeds = sortSpeeds(next); },
+    blocks: () => editor.speeds,
+    onChange: (next) => { editor.speeds = sortSpeeds(next); },
     duration: () => recording?.duration ?? 0,
     selected: () => selectedSpeed,
     onSelect: (id, region) => {
@@ -2297,7 +2225,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!recording) return;
     speedTrack.render();
 
-    const region = speeds.find((entry) => entry.id === selectedSpeed);
+    const region = editor.speeds.find((entry) => entry.id === selectedSpeed);
     speedPanel.hidden = !region;
     $<HTMLButtonElement>('ll-speed-delete').hidden = !region;
     if (region) {
@@ -2306,8 +2234,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
 
     // What the edit has done to the length, which is the whole reason for it.
-    const finished = editedDuration(segmentsOf(trim, cuts, speeds));
-    const raw = trim.end - trim.start;
+    const finished = editedDuration(segmentsOf(editor.trim, editor.cuts, editor.speeds));
+    const raw = editor.trim.end - editor.trim.start;
     // To a tenth, because whole seconds hide the difference between 2x and 4x
     // on a short recording and the readout then looks broken.
     const tenth = (value: number) => `${value.toFixed(1)}s`;
@@ -2325,27 +2253,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   $<HTMLButtonElement>('ll-speed-add').addEventListener('click', () => {
     if (!recording) return;
-    const before = speeds.length;
-    speeds = addSpeed(speeds, previewTime, recording.duration, 2, createId('speed'));
-    if (speeds.length === before) {
+    const before = editor.speeds.length;
+    editor.speeds = addSpeed(editor.speeds, previewTime, recording.duration, 2, createId('speed'));
+    if (editor.speeds.length === before) {
       setStatus('There is no room for a speed change there.', 'bad');
       return;
     }
     announceAdded('Speed change', previewTime);
-    selectedSpeed = speeds.find((region) => region.start <= previewTime + 0.01 && region.end >= previewTime - 0.01)?.id ?? null;
+    selectedSpeed = editor.speeds.find((region) => region.start <= previewTime + 0.01 && region.end >= previewTime - 0.01)?.id ?? null;
     persistSpeeds();
   });
 
   $<HTMLInputElement>('ll-speed-amount').addEventListener('input', (event) => {
     if (!selectedSpeed) return;
     const speed = clampSpeed(Number((event.target as HTMLInputElement).value));
-    speeds = speeds.map((region) => (region.id === selectedSpeed ? { ...region, speed } : region));
+    editor.speeds = editor.speeds.map((region) => (region.id === selectedSpeed ? { ...region, speed } : region));
     persistSpeeds(`speed:${selectedSpeed}`);
   });
 
   $<HTMLButtonElement>('ll-speed-delete').addEventListener('click', () => {
     if (!selectedSpeed) return;
-    speeds = removeSpeed(speeds, selectedSpeed);
+    editor.speeds = removeSpeed(editor.speeds, selectedSpeed);
     selectedSpeed = null;
     persistSpeeds();
     toast('Back to normal speed. Undo with Ctrl+Z.');
@@ -2366,8 +2294,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const shapeTrack = mountBlockTrack<Shape>({
     element: shapeTrackEl,
-    blocks: () => shapes,
-    onChange: (next) => { shapes = sortShapes(next); },
+    blocks: () => editor.shapes,
+    onChange: (next) => { editor.shapes = sortShapes(next); },
     duration: () => recording?.duration ?? 0,
     selected: () => selectedShape,
     onSelect: (id, shape) => {
@@ -2390,7 +2318,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!recording) return;
     shapeTrack.render();
 
-    const shape = shapes.find((entry) => entry.id === selectedShape);
+    const shape = editor.shapes.find((entry) => entry.id === selectedShape);
     shapePanel.hidden = !shape;
     shapeNote.hidden = !shape;
     if (shape) {
@@ -2400,7 +2328,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       $<HTMLSpanElement>('ll-shape-fade-out').textContent = `${shape.fade.toFixed(2)}s`;
     }
     renderSwatches(shape?.colour);
-    $<HTMLSpanElement>('ll-shape-label').textContent = shapes.length ? `${shapes.length} on screen` : '';
+    $<HTMLSpanElement>('ll-shape-label').textContent = editor.shapes.length ? `${editor.shapes.length} on screen` : '';
     renderPicker();
   }
 
@@ -2416,7 +2344,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       swatch.setAttribute('aria-pressed', String(current === colour));
       swatch.addEventListener('click', () => {
         if (!selectedShape) return;
-        shapes = updateShape(shapes, selectedShape, { colour });
+        editor.shapes = updateShape(editor.shapes, selectedShape, { colour });
         persistShapes('shape-colour');
       });
       holder.append(swatch);
@@ -2432,9 +2360,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   $<HTMLButtonElement>('ll-shape-add').addEventListener('click', () => {
     if (!recording) return;
     const kind = $<HTMLSelectElement>('ll-shape-kind').value as ShapeKind;
-    shapes = addShape(shapes, previewTime, recording.duration, kind, createId('shape'));
+    editor.shapes = addShape(editor.shapes, previewTime, recording.duration, kind, createId('shape'));
     announceAdded(kind, previewTime);
-    selectedShape = shapes.find((shape) => shape.start <= previewTime + 0.01 && shape.end >= previewTime - 0.01)?.id ?? null;
+    selectedShape = editor.shapes.find((shape) => shape.start <= previewTime + 0.01 && shape.end >= previewTime - 0.01)?.id ?? null;
     selectedRedaction = null;
     renderRedactions();
     persistShapes();
@@ -2443,17 +2371,17 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   $<HTMLInputElement>('ll-shape-weight').addEventListener('input', (event) => {
     if (!selectedShape) return;
-    shapes = updateShape(shapes, selectedShape, { thickness: Number((event.target as HTMLInputElement).value) });
+    editor.shapes = updateShape(editor.shapes, selectedShape, { thickness: Number((event.target as HTMLInputElement).value) });
     persistShapes(`shape-weight:${selectedShape}`);
   });
   $<HTMLInputElement>('ll-shape-fade').addEventListener('input', (event) => {
     if (!selectedShape) return;
-    shapes = updateShape(shapes, selectedShape, { fade: Number((event.target as HTMLInputElement).value) });
+    editor.shapes = updateShape(editor.shapes, selectedShape, { fade: Number((event.target as HTMLInputElement).value) });
     persistShapes(`shape-fade:${selectedShape}`);
   });
   $<HTMLButtonElement>('ll-shape-delete').addEventListener('click', () => {
     if (!selectedShape) return;
-    shapes = removeShape(shapes, selectedShape);
+    editor.shapes = removeShape(editor.shapes, selectedShape);
     selectedShape = null;
     persistShapes();
     toast('Shape removed. Undo with Ctrl+Z.');
@@ -2474,8 +2402,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const redactTrack = mountBlockTrack<RedactBlock>({
     element: redactTrackEl,
-    blocks: () => redactions,
-    onChange: (next) => { redactions = sortRedactions(next); },
+    blocks: () => editor.redactions,
+    onChange: (next) => { editor.redactions = sortRedactions(next); },
     duration: () => recording?.duration ?? 0,
     selected: () => selectedRedaction,
     onSelect: (id, block) => {
@@ -2500,7 +2428,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!recording) return;
     redactTrack.render();
 
-    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    const block = editor.redactions.find((entry) => entry.id === selectedRedaction);
     redactPanel.hidden = !block;
     redactNote.hidden = !block;
     if (block) {
@@ -2510,8 +2438,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       $<HTMLInputElement>('ll-redact-h').value = String(block.height);
       $<HTMLSpanElement>('ll-redact-h-out').textContent = `${Math.round(block.height * 100)}%`;
     }
-    $<HTMLSpanElement>('ll-redact-label').textContent = redactions.length
-      ? `${redactions.length} hidden`
+    $<HTMLSpanElement>('ll-redact-label').textContent = editor.redactions.length
+      ? `${editor.redactions.length} hidden`
       : '';
     renderPicker();
   }
@@ -2526,18 +2454,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!recording) return;
     const current = project();
     const at = current ? cursorAt(current, previewTime) : null;
-    redactions = addRedaction(
-      redactions, previewTime, recording.duration, createId('redact'),
+    editor.redactions = addRedaction(
+      editor.redactions, previewTime, recording.duration, createId('redact'),
       at ? { x: at.x, y: at.y } : { x: 0.5, y: 0.5 },
     );
-    selectedRedaction = redactions.find((block) => block.start <= previewTime + 0.01 && block.end >= previewTime - 0.01)?.id ?? null;
+    selectedRedaction = editor.redactions.find((block) => block.start <= previewTime + 0.01 && block.end >= previewTime - 0.01)?.id ?? null;
     persistRedactions();
     toast('Drag on the picture to place what should be hidden.');
   });
 
   function editRedaction(change: Partial<RedactBlock>, label: string): void {
     if (!selectedRedaction) return;
-    redactions = redactions.map((block) => (block.id === selectedRedaction ? { ...block, ...change } : block));
+    editor.redactions = editor.redactions.map((block) => (block.id === selectedRedaction ? { ...block, ...change } : block));
     persistRedactions(label);
   }
 
@@ -2552,10 +2480,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   });
 
   $<HTMLButtonElement>('ll-redact-point').addEventListener('click', () => {
-    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    const block = editor.redactions.find((entry) => entry.id === selectedRedaction);
     if (!block) return;
     const here = rectAt(block, previewTime);
-    redactions = redactions.map((entry) => (entry.id === block.id
+    editor.redactions = editor.redactions.map((entry) => (entry.id === block.id
       ? setPoint(entry, previewTime, here.x + here.width / 2, here.y + here.height / 2)
       : entry));
     persistRedactions('redact-point');
@@ -2564,7 +2492,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   $<HTMLButtonElement>('ll-redact-delete').addEventListener('click', () => {
     if (!selectedRedaction) return;
-    redactions = removeRedaction(redactions, selectedRedaction);
+    editor.redactions = removeRedaction(editor.redactions, selectedRedaction);
     selectedRedaction = null;
     persistRedactions();
     toast('Redaction removed. Undo with Ctrl+Z.');
@@ -2582,7 +2510,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function zoomRegion(): { x: number; y: number; width: number; height: number } | null {
     const current = project();
     if (!current) return null;
-    return cropRect(crop, current.sourceWidth, current.sourceHeight);
+    return cropRect(editor.crop, current.sourceWidth, current.sourceHeight);
   }
 
   /**
@@ -2646,7 +2574,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * avoids inverting the zoom transform.
    */
   function drawRedactOutline(context: CanvasRenderingContext2D, time: number): void {
-    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    const block = editor.redactions.find((entry) => entry.id === selectedRedaction);
     if (!block || time < block.start || time > block.end) return;
     const box = rectAt(block, time);
     const { width, height } = canvas;
@@ -2670,8 +2598,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function moveFocus(point: { x: number; y: number }, label: string): void {
     if (!focusTarget || !recording) return;
     const id = focusTarget.id;
-    zooms = zooms.map((zoom) => (zoom.id === id ? { ...zoom, x: point.x, y: point.y, pinned: true } : zoom));
-    focusTarget = zooms.find((zoom) => zoom.id === id) ?? null;
+    editor.zooms = editor.zooms.map((zoom) => (zoom.id === id ? { ...zoom, x: point.x, y: point.y, pinned: true } : zoom));
+    focusTarget = editor.zooms.find((zoom) => zoom.id === id) ?? null;
     invalidateTrack();
     renderSelected();
     persistZooms(label);
@@ -2679,7 +2607,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   function startAiming(id: string): void {
-    const zoom = zooms.find((entry) => entry.id === id);
+    const zoom = editor.zooms.find((entry) => entry.id === id);
     if (!zoom || !recording) return;
     if (playing) pause();
     if (cropping) return;
@@ -2715,8 +2643,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const zoomBlocks = mountBlockTrack<ZoomBlock>({
     element: zoomTrackEl,
-    blocks: () => zooms,
-    onChange: (next) => { zooms = next.map((zoom) => ({ ...zoom, pinned: true })); },
+    blocks: () => editor.zooms,
+    onChange: (next) => { editor.zooms = next.map((zoom) => ({ ...zoom, pinned: true })); },
     duration: () => recording?.duration ?? 0,
     selected: () => selected,
     onSelect: (id, zoom) => {
@@ -2747,7 +2675,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     invalidateTrack();
     zoomBlocks.render();
 
-    $<HTMLParagraphElement>('ll-zoom-hint').textContent = zooms.length
+    $<HTMLParagraphElement>('ll-zoom-hint').textContent = editor.zooms.length
       ? 'Drag a zoom to move it, or its edges to resize. Click one to edit it, double click to aim it at something.'
       : 'No zooms yet. Press Add a zoom to put one at the playhead.';
     renderSelected();
@@ -2756,7 +2684,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function renderSelected(): void {
     const panel = $<HTMLDivElement>('ll-zoom-selected');
-    const zoom = zooms.find((entry) => entry.id === selected);
+    const zoom = editor.zooms.find((entry) => entry.id === selected);
     panel.hidden = !zoom;
     if (!zoom) { if (focusTarget) stopAiming(); return; }
     $<HTMLInputElement>('ll-zoom-amount').value = String(zoom.scale);
@@ -2774,9 +2702,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function editSelectedZoom(change: Partial<ZoomBlock>, label: string): void {
     if (!selected || !recording) return;
     const id = selected;
-    zooms = zooms.map((zoom) => (zoom.id === id ? { ...zoom, ...change, pinned: true } : zoom));
-    zooms = constrain(zooms, id, recording.duration);
-    if (focusTarget) focusTarget = zooms.find((zoom) => zoom.id === id) ?? null;
+    editor.zooms = editor.zooms.map((zoom) => (zoom.id === id ? { ...zoom, ...change, pinned: true } : zoom));
+    editor.zooms = constrain(editor.zooms, id, recording.duration);
+    if (focusTarget) focusTarget = editor.zooms.find((zoom) => zoom.id === id) ?? null;
     invalidateTrack();
     renderZooms();
     persistZooms(label);
@@ -2809,7 +2737,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** Removes a zoom and says so, because undo is not where the eye is. */
   function deleteZoom(id: string): void {
     if (focusTarget?.id === id) stopAiming();
-    zooms = removeBlock(zooms, id);
+    editor.zooms = removeBlock(editor.zooms, id);
     if (selected === id) selected = null;
     invalidateTrack();
     renderZooms();
@@ -2837,7 +2765,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       event.preventDefault();
       draggingShape = aimPointAt(event);
       try { canvas.setPointerCapture(event.pointerId); } catch { /* the drag still tracks */ }
-      shapes = updateShape(shapes, selectedShape, {
+      editor.shapes = updateShape(editor.shapes, selectedShape, {
         x: draggingShape.x, y: draggingShape.y, width: 0.001, height: 0.001,
       });
       renderShapes();
@@ -2854,7 +2782,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (draggingRedaction) { placeRedaction(aimPointAt(event)); return; }
     if (draggingShape && selectedShape) {
       const to = aimPointAt(event);
-      shapes = updateShape(shapes, selectedShape, {
+      editor.shapes = updateShape(editor.shapes, selectedShape, {
         width: to.x - draggingShape.x, height: to.y - draggingShape.y,
       });
       renderShapes();
@@ -2880,9 +2808,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * flatten it.
    */
   function placeRedaction(point: { x: number; y: number }): void {
-    const block = redactions.find((entry) => entry.id === selectedRedaction);
+    const block = editor.redactions.find((entry) => entry.id === selectedRedaction);
     if (!block) return;
-    redactions = redactions.map((entry) => (entry.id === block.id
+    editor.redactions = editor.redactions.map((entry) => (entry.id === block.id
       ? (entry.points.length <= 1
         ? { ...entry, points: [{ time: entry.start, x: point.x, y: point.y }] }
         : setPoint(entry, previewTime, point.x, point.y))
@@ -2893,23 +2821,23 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   $<HTMLButtonElement>('ll-zoom-add').addEventListener('click', () => {
     if (!recording) return;
-    const before = zooms.length;
+    const before = editor.zooms.length;
     const current = project();
     // Aim it where the pointer actually was at that moment. The recording
     // already carries that track, so a new zoom starts pointed at the thing you
     // were doing rather than at the middle of the screen.
     const at = current ? cursorAt(current, previewTime) : null;
-    zooms = addBlock(
-      zooms, previewTime, recording.duration, settings.zoom,
+    editor.zooms = addBlock(
+      editor.zooms, previewTime, recording.duration, editor.settings.zoom,
       at ? { x: at.x, y: at.y } : undefined,
     );
-    if (zooms.length === before) {
+    if (editor.zooms.length === before) {
       setStatus('There is no room for a zoom there. Move the playhead into a gap.', 'bad');
       return;
     }
     invalidateTrack();
     announceAdded('Zoom', previewTime);
-    selected = zooms.find((zoom) => zoom.pinned && zoom.start <= previewTime + 0.01 && zoom.end >= previewTime - 0.01)?.id ?? selected;
+    selected = editor.zooms.find((zoom) => zoom.pinned && zoom.start <= previewTime + 0.01 && zoom.end >= previewTime - 0.01)?.id ?? selected;
     selectedText = null;
     renderTextSelected();
     renderZooms();
@@ -2918,8 +2846,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   });
 
   $<HTMLButtonElement>('ll-zoom-clear').addEventListener('click', () => {
-    if (!zooms.length || !confirm('Remove every zoom, including the ones you set by hand?')) return;
-    zooms = [];
+    if (!editor.zooms.length || !confirm('Remove every zoom, including the ones you set by hand?')) return;
+    editor.zooms = [];
     selected = null;
     stopAiming();
     invalidateTrack();
@@ -2937,8 +2865,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const textTrack = mountBlockTrack<TextBlock>({
     element: textTrackEl,
-    blocks: () => texts,
-    onChange: (next) => { texts = next; },
+    blocks: () => editor.texts,
+    onChange: (next) => { editor.texts = next; },
     duration: () => recording?.duration ?? 0,
     selected: () => selectedText,
     onSelect: (id, text) => {
@@ -2978,7 +2906,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function renderTextSelected(): void {
     const panel = $<HTMLDivElement>('ll-text-selected');
-    const text = texts.find((entry) => entry.id === selectedText);
+    const text = editor.texts.find((entry) => entry.id === selectedText);
     panel.hidden = !text;
     for (const bar of textTrackEl.querySelectorAll<HTMLDivElement>('.ll-zoom')) {
       bar.classList.toggle('is-selected', bar.dataset.id === selectedText);
@@ -3004,7 +2932,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   /** Applies a change to the selected caption and records it as one step. */
   function editSelectedText(change: Partial<TextBlock>, label: string): void {
     if (!selectedText) return;
-    texts = updateText(texts, selectedText, change);
+    editor.texts = updateText(editor.texts, selectedText, change);
     renderTexts();
     persistTexts(`${label}:${selectedText}`);
     void drawPreview();
@@ -3033,11 +2961,11 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   $<HTMLButtonElement>('ll-text-add').addEventListener('click', () => {
     if (!recording) return;
-    const before = new Set(texts.map((text) => text.id));
-    texts = addText(texts, previewTime, recording.duration);
+    const before = new Set(editor.texts.map((text) => text.id));
+    editor.texts = addText(editor.texts, previewTime, recording.duration);
     // addText sorts, so the new caption is found by what was not there before
     // rather than by where it ended up.
-    selectedText = texts.find((text) => !before.has(text.id))?.id ?? selectedText;
+    selectedText = editor.texts.find((text) => !before.has(text.id))?.id ?? selectedText;
     announceAdded('Caption', previewTime);
     selected = null;
     renderSelected();
@@ -3058,7 +2986,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let trackCache: ReturnType<typeof trackFromBlocks> | null = null;
   function invalidateTrack(): void { trackCache = null; }
   function zoomTrack(): ReturnType<typeof trackFromBlocks> {
-    if (!trackCache) trackCache = trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom);
+    if (!trackCache) trackCache = trackFromBlocks(editor.zooms, recording?.duration ?? 0, editor.settings.zoom);
     return trackCache;
   }
 
@@ -3104,7 +3032,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       ? { width: video.videoWidth || current.sourceWidth, height: video.videoHeight || current.sourceHeight }
       : region
         ? { width: Math.round(region.width), height: Math.round(region.height) }
-        : settings.composition;
+        : editor.settings.composition;
     if (canvas.width !== size.width) canvas.width = size.width;
     if (canvas.height !== size.height) canvas.height = size.height;
 
@@ -3235,16 +3163,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function zoomMenu(event: MouseEvent, id: string): void {
     if (!recording) return;
-    const zoom = zooms.find((entry) => entry.id === id);
+    const zoom = editor.zooms.find((entry) => entry.id === id);
     if (!zoom) return;
     const canSplit = previewTime - zoom.start >= MIN_BLOCK && zoom.end - previewTime >= MIN_BLOCK;
 
     openMenu(event, [
       {
         label: 'Duplicate',
-        enabled: duplicateBlock(zooms, id, recording.duration).length > zooms.length,
+        enabled: duplicateBlock(editor.zooms, id, recording.duration).length > editor.zooms.length,
         run: () => {
-          zooms = duplicateBlock(zooms, id, recording!.duration);
+          editor.zooms = duplicateBlock(editor.zooms, id, recording!.duration);
           renderZooms();
           persistZooms();
           void drawPreview();
@@ -3254,7 +3182,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         label: 'Split at the playhead',
         enabled: canSplit,
         run: () => {
-          zooms = splitBlock(zooms, id, previewTime);
+          editor.zooms = splitBlock(editor.zooms, id, previewTime);
           renderZooms();
           persistZooms();
           void drawPreview();
@@ -3264,7 +3192,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         label: 'Remove',
         enabled: true,
         run: () => {
-          zooms = removeBlock(zooms, id);
+          editor.zooms = removeBlock(editor.zooms, id);
           if (selected === id) selected = null;
           renderZooms();
           persistZooms();
@@ -3276,7 +3204,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function textMenu(event: MouseEvent, id: string): void {
     if (!recording) return;
-    const text = texts.find((entry) => entry.id === id);
+    const text = editor.texts.find((entry) => entry.id === id);
     if (!text) return;
     const canSplit = previewTime - text.start >= MIN_TEXT && text.end - previewTime >= MIN_TEXT;
 
@@ -3285,7 +3213,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         label: 'Duplicate',
         enabled: true,
         run: () => {
-          texts = duplicateText(texts, id, recording!.duration);
+          editor.texts = duplicateText(editor.texts, id, recording!.duration);
           renderTexts();
           persistTexts();
           void drawPreview();
@@ -3295,7 +3223,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         label: 'Split at the playhead',
         enabled: canSplit,
         run: () => {
-          texts = splitText(texts, id, previewTime);
+          editor.texts = splitText(editor.texts, id, previewTime);
           renderTexts();
           persistTexts();
           void drawPreview();
@@ -3305,7 +3233,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         label: 'Remove',
         enabled: true,
         run: () => {
-          texts = removeText(texts, id);
+          editor.texts = removeText(editor.texts, id);
           if (selectedText === id) selectedText = null;
           renderTexts();
           persistTexts();
@@ -3321,263 +3249,27 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   // ------------------------------------------------------------------ controls
 
-  const presetsEl = $<HTMLDivElement>('ll-presets');
-  for (const preset of PRESETS) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'll-preset';
-    button.dataset.preset = preset.id;
-    button.title = preset.label;
-    button.setAttribute('aria-label', preset.label);
-    button.style.background = preset.background === 'gradient'
-      ? `linear-gradient(135deg, ${preset.colours[0]}, ${preset.colours[1]})`
-      : preset.background === 'none' ? 'repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 50% / 12px 12px'
-      : preset.colours[0];
-    button.addEventListener('click', () => {
-      settings.composition.background = preset.background;
-      settings.composition.colours = [...preset.colours];
-      remember();
-      markPresets();
-      void drawPreview();
-    });
-    presetsEl.append(button);
-  }
-  function markPresets(): void {
-    for (const button of presetsEl.querySelectorAll<HTMLButtonElement>('.ll-preset')) {
-      const preset = PRESETS.find((entry) => entry.id === button.dataset.preset)!;
-      const active = preset.background === settings.composition.background
-        && preset.colours[0] === settings.composition.colours[0];
-      button.setAttribute('aria-pressed', String(active));
-    }
-  }
-
-  const sizeEl = $<HTMLSelectElement>('ll-size');
-  for (const size of OUTPUT_SIZES) {
-    const option = document.createElement('option');
-    option.value = size.id;
-    option.textContent = size.label;
-    sizeEl.append(option);
-  }
-  sizeEl.addEventListener('change', () => {
-    const size = OUTPUT_SIZES.find((entry) => entry.id === sizeEl.value);
-    if (!size) return;
-    settings.composition.width = size.width;
-    settings.composition.height = size.height;
-    remember();
-    void describeFormat();
-    void drawPreview();
+  const { renderControls, markPresets, describeFormat } = mountControls({
+    get $() { return $; },
+    get settings() { return editor.settings; },
+    set settings(value) { editor.settings = value; },
+    get zooms() { return editor.zooms; },
+    set zooms(value) { editor.zooms = value; },
+    get remember() { return remember; },
+    get drawPreview() { return drawPreview; },
+    get invalidateTrack() { return invalidateTrack; },
+    get renderZooms() { return renderZooms; },
+    get countdownEl() { return countdownEl; },
+    get renderWallpaper() { return renderWallpaper; },
+    get suggestBitrate() { return suggestBitrate; },
+    get analyse() { return analyse; },
   });
-
-  const sliders: [string, (value: number) => void, () => number][] = [
-    ['ll-padding', (value) => { settings.composition.padding = value; }, () => settings.composition.padding],
-    ['ll-radius', (value) => { settings.composition.radius = value; }, () => settings.composition.radius],
-    ['ll-shadow', (value) => { settings.composition.shadow = value; }, () => settings.composition.shadow],
-    ['ll-zoom-scale', (value) => { settings.zoom.scale = value; }, () => settings.zoom.scale],
-    ['ll-zoom-hold', (value) => { settings.zoom.holdSeconds = value; }, () => settings.zoom.holdSeconds],
-    ['ll-zoom-move', (value) => { settings.zoom.moveSeconds = value; }, () => settings.zoom.moveSeconds],
-    ['ll-camera-size', (value) => { settings.composition.camera.size = value; }, () => settings.composition.camera.size],
-    ['ll-tilt-x', (value) => { settings.tilt.x = value; }, () => settings.tilt.x],
-    ['ll-tilt-y', (value) => { settings.tilt.y = value; }, () => settings.tilt.y],
-    ['ll-tilt-rotate', (value) => { settings.tilt.rotate = value; }, () => settings.tilt.rotate],
-    ['ll-tilt-depth', (value) => { settings.tilt.depth = value; }, () => settings.tilt.depth],
-    ['ll-motion-seconds', (value) => { settings.motion.seconds = value; }, () => settings.motion.seconds],
-    ['ll-cursor-size', (value) => { settings.cursorSize = value; }, () => settings.cursorSize],
-    ['ll-voice-highpass', (value) => { settings.voice.highPass = value; }, () => settings.voice.highPass],
-    ['ll-voice-gate', (value) => { settings.voice.gate = value; }, () => settings.voice.gate],
-    ['ll-spotlight', (value) => { settings.spotlight = value; }, () => settings.spotlight],
-  ];
-  for (const [id, apply] of sliders) {
-    const input = $<HTMLInputElement>(id);
-    input.addEventListener('input', () => {
-      apply(Number(input.value));
-      // The default scale used to write a value that only new blocks would ever
-      // read, so after a recording the slider looked broken. It now carries the
-      // blocks nobody has touched with it, which is what a default should mean.
-      if (id === 'll-zoom-scale') applyDefaultScale();
-      remember(`slider:${id}`);
-      renderReadouts();
-      void drawPreview();
-    });
-  }
-
-  /** Retunes every zoom still on the automatic settings. Pinned ones are yours. */
-  function applyDefaultScale(): void {
-    if (!zooms.some((zoom) => !zoom.pinned)) return;
-    zooms = zooms.map((zoom) => (zoom.pinned ? zoom : { ...zoom, scale: settings.zoom.scale }));
-    invalidateTrack();
-    renderZooms();
-  }
-
-  const toggles: [string, (value: boolean) => void, () => boolean][] = [
-    ['ll-zoom-on', (value) => { settings.zoom.enabled = value; }, () => settings.zoom.enabled],
-    ['ll-clicks', (value) => { settings.showClicks = value; }, () => settings.showClicks],
-    ['ll-cursor', (value) => { settings.showCursor = value; }, () => settings.showCursor],
-    ['ll-keys', (value) => { settings.showKeys = value; }, () => settings.showKeys],
-    ['ll-voice-normalise', (value) => { settings.voice.normalise = value; }, () => settings.voice.normalise],
-    ['ll-camera-on', (value) => { settings.composition.camera.enabled = value; }, () => settings.composition.camera.enabled],
-    ['ll-audio', (value) => { settings.keepAudio = value; }, () => settings.keepAudio],
-  ];
-  for (const [id, apply] of toggles) {
-    const input = $<HTMLInputElement>(id);
-    input.addEventListener('change', () => {
-      apply(input.checked);
-      remember();
-      void drawPreview();
-    });
-  }
-
-  for (const [id, key] of [['ll-motion-in', 'entrance'], ['ll-motion-out', 'exit']] as [string, 'entrance' | 'exit'][]) {
-    const select = $<HTMLSelectElement>(id);
-    for (const entry of MOTIONS) {
-      const option = document.createElement('option');
-      option.value = entry.id;
-      option.textContent = entry.label;
-      select.append(option);
-    }
-    select.addEventListener('change', () => {
-      settings.motion[key] = select.value as Motion;
-      remember();
-      void drawPreview();
-    });
-  }
-
-  $<HTMLButtonElement>('ll-tilt-reset').addEventListener('click', () => {
-    settings.tilt = { ...defaultTilt };
-    remember();
-    renderControls();
-    void drawPreview();
-  });
-
-  const shapeEl = $<HTMLSelectElement>('ll-camera-shape');
-  for (const shape of CAMERA_SHAPES) {
-    const option = document.createElement('option');
-    option.value = shape.id;
-    option.textContent = shape.label;
-    shapeEl.append(option);
-  }
-  shapeEl.addEventListener('change', () => {
-    settings.composition.camera.shape = shapeEl.value as CameraShape;
-    remember();
-    void drawPreview();
-  });
-
-  const cornerEl = $<HTMLSelectElement>('ll-camera-corner');
-  cornerEl.addEventListener('change', () => {
-    settings.composition.camera.corner = cornerEl.value as CameraCorner;
-    remember();
-    void drawPreview();
-  });
-
-  const formatEl = $<HTMLSelectElement>('ll-format');
-  formatEl.addEventListener('change', async () => {
-    settings.format = formatEl.value as OutputFormat;
-    remember();
-    await describeFormat();
-  });
-
-  const qualityEl = $<HTMLSelectElement>('ll-quality');
-  for (const entry of QUALITY) {
-    const option = document.createElement('option');
-    option.value = entry.id;
-    option.textContent = entry.label;
-    qualityEl.append(option);
-  }
-  qualityEl.addEventListener('change', () => {
-    settings.quality = qualityEl.value as Settings['quality'];
-    remember();
-    renderReadouts();
-  });
-
-  /** Says what this browser can write, and what each choice costs. */
-  async function describeFormat(): Promise<void> {
-    const note = $<HTMLParagraphElement>('ll-format-note');
-    const { width, height } = settings.composition;
-    const able = await capabilities(width, height);
-
-    const mp4Option = formatEl.querySelector<HTMLOptionElement>('option[value="mp4"]');
-    if (mp4Option) {
-      mp4Option.disabled = !able.mp4;
-      mp4Option.textContent = able.mp4 ? 'MP4' : 'MP4, not available here';
-    }
-
-    if (settings.format === 'mp4' && !able.mp4) {
-      settings.format = 'webm';
-      formatEl.value = 'webm';
-      remember();
-    }
-
-    note.textContent =
-      settings.format === 'gif'
-        ? 'A GIF plays anywhere but has no sound and only 256 colours a frame. Keep it short and small.'
-        : settings.format === 'mp4'
-          ? able.aac
-            ? 'MP4 with H.264. The most portable choice.'
-            : 'MP4 with H.264. This browser cannot encode AAC, so the sound will be Opus, which Safari does not play. WebM keeps sound everywhere.'
-          : 'WebM with VP9. Best quality for the size, and sound that plays in every current browser.';
-  }
-
-  const fpsEl = $<HTMLSelectElement>('ll-fps');
-  fpsEl.addEventListener('change', () => {
-    settings.frameRate = Number(fpsEl.value) || 30;
-    remember();
-    renderReadouts();
-  });
-
-  function renderControls(): void {
-    for (const [id, , read] of sliders) $<HTMLInputElement>(id).value = String(read());
-    for (const [id, , read] of toggles) $<HTMLInputElement>(id).checked = read();
-    cornerEl.value = settings.composition.camera.corner;
-    shapeEl.value = settings.composition.camera.shape;
-    $<HTMLSelectElement>('ll-motion-in').value = settings.motion.entrance;
-    $<HTMLSelectElement>('ll-motion-out').value = settings.motion.exit;
-    countdownEl.value = String(settings.countdown);
-    $<HTMLInputElement>('ll-countdown-sound').checked = settings.countdownSound;
-    $<HTMLInputElement>('ll-camera-blur').checked = settings.cameraBlur;
-    renderWallpaper();
-    fpsEl.value = String(settings.frameRate);
-    formatEl.value = settings.format;
-    qualityEl.value = settings.quality;
-    const size = OUTPUT_SIZES.find((entry) =>
-      entry.width === settings.composition.width && entry.height === settings.composition.height);
-    sizeEl.value = size?.id ?? OUTPUT_SIZES[0].id;
-    markPresets();
-    renderReadouts();
-  }
-
-  function renderReadouts(): void {
-    const readouts: [string, string][] = [
-      ['ll-padding-out', `${Math.round(settings.composition.padding * 100)}%`],
-      ['ll-radius-out', `${Math.round(settings.composition.radius * 100)}%`],
-      ['ll-shadow-out', `${Math.round(settings.composition.shadow * 100)}%`],
-      ['ll-zoom-scale-out', `${settings.zoom.scale.toFixed(1)}x`],
-      ['ll-zoom-hold-out', `${settings.zoom.holdSeconds.toFixed(1)}s`],
-      ['ll-zoom-move-out', `${settings.zoom.moveSeconds.toFixed(2)}s`],
-      ['ll-camera-size-out', `${Math.round(settings.composition.camera.size * 100)}%`],
-      ['ll-tilt-x-out', `${Math.round(settings.tilt.x)}\u00b0`],
-      ['ll-tilt-y-out', `${Math.round(settings.tilt.y)}\u00b0`],
-      ['ll-tilt-rotate-out', `${Math.round(settings.tilt.rotate)}\u00b0`],
-      ['ll-tilt-depth-out', `${Math.round(settings.tilt.depth * 100)}%`],
-      ['ll-motion-seconds-out', `${settings.motion.seconds.toFixed(2)}s`],
-      ['ll-cursor-size-out', `${settings.cursorSize.toFixed(1)}x`],
-      ['ll-voice-highpass-out', settings.voice.highPass > 0 ? `${settings.voice.highPass} Hz` : 'off'],
-      ['ll-voice-gate-out', settings.voice.gate > 0 ? `${Math.round(settings.voice.gate * 100)}%` : 'off'],
-      ['ll-spotlight-out', settings.spotlight > 0 ? `${Math.round(settings.spotlight * 100)}%` : 'off'],
-    ];
-    for (const [id, text] of readouts) $<HTMLSpanElement>(id).textContent = text;
-    $<HTMLSpanElement>('ll-bitrate-out').textContent = `${Math.round(suggestBitrate() / 1000)} kbps`;
-    $<HTMLDivElement>('ll-camera-fields').hidden = !settings.composition.camera.enabled;
-  }
-
-  $<HTMLButtonElement>('ll-reanalyse').addEventListener('click', () => { void analyse().then(drawPreview); });
 
   // ------------------------------------------------------------------ wallpaper
 
   /** The chosen background picture, decoded once and kept ready to draw. */
   let wallpaper: ImageBitmap | HTMLImageElement | null = null;
   let wallpaperUrl: string | null = null;
-  /** Kept alongside the decoded picture so an undo can put the right one back. */
-  let wallpaperBytes: Uint8Array | null = null;
-  let wallpaperMime = 'image/png';
 
   const wallpaperNote = $<HTMLParagraphElement>('ll-wallpaper-note');
   const wallpaperFile = $<HTMLInputElement>('ll-wallpaper-file');
@@ -3604,8 +3296,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   async function useWallpaper(bytes: Uint8Array, mime: string): Promise<void> {
     dropWallpaper();
     const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
-    wallpaperBytes = bytes;
-    wallpaperMime = mime;
+    editor.wallpaper = bytes;
+    editor.wallpaperMime = mime;
 
     if (typeof createImageBitmap === 'function') {
       try {
@@ -3627,7 +3319,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       });
     } catch {
       URL.revokeObjectURL(url);
-      wallpaperBytes = null;
+      editor.wallpaper = null;
       toast('That picture could not be read.');
       return;
     }
@@ -3645,7 +3337,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (wallpaper instanceof ImageBitmap) wallpaper.close();
     wallpaper = null;
     wallpaperUrl = null;
-    wallpaperBytes = null;
+    editor.wallpaper = null;
   }
 
   $<HTMLButtonElement>('ll-wallpaper-pick').addEventListener('click', () => wallpaperFile.click());
@@ -3659,12 +3351,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     await useWallpaper(bytes, file.type || 'image/png');
     if (!wallpaper) return;
 
-    settings.composition.background = 'image';
+    editor.settings.composition.background = 'image';
     if (stored) {
       // The picture travels with the project, because a background that
       // disappeared on reopening would be worse than not offering one.
       stored.wallpaper = bytes;
-      stored.wallpaperMime = wallpaperMime;
+      stored.wallpaperMime = editor.wallpaperMime;
     }
     remember();
     markPresets();
@@ -3675,7 +3367,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   wallpaperClear.addEventListener('click', () => {
     dropWallpaper();
-    if (settings.composition.background === 'image') settings.composition.background = 'gradient';
+    if (editor.settings.composition.background === 'image') editor.settings.composition.background = 'gradient';
     if (stored) stored.wallpaper = null;
     remember();
     markPresets();
@@ -3691,7 +3383,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   function renderCues(): void {
     cuesEl.innerHTML = '';
-    for (const cue of captions) {
+    for (const cue of editor.captions) {
       const row = document.createElement('li');
       row.className = 'll-cue';
       row.dataset.id = cue.id;
@@ -3720,7 +3412,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       words.value = cue.text;
       words.setAttribute('aria-label', `Words of the line at ${formatClock(cue.start)}`);
       words.addEventListener('input', () => {
-        captions = captions.map((entry) => (entry.id === cue.id ? { ...entry, text: words.value } : entry));
+        editor.captions = editor.captions.map((entry) => (entry.id === cue.id ? { ...entry, text: words.value } : entry));
         remember(`cue:${cue.id}`);
         void drawPreview();
       });
@@ -3729,16 +3421,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       cuesEl.append(row);
     }
 
-    const picked = captions.filter((cue) => pickedCues.has(cue.id));
+    const picked = editor.captions.filter((cue) => pickedCues.has(cue.id));
     $<HTMLDivElement>('ll-cues-actions').hidden = picked.length === 0;
     const seconds = picked.reduce((total, cue) => total + (cue.end - cue.start), 0);
     $<HTMLSpanElement>('ll-cues-label').textContent = picked.length
       ? `${picked.length} line${picked.length === 1 ? '' : 's'}, ${seconds.toFixed(1)}s`
       : '';
     renderListen();
-    $<HTMLInputElement>('ll-captions-burn').checked = settings.burnCaptions;
-    $<HTMLInputElement>('ll-caption-size').value = String(settings.captionSize);
-    $<HTMLSpanElement>('ll-caption-size-out').textContent = `${Math.round(settings.captionSize * 100)}%`;
+    $<HTMLInputElement>('ll-captions-burn').checked = editor.settings.burnCaptions;
+    $<HTMLInputElement>('ll-caption-size').value = String(editor.settings.captionSize);
+    $<HTMLSpanElement>('ll-caption-size-out').textContent = `${Math.round(editor.settings.captionSize * 100)}%`;
   }
 
   // ---------------------------------------------------------------- listening
@@ -3812,7 +3504,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         setStatus('Nothing could be made out in the recording.', 'bad');
         return;
       }
-      captions = sortCues(found.map((cue) => ({ ...cue, id: createId('cue') })));
+      editor.captions = sortCues(found.map((cue) => ({ ...cue, id: createId('cue') })));
       pickedCues.clear();
       remember('transcribed');
       renderCues();
@@ -3846,7 +3538,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       setStatus('No subtitles could be read out of that file.', 'bad');
       return;
     }
-    captions = parsed;
+    editor.captions = parsed;
     pickedCues.clear();
     remember('captions');
     renderCues();
@@ -3858,18 +3550,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!recording) return;
     const end = Math.min(recording.duration, previewTime + 2.5);
     if (end - previewTime < 0.2) return;
-    captions = sortCues([...captions, { id: createId('cue'), start: previewTime, end, text: 'New line' }]);
+    editor.captions = sortCues([...editor.captions, { id: createId('cue'), start: previewTime, end, text: 'New line' }]);
     remember('cue-add');
     renderCues();
     void drawPreview();
   });
 
   $<HTMLButtonElement>('ll-captions-srt').addEventListener('click', () => {
-    if (!captions.length) return;
+    if (!editor.captions.length) return;
     downloadBlob(`${projectName()}.srt`, new Blob([toSrt(alignedCaptions())], { type: 'text/plain' }));
   });
   $<HTMLButtonElement>('ll-captions-vtt').addEventListener('click', () => {
-    if (!captions.length) return;
+    if (!editor.captions.length) return;
     downloadBlob(`${projectName()}.vtt`, new Blob([toVtt(alignedCaptions())], { type: 'text/vtt' }));
   });
 
@@ -3884,23 +3576,23 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * export, and those stop agreeing the moment anything is cut or sped up.
    */
   function alignedCaptions(): Cue[] {
-    if (!recording) return captions;
-    const segments = segmentsOf(trim, cuts, speeds);
+    if (!recording) return editor.captions;
+    const segments = segmentsOf(editor.trim, editor.cuts, editor.speeds);
     return alignToEdit(
-      captions,
+      editor.captions,
       (source) => editedAt(segments, source),
       (source) => !segments.some((part) => source >= part.start && source < part.end),
     );
   }
 
   $<HTMLButtonElement>('ll-cues-cut').addEventListener('click', () => {
-    const spans = spansOf(captions, [...pickedCues]);
+    const spans = spansOf(editor.captions, [...pickedCues]);
     if (spans.length === 0) return;
     const removed = spans.reduce((total, span) => total + (span.end - span.start), 0);
-    cuts = mergeSpans([...cuts, ...spans]);
+    editor.cuts = mergeSpans([...editor.cuts, ...spans]);
     // The lines themselves go too: their seconds are no longer in the video, so
     // leaving them would put a subtitle on a moment that does not exist.
-    captions = captions.filter((cue) => !pickedCues.has(cue.id));
+    editor.captions = editor.captions.filter((cue) => !pickedCues.has(cue.id));
     pickedCues.clear();
     remember('cut-transcript');
     renderCues();
@@ -3915,12 +3607,12 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   });
 
   $<HTMLInputElement>('ll-captions-burn').addEventListener('change', (event) => {
-    settings.burnCaptions = (event.target as HTMLInputElement).checked;
+    editor.settings.burnCaptions = (event.target as HTMLInputElement).checked;
     remember();
     void drawPreview();
   });
   $<HTMLInputElement>('ll-caption-size').addEventListener('input', (event) => {
-    settings.captionSize = Number((event.target as HTMLInputElement).value);
+    editor.settings.captionSize = Number((event.target as HTMLInputElement).value);
     remember('caption-size');
     renderCues();
     void drawPreview();
@@ -3965,10 +3657,10 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const name = stored?.musicName ?? '';
     $<HTMLSpanElement>('ll-music-name').textContent = name;
     $<HTMLButtonElement>('ll-music-drop').hidden = !name;
-    $<HTMLInputElement>('ll-music-level').value = String(settings.music.level);
-    $<HTMLSpanElement>('ll-music-level-out').textContent = `${Math.round(settings.music.level * 100)}%`;
-    $<HTMLInputElement>('ll-music-duck').value = String(settings.music.duck);
-    $<HTMLSpanElement>('ll-music-duck-out').textContent = `${Math.round(settings.music.duck * 100)}%`;
+    $<HTMLInputElement>('ll-music-level').value = String(editor.settings.music.level);
+    $<HTMLSpanElement>('ll-music-level-out').textContent = `${Math.round(editor.settings.music.level * 100)}%`;
+    $<HTMLInputElement>('ll-music-duck').value = String(editor.settings.music.duck);
+    $<HTMLSpanElement>('ll-music-duck-out').textContent = `${Math.round(editor.settings.music.duck * 100)}%`;
   }
 
   $<HTMLButtonElement>('ll-music-open').addEventListener('click', () => musicFile.click());
@@ -4001,8 +3693,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   });
 
   for (const [id, apply] of [
-    ['ll-music-level', (value: number) => { settings.music.level = value; }],
-    ['ll-music-duck', (value: number) => { settings.music.duck = value; }],
+    ['ll-music-level', (value: number) => { editor.settings.music.level = value; }],
+    ['ll-music-duck', (value: number) => { editor.settings.music.duck = value; }],
   ] as [string, (value: number) => void][]) {
     $<HTMLInputElement>(id).addEventListener('input', (event) => {
       apply(Number((event.target as HTMLInputElement).value));
@@ -4049,16 +3741,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       button.type = 'button';
       button.className = 'btn btn--sm ll-preset';
       button.textContent = destination.label;
-      const active = settings.composition.width === destination.width
-        && settings.composition.height === destination.height;
+      const active = editor.settings.composition.width === destination.width
+        && editor.settings.composition.height === destination.height;
       button.setAttribute('aria-pressed', String(active));
       button.addEventListener('click', () => {
         if (!recording) return;
-        settings.composition.width = destination.width;
-        settings.composition.height = destination.height;
+        editor.settings.composition.width = destination.width;
+        editor.settings.composition.height = destination.height;
         const ratio = CROP_ASPECTS.find((entry) => entry.id === destination.aspect);
         if (ratio?.ratio) {
-          crop = cropToAspect(crop, ratio.ratio, video?.videoWidth || 1, video?.videoHeight || 1);
+          editor.crop = cropToAspect(editor.crop, ratio.ratio, video?.videoWidth || 1, video?.videoHeight || 1);
         }
         remember(`destination:${destination.id}`);
         renderControls();
@@ -4119,15 +3811,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   }
 
   async function applySavedLook(look: Look): Promise<void> {
-    settings = applyLook(settings, look);
+    editor.settings = applyLook(editor.settings, look);
     // The background picture travels with the look, so a look that had one
     // brings it and a look that had none takes it away. Otherwise applying a
     // plain look over a recording with a wallpaper would leave the wallpaper
     // showing and the look would not be what was saved.
     if (look.wallpaper) await useWallpaper(look.wallpaper, look.wallpaperMime);
     else dropWallpaper();
-    if (settings.composition.background === 'image' && !wallpaper) {
-      settings.composition.background = 'gradient';
+    if (editor.settings.composition.background === 'image' && !wallpaper) {
+      editor.settings.composition.background = 'gradient';
     }
     remember(`look:${look.id}`);
     renderControls();
@@ -4143,7 +3835,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       lookNameEl.focus();
       return;
     }
-    await saveLook(lookFrom(name, settings, wallpaperBytes, wallpaperMime)).catch(() => {});
+    await saveLook(lookFrom(name, editor.settings, editor.wallpaper, editor.wallpaperMime)).catch(() => {});
     lookNameEl.value = '';
     await renderLooks();
     toast(`Saved the look ${name}.`);
@@ -4157,13 +3849,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   const countdownEl = $<HTMLSelectElement>('ll-countdown');
   countdownEl.addEventListener('change', () => {
-    settings.countdown = Number(countdownEl.value);
+    editor.settings.countdown = Number(countdownEl.value);
     remember();
   });
 
   for (const [id, apply] of [
-    ['ll-countdown-sound', (value: boolean) => { settings.countdownSound = value; }],
-    ['ll-camera-blur', (value: boolean) => { settings.cameraBlur = value; }],
+    ['ll-countdown-sound', (value: boolean) => { editor.settings.countdownSound = value; }],
+    ['ll-camera-blur', (value: boolean) => { editor.settings.cameraBlur = value; }],
   ] as [string, (value: boolean) => void][]) {
     const input = $<HTMLInputElement>(id);
     input.addEventListener('change', () => { apply(input.checked); remember(); });
@@ -4215,7 +3907,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (typing && !(target instanceof HTMLInputElement && target.type === 'range')) return;
     if (!recording || stageEl.hidden) return;
 
-    const step = event.shiftKey ? 1 : 1 / Math.max(1, settings.frameRate);
+    const step = event.shiftKey ? 1 : 1 / Math.max(1, editor.settings.frameRate);
     const seek = (to: number) => {
       previewTime = Math.max(0, Math.min(recording!.duration, to));
       scrubber.value = String(previewTime);
@@ -4233,8 +3925,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       play: () => togglePlay(),
       stepBack: () => seek(previewTime - step),
       stepForward: () => seek(previewTime + step),
-      toStart: () => seek(trim.start),
-      toEnd: () => seek(trim.end),
+      toStart: () => seek(editor.trim.start),
+      toEnd: () => seek(editor.trim.end),
       crop: () => cropButton.click(),
       trimStart: () => $<HTMLButtonElement>('ll-trim-start').click(),
       trimEnd: () => $<HTMLButtonElement>('ll-trim-end').click(),
@@ -4280,7 +3972,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (kind) speaker.say(`${kind} removed.`);
 
     if (selectedText) {
-      texts = removeText(texts, selectedText);
+      editor.texts = removeText(editor.texts, selectedText);
       selectedText = null;
       renderTexts();
       persistTexts();
@@ -4288,19 +3980,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       return;
     }
     if (selectedRedaction) {
-      redactions = removeRedaction(redactions, selectedRedaction);
+      editor.redactions = removeRedaction(editor.redactions, selectedRedaction);
       selectedRedaction = null;
       persistRedactions();
       return;
     }
     if (selectedShape) {
-      shapes = removeShape(shapes, selectedShape);
+      editor.shapes = removeShape(editor.shapes, selectedShape);
       selectedShape = null;
       persistShapes();
       return;
     }
     if (selectedSpeed) {
-      speeds = removeSpeed(speeds, selectedSpeed);
+      editor.speeds = removeSpeed(editor.speeds, selectedSpeed);
       selectedSpeed = null;
       persistSpeeds();
       return;
@@ -4327,289 +4019,32 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
    * through the clip: an element three seconds into its own recording may be
    * twenty seconds into the finished video.
    */
-  let stage: HTMLVideoElement | null = null;
-  let stageClip: Placed | null = null;
-
-  function driver(): HTMLVideoElement | null {
-    return stage ?? video;
-  }
-
-  /** Element time to reel time. The identity when there is one recording. */
-  function reelTime(): number {
-    const element = driver();
-    if (!element) return previewTime;
-    if (!stageClip) return element.currentTime;
-    return stageClip.at + Math.max(0, element.currentTime - stageClip.in);
-  }
-
-  function clipAudioLevel(clip: Placed | null, sourceTime: number): number {
-    if (!clip) return 1;
-    if (clip.muted) return 0;
-    const local = Math.max(0, sourceTime - clip.in);
-    const enter = clip.fadeIn ? Math.min(1, local / clip.fadeIn) : 1;
-    const leave = clip.fadeOut ? Math.min(1, Math.max(0, clip.length - local) / clip.fadeOut) : 1;
-    return Math.max(0, Math.min(2, clip.gain ?? 1)) * Math.min(enter, leave);
-  }
-
-  function applyPlaybackVolume(element: HTMLVideoElement, clip: Placed | null): void {
-    const hasSound = clip
-      ? takes.get(clip.source)?.hasAudio ?? recording?.hasAudio ?? false
-      : recording?.hasAudio ?? false;
-    const level = clipAudioLevel(clip, element.currentTime);
-    element.muted = muted || !hasSound || level <= 0;
-    element.volume = Math.max(0, Math.min(1, Number(volInput.value) * level));
-  }
-
-  function stopFrames(): void {
-    const element = driver();
-    if (frameHandle && element) {
-      const cancel = (element as VideoWithFrameCallback).cancelVideoFrameCallback;
-      if (typeof cancel === 'function') cancel.call(element, frameHandle);
-    }
-    if (rafHandle) cancelAnimationFrame(rafHandle);
-    frameHandle = 0;
-    rafHandle = 0;
-  }
-
-  function queueFrame(): void {
-    const element = driver();
-    if (!element || !playing) return;
-    const request = (element as VideoWithFrameCallback).requestVideoFrameCallback;
-    if (typeof request === 'function') frameHandle = request.call(element, () => step());
-    else rafHandle = requestAnimationFrame(() => step());
-  }
-
-  /**
-   * Hands playback from one clip to the next.
-   *
-   * Two elements are never playing at once: the one that has finished is
-   * stopped before the next is started, or a join would play both recordings
-   * over each other for as long as the handover took.
-   */
-  async function handOver(to: Placed): Promise<void> {
-    const leaving = driver();
-    if (leaving) { leaving.pause(); leaving.muted = true; }
-    stopFrames();
-
-    const arriving = takes.get(to.source)?.video ?? video;
-    if (!arriving) { pause(); return; }
-    stage = arriving;
-    stageClip = to;
-
-    await seekSafely(arriving, to.in).catch(() => {});
-    applyPlaybackVolume(arriving, to);
-    try {
-      await arriving.play();
-    } catch {
-      pause();
-      return;
-    }
-    queueFrame();
-  }
-
-  function step(): void {
-    const element = driver();
-    if (!playing || !element || !recording) return;
-
-    // A clip that has played to its own end hands over rather than running on
-    // into whatever else happens to be in that recording after the window.
-    if (stageClip && element.currentTime >= stageClip.out - 1e-3) {
-      const placed = placedClips();
-      const next = placed[placed.findIndex((entry) => entry.id === stageClip!.id) + 1];
-      if (next) { void handOver(next); return; }
-    }
-
-    const time = reelTime();
-    applyPlaybackVolume(element, stageClip);
-
-    if (time >= trim.end - 1e-3) {
-      if (looping) { void restart(); return; }
-      pause();
-      previewTime = trim.end;
-      syncScrub();
-      paint(previewTime);
-      return;
-    }
-
-    // Skip anything cut out, so the preview is the finished video rather than
-    // the raw recording with some bands drawn on it.
-    const inCut = cuts.find((cut) => time >= cut.start && time < cut.end - 1e-3);
-    if (inCut) {
-      if (inCut.end >= trim.end - 1e-3) {
-        if (looping) { void restart(); return; }
-        pause();
-        previewTime = trim.end;
-        syncScrub();
-        paint(previewTime);
-        return;
-      }
-      // The cut is in reel seconds. On a reel the far side of it may be in a
-      // different recording, in which case the handover does the seeking.
-      const landing = spotAt(inCut.end);
-      if (stageClip && landing.clip && landing.clip.id !== stageClip.id) {
-        void handOver(landing.clip).then(() => {
-          const arriving = driver();
-          if (arriving) arriving.currentTime = landing.at;
-        });
-        return;
-      }
-      element.currentTime = landing.at;
-      if (cameraVideo) cameraVideo.currentTime = inCut.end;
-      queueFrame();
-      return;
-    }
-
-    previewTime = time;
-    syncScrub();
-    paint(time);
-    queueFrame();
-  }
-
-  async function restart(): Promise<void> {
-    if (!video) return;
-    const spot = spotAt(trim.start);
-    if (spot.clip && spot.clip.id !== stageClip?.id) {
-      previewTime = trim.start;
-      await handOver(spot.clip);
-      const arriving = driver();
-      if (arriving) arriving.currentTime = spot.at;
-      syncScrub();
-      return;
-    }
-    await seekSafely(spot.element, spot.at);
-    if (cameraVideo) await seekSafely(cameraVideo, trim.start).catch(() => {});
-    previewTime = trim.start;
-    syncScrub();
-    queueFrame();
-  }
-
-  async function play(): Promise<void> {
-    if (!video || !recording || playing || cropping) return;
-    if (previewTime >= trim.end - 1e-3 || previewTime < trim.start) previewTime = trim.start;
-
-    // Playback begins on whichever recording the playhead is over, which on a
-    // reel of one is the only one there is.
-    const spot = spotAt(previewTime);
-    stage = spot.element;
-    stageClip = spot.clip;
-
-    const limit = Number.isFinite(spot.element.duration) && spot.element.duration > 0
-      ? spot.element.duration
-      : recording.duration;
-    await seekSafely(spot.element, Math.max(0, Math.min(limit - 1e-3, spot.at)));
-    if (cameraVideo) {
-      await seekSafely(cameraVideo, Math.min(Math.max(0, cameraVideo.duration - 1e-3), previewTime)).catch(() => {});
-    }
-
-    // Muted for scrubbing, unmuted to play. Without this you cannot hear your
-    // own narration while editing, which is most of what there is to check.
-    applyPlaybackVolume(spot.element, spot.clip);
-
-    playing = true;
-    renderTransport();
-    try {
-      await spot.element.play();
-      if (cameraVideo) await cameraVideo.play().catch(() => {});
-    } catch {
-      playing = false;
-      renderTransport();
-      setStatus('The browser would not start playback.', 'bad');
-      return;
-    }
-    queueFrame();
-  }
-
-  function pause(): void {
-    if (!playing) return;
-    playing = false;
-    stopFrames();
-    // Every element, not only the one driving: a handover leaves the previous
-    // one paused, and muting all of them keeps scrubbing silent.
-    for (const take of takes.values()) { take.video.pause(); take.video.muted = true; }
-    video?.pause();
-    cameraVideo?.pause();
-    if (video) video.muted = true;
-    renderTransport();
-  }
-
-  function togglePlay(): void {
-    if (playing) pause();
-    else void play();
-  }
-
-  /** Reflects playback state onto the transport. */
-  function renderTransport(): void {
-    playButton.textContent = playing ? '⏸' : '▶';
-    playButton.title = playing ? 'Pause (Space)' : 'Play (Space)';
-    playButton.setAttribute('aria-label', playing ? 'Pause' : 'Play');
-    playButton.dataset.playing = String(playing);
-    playButton.disabled = !recording || cropping;
-    loopButton.setAttribute('aria-pressed', String(looping));
-    muteButton.textContent = muted ? '\u{1F507}' : '\u{1F50A}';
-    muteButton.title = muted ? 'Unmute' : 'Mute';
-    muteButton.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
-    muteButton.setAttribute('aria-pressed', String(muted));
-    // Nothing to hear on a silent recording, so the control does not appear.
-    volWrap.hidden = !recording?.hasAudio;
-    for (const id of ['ll-to-start', 'll-step-back', 'll-step-fwd', 'll-to-end']) {
-      $<HTMLButtonElement>(id).disabled = !recording;
-    }
-  }
-
-  /**
-   * Moves the playhead into a block so its edits are visible in the preview.
-   *
-   * Editing a zoom at 0:40 while looking at 0:05 showed nothing changing, and
-   * read as a broken control rather than a preview pointed elsewhere.
-   */
-  function showBlock(start: number, end: number): void {
-    if (!recording) return;
-    if (previewTime >= start && previewTime <= end) return;
-    if (playing) pause();
-    previewTime = Math.min(Math.max((start + end) / 2, 0), recording.duration);
-    syncScrub();
-    void drawPreview();
-  }
-
-  /** Moves the playhead, stopping playback first, and repaints. */
-  function seekTo(time: number): void {
-    if (!recording) return;
-    if (playing) pause();
-    previewTime = Math.max(0, Math.min(recording.duration, time));
-    syncScrub();
-    void drawPreview();
-  }
-
-  playButton.addEventListener('click', togglePlay);
-  $<HTMLButtonElement>('ll-to-start').addEventListener('click', () => seekTo(trim.start));
-  $<HTMLButtonElement>('ll-to-end').addEventListener('click', () => seekTo(trim.end));
-  $<HTMLButtonElement>('ll-step-back').addEventListener('click', () => {
-    seekTo(previewTime - 1 / Math.max(1, settings.frameRate));
-  });
-  $<HTMLButtonElement>('ll-step-fwd').addEventListener('click', () => {
-    seekTo(previewTime + 1 / Math.max(1, settings.frameRate));
-  });
-
-  loopButton.addEventListener('click', () => {
-    looping = !looping;
-    renderTransport();
-  });
-
-  muteButton.addEventListener('click', () => {
-    muted = !muted;
-    if (video && playing) video.muted = muted;
-    renderTransport();
-  });
-
-  volInput.addEventListener('input', () => {
-    const level = Number(volInput.value);
-    if (video) video.volume = level;
-    // Reaching for the volume when muted plainly means "let me hear it".
-    if (level > 0 && muted) {
-      muted = false;
-      if (video && playing) video.muted = false;
-      renderTransport();
-    }
+  const { renderTransport, pause, showBlock, seekTo, togglePlay, play } = mountPlayback({
+    get video() { return video; },
+    get previewTime() { return previewTime; },
+    set previewTime(value) { previewTime = value; },
+    get takes() { return takes; },
+    get recording() { return recording; },
+    get playing() { return playing; },
+    set playing(value) { playing = value; },
+    get cameraVideo() { return cameraVideo; },
+    get cropping() { return cropping; },
+    get settings() { return editor.settings; },
+    set settings(value) { editor.settings = value; },
+    get trim() { return editor.trim; },
+    get cuts() { return editor.cuts; },
+    get volInput() { return volInput; },
+    get playButton() { return playButton; },
+    get loopButton() { return loopButton; },
+    get muteButton() { return muteButton; },
+    get volWrap() { return volWrap; },
+    get $() { return $; },
+    get placedClips() { return placedClips; },
+    get spotAt() { return spotAt; },
+    get syncScrub() { return syncScrub; },
+    get paint() { return paint; },
+    get drawPreview() { return drawPreview; },
+    get setStatus() { return setStatus; },
   });
 
   // ------------------------------------------------------------------ export
@@ -4626,7 +4061,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     const started = performance.now();
 
     try {
-      const ready = { ...current, keyframes: trackFromBlocks(zooms, current.duration, settings.zoom) };
+      const ready = { ...current, keyframes: trackFromBlocks(editor.zooms, current.duration, editor.settings.zoom) };
       // The worker first, so the page stays usable. Anything it cannot finish
       // comes back here rather than failing.
       const offloaded = canExportInWorker(ready)
@@ -4687,24 +4122,24 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       clicks: recording.clicks,
       keys: recording.keys,
       marks: recording.marks,
-      start: trim.start,
-      end: trim.end,
-      crop,
+      start: editor.trim.start,
+      end: editor.trim.end,
+      crop: editor.crop,
       wallpaper: stored?.wallpaper ?? null,
       wallpaperMime: stored?.wallpaperMime ?? 'image/png',
-      zooms,
-      texts,
-      cuts,
-      speeds,
-      redactions,
-      captions,
-      shapes,
+      zooms: editor.zooms,
+      texts: editor.texts,
+      cuts: editor.cuts,
+      speeds: editor.speeds,
+      redactions: editor.redactions,
+      captions: editor.captions,
+      shapes: editor.shapes,
       music: stored?.music ?? null,
       musicName: stored?.musicName ?? '',
-      clips: hasEditedReel() ? clips : [],
+      clips: hasEditedReel() ? editor.clips : [],
       takes: await takeRecords(),
-      keyframes: trackFromBlocks(zooms, recording.duration, settings.zoom),
-      settings,
+      keyframes: trackFromBlocks(editor.zooms, recording.duration, editor.settings.zoom),
+      settings: editor.settings,
       createdAt: stored?.createdAt ?? now,
       updatedAt: now,
     };
@@ -4810,16 +4245,16 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     if (!onto) return;
     const merged = applySidecar(onto, sidecar);
 
-    settings = merged.settings;
-    crop = merged.crop;
-    zooms = merged.zooms;
-    texts = merged.texts;
-    cuts = merged.cuts;
-    speeds = merged.speeds;
-    redactions = merged.redactions;
-    captions = merged.captions;
-    shapes = merged.shapes;
-    trim = { start: merged.start, end: merged.end };
+    editor.settings = merged.settings;
+    editor.crop = merged.crop;
+    editor.zooms = merged.zooms;
+    editor.texts = merged.texts;
+    editor.cuts = merged.cuts;
+    editor.speeds = merged.speeds;
+    editor.redactions = merged.redactions;
+    editor.captions = merged.captions;
+    editor.shapes = merged.shapes;
+    editor.trim = { start: merged.start, end: merged.end };
     selected = null; selectedText = null; selectedShape = null;
     selectedRedaction = null; selectedSpeed = null;
 
@@ -4879,8 +4314,8 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         width: video?.videoWidth ?? 0,
         height: video?.videoHeight ?? 0,
       }, file.name.replace(/\.[a-z0-9]+$/i, ''));
-    } catch {
-      setStatus(`${file.name} could not be opened as a video.`, 'bad');
+    } catch (error) {
+      setStatus(error instanceof Error ? `${file.name}: ${error.message}` : `${file.name} could not be opened as a video.`, 'bad');
     }
   });
 
@@ -4897,7 +4332,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     cameraVideo = null;
   }
 
-  window.addEventListener('pagehide', () => { session?.cancel(); release(); });
+  window.addEventListener('pagehide', () => { void autosave.flush(); session?.cancel(); release(); });
 
   /**
    * Offers back a recording that was interrupted.
@@ -4971,18 +4406,18 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       recording,
       points,
       interestSource,
-      settings,
-      track: trackFromBlocks(zooms, recording?.duration ?? 0, settings.zoom),
-      crop,
-      trim,
-      texts,
-      zooms,
-      cuts,
+      settings: editor.settings,
+      track: trackFromBlocks(editor.zooms, recording?.duration ?? 0, editor.settings.zoom),
+      crop: editor.crop,
+      trim: editor.trim,
+      texts: editor.texts,
+      zooms: editor.zooms,
+      cuts: editor.cuts,
       loudness: wave?.loudness ?? null,
       looks: knownLooks,
       previewTime,
       playing,
-      clips,
+      clips: editor.clips,
       sourceDurations: Object.fromEntries([...takes].map(([id, take]) => [id, take.duration])),
     }),
     (change) => {
@@ -4995,19 +4430,19 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         else void adoptReorder(change.reel.clips, change.reel.message);
         return;
       }
-      if (change.crop) { crop = change.crop; cropAspect = 'free'; }
-      if (change.trim) trim = { ...change.trim };
-      if (change.texts) { texts = change.texts; selectedText = null; }
-      if (change.tilt) settings.tilt = change.tilt;
-      if (change.motion) settings.motion = change.motion;
+      if (change.crop) { editor.crop = change.crop; cropAspect = 'free'; }
+      if (change.trim) editor.trim = { ...change.trim };
+      if (change.texts) { editor.texts = change.texts; selectedText = null; }
+      if (change.tilt) editor.settings.tilt = change.tilt;
+      if (change.motion) editor.settings.motion = change.motion;
       if (change.zooms) {
-        zooms = change.zooms;
-        if (selected && !zooms.some((zoom) => zoom.id === selected)) selected = null;
-        if (focusTarget) focusTarget = zooms.find((zoom) => zoom.id === focusTarget!.id) ?? null;
+        editor.zooms = change.zooms;
+        if (selected && !editor.zooms.some((zoom) => zoom.id === selected)) selected = null;
+        if (focusTarget) focusTarget = editor.zooms.find((zoom) => zoom.id === focusTarget!.id) ?? null;
         if (!focusTarget) stopAiming();
         invalidateTrack();
       }
-      if (change.cuts) { cuts = change.cuts; selection = null; }
+      if (change.cuts) { editor.cuts = change.cuts; selection = null; }
       if (change.seek !== undefined) {
         if (playing) pause();
         previewTime = change.seek;
@@ -5020,7 +4455,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         if (look) void applySavedLook(look);
       }
       if (change.composition) {
-        settings.composition = { ...settings.composition, ...change.composition };
+        editor.settings.composition = { ...editor.settings.composition, ...change.composition };
         // A background chosen by name is no longer a picture, so the stored one
         // would otherwise sit there unused and unmentioned.
         if (change.composition.background && change.composition.background !== 'image') dropWallpaper();
@@ -5039,22 +4474,6 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       else void drawPreview();
     },
   ));
-}
-
-function once(target: HTMLVideoElement, event: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    target.addEventListener(event, () => resolve(), { once: true });
-    target.addEventListener('error', () => reject(new Error('That file could not be read as a video.')), { once: true });
-  });
-}
-
-function seekSafely(video: HTMLVideoElement, time: number): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => { window.clearTimeout(timer); resolve(); };
-    const timer = window.setTimeout(done, 4000);
-    video.addEventListener('seeked', done, { once: true });
-    video.currentTime = time;
-  });
 }
 
 function formatClock(seconds: number): string {

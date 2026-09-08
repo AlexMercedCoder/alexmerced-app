@@ -59,7 +59,16 @@ function transact<T>(
     tx.onerror = () => { if (!settled) { settled = true; reject(tx.error ?? new Error('Transaction failed')); } };
     tx.onabort = () => { if (!settled) { settled = true; reject(tx.error ?? new Error('Transaction aborted')); } };
 
-    Promise.resolve(work(tx))
+    // Run synchronously so requests enter the active transaction, but also
+    // turn synchronous DataCloneError/DataError failures into an abort.
+    let pending: Promise<T> | T;
+    try { pending = work(tx); } catch (error) {
+      settled = true;
+      try { tx.abort(); } catch { /* already finished */ }
+      reject(error);
+      return;
+    }
+    Promise.resolve(pending)
       .then((value) => { result = value; })
       .catch((error) => {
         settled = true;
@@ -72,6 +81,31 @@ function transact<T>(
 /** A typed handle on one object store. */
 export class Collection<T extends { id: string }> {
   constructor(private db: IDBDatabase, private storeName: string) {}
+
+  /** Commit related collections together, or leave every collection untouched. */
+  static replaceTogether(updates: {
+    collection: Collection<{ id: string }>;
+    records: readonly { id: string }[];
+  }[]): Promise<void> {
+    if (!updates.length) return Promise.resolve();
+    const db = updates[0].collection.db;
+    if (updates.some(({ collection }) => collection.db !== db)) {
+      return Promise.reject(new Error('Atomic replacement requires one database connection.'));
+    }
+    const names = updates.map(({ collection }) => collection.storeName);
+    if (new Set(names).size !== names.length) {
+      return Promise.reject(new Error('Each collection may be replaced only once.'));
+    }
+    return transact(db, names, 'readwrite', (tx) => {
+      // Queue all requests while the transaction is active. Transaction events
+      // report completion and abort, including an asynchronous constraint error.
+      for (const { collection, records } of updates) {
+        const store = tx.objectStore(collection.storeName);
+        store.clear();
+        for (const record of records) store.put(record);
+      }
+    });
+  }
 
   all(): Promise<T[]> {
     return transact(this.db, this.storeName, 'readonly', (tx) =>

@@ -137,8 +137,10 @@ export async function applyImport(text: string, mode: ImportMode): Promise<{ boa
 
   if (mode === 'replace') {
     const kept = reconcile(incomingBoards, incomingCards);
-    await boards.replaceAll(incomingBoards);
-    await cards.replaceAll(kept);
+    await Collection.replaceTogether([
+      { collection: boards, records: incomingBoards },
+      { collection: cards, records: kept },
+    ]);
     return { boards: incomingBoards.length, cards: kept.length };
   }
 
@@ -146,7 +148,9 @@ export async function applyImport(text: string, mode: ImportMode): Promise<{ boa
   const mergedBoards = mergeByNewest(current.boards, incomingBoards);
   const mergedCards = reconcile(mergedBoards, mergeByNewest(current.cards, incomingCards));
 
-  await boards.replaceAll(mergedBoards);
-  await cards.replaceAll(mergedCards);
+  await Collection.replaceTogether([
+    { collection: boards, records: mergedBoards },
+    { collection: cards, records: mergedCards },
+  ]);
   return { boards: mergedBoards.length, cards: mergedCards.length };
 }

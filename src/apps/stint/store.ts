@@ -53,8 +53,8 @@ export async function loadWorkspace(now: Date = new Date()): Promise<Workspace> 
   return { projects: loadedProjects, entries: stopExtraTimers(reconcile(loadedProjects, loadedEntries), now) };
 }
 
-export async function saveProject(project: Project): Promise<void> { (await connect()).projects.put(project); }
-export async function saveEntry(entry: Entry): Promise<void> { (await connect()).entries.put(entry); }
+export async function saveProject(project: Project): Promise<void> { await (await connect()).projects.put(project); }
+export async function saveEntry(entry: Entry): Promise<void> { await (await connect()).entries.put(entry); }
 export async function saveEntries(list: Entry[]): Promise<void> { await (await connect()).entries.putMany(list); }
 export async function deleteEntry(id: string): Promise<void> { await (await connect()).entries.delete(id); }
 export async function deleteProject(id: string): Promise<void> { await (await connect()).projects.delete(id); }
@@ -87,8 +87,10 @@ export async function applyImport(text: string, mode: ImportMode): Promise<{ pro
   const store = await connect();
   if (mode === 'replace') {
     const kept = stopExtraTimers(reconcile(incomingProjects, incomingEntries));
-    await store.projects.replaceAll(incomingProjects);
-    await store.entries.replaceAll(kept);
+    await Collection.replaceTogether([
+      { collection: store.projects, records: incomingProjects },
+      { collection: store.entries, records: kept },
+    ]);
     if (envelope.data.settings) saveSettings(reviveSettings(envelope.data.settings));
     return { projects: incomingProjects.length, entries: kept.length };
   }
@@ -96,7 +98,9 @@ export async function applyImport(text: string, mode: ImportMode): Promise<{ pro
   const current = await loadWorkspace();
   const mergedProjects = mergeByNewest(current.projects, incomingProjects);
   const mergedEntries = stopExtraTimers(reconcile(mergedProjects, mergeByNewest(current.entries, incomingEntries)));
-  await store.projects.replaceAll(mergedProjects);
-  await store.entries.replaceAll(mergedEntries);
+  await Collection.replaceTogether([
+    { collection: store.projects, records: mergedProjects },
+    { collection: store.entries, records: mergedEntries },
+  ]);
   return { projects: mergedProjects.length, entries: mergedEntries.length };
 }

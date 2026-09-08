@@ -1,8 +1,8 @@
 # alexmerced.app
 
-A shelf of small browser tools. Every one runs entirely on the visitor's own
-machine, stores its data locally, and exports the whole dataset to a file on
-request. There is no server, no account, and no analytics.
+A shelf of small browser tools. Files are processed on the visitor's own
+machine. Workspace apps store data locally and export portable backups; file
+tools download the results they produce. There is no server, no account, and no analytics.
 
 Live at **https://alexmerced.app**
 
@@ -58,14 +58,14 @@ Live at **https://alexmerced.app**
 ```bash
 npm install
 npm run dev       # http://localhost:4321
-npm test          # 836 tests
+npm test          # unit and compatibility tests
 npm run build     # writes dist/ and generates the service worker
 npm run preview   # serve the built site, needed to exercise the PWA
 ```
 
 ## How it is built
 
-Astro 5 with no UI framework. Each app is plain TypeScript split into three
+Astro 7 with no UI framework. Each app is plain TypeScript split into three
 parts, which is what makes it testable:
 
 - **`model.ts`** is pure logic with no browser APIs: the page tree, card
@@ -79,7 +79,8 @@ format, toasts, and the PWA registration.
 
 ### Written from scratch, not pulled in
 
-Every app but one is built from nothing but the platform. Where a library would
+Most app logic is built directly on the platform. Quarry uses DuckDB, and optional
+Limelight transcription downloads Transformers.js and speech models. Where a library would
 normally be reached for, the thing is implemented here and covered by tests:
 
 - **A QR encoder** implementing ISO/IEC 18004 (`src/apps/tessera/qr.ts`).
@@ -109,7 +110,7 @@ normally be reached for, the thing is implemented here and covered by tests:
 - **An EXIF reader** (`src/apps/loupe/exif.ts`), a **ZIP writer** with CRC-32
   (`src/lib/zip.ts`), and a **seeded PRNG** (`src/lib/random.ts`).
 
-### The one exception: Quarry
+### Quarry: an on-demand SQL engine
 
 Quarry runs [DuckDB](https://duckdb.org) compiled to WebAssembly. Writing a
 columnar SQL engine was not on the table, and pretending otherwise would have
@@ -117,9 +118,8 @@ meant a worse tool.
 
 Two things follow from that, and both are deliberate:
 
-- **It is served from this site, not from a CDN.** A script from someone else's
-  domain would run with full access to whatever you loaded into it, which is the
-  one thing this site promises never happens. `scripts/copy-duckdb.mjs` copies
+- **It is served from this site, not from a CDN.** Self-hosting keeps this engine's
+  code and updates part of the site's own deploy. `scripts/copy-duckdb.mjs` copies
   the engine out of `node_modules` at build time, so the repository stays small
   and the deploy self-hosts the file.
 - **It is fetched only when you ask for it.** The engine is about 34 MB, which is
@@ -146,7 +146,8 @@ mask and across versions that exercise alignment patterns and version blocks.
 
 ### Export and import
 
-Every app writes the same envelope:
+Workspace apps use the same export envelope (file converters download their output
+formats, and Limelight has its own project sidecar):
 
 ```json
 {
@@ -169,13 +170,17 @@ paragraph.
 
 ### Progressive web app
 
-The site installs to a phone or desktop and works with no network at all.
+The core site installs to a phone or desktop and works offline once its cache is ready.
+Quarry and optional Limelight transcription need initial downloads. Transcription loads
+Transformers.js from jsDelivr and models from Hugging Face only when requested; audio
+is processed locally. Offline availability of these optional downloads depends on caching.
 
 `scripts/build-sw.mjs` runs after `astro build`. It walks `dist/`, collects
 every page and asset, and writes `dist/sw.js` with that precache list and a
 version hashed from the content plus the worker's own source, so a deploy always
-invalidates the previous cache. The worker precaches on install and then serves
-cache-first while refreshing in the background.
+invalidates the previous cache. The worker installs only when every core asset is cached. Core pages and scripts stay
+paired with that release. Updates wait for the user to choose Reload or close old tabs;
+a failed download leaves the previous release available offline.
 
 One thing worth knowing if you adapt this: cache lookups pass
 `{ ignoreVary: true }`. Servers commonly send `Vary: Origin` on JavaScript, and
@@ -187,7 +192,7 @@ the site loads offline with no JavaScript at all.
 
 Every page registers WebMCP tools when it loads, so an agent that has navigated
 to a page can use what that page does rather than read a description of it.
-Seventy-four tools across twenty apps: run SQL, render a chart, read a QR code
+Tools across every app: run SQL, render a chart, read a QR code
 out of a photograph, merge PDFs, straighten a scan, trim audio, convert an
 image, add a card to a board.
 
@@ -241,3 +246,30 @@ button.
 ## License
 
 MIT for the code. See `LICENSE`.
+
+## Reliability checks
+
+```bash
+npm run check
+npm test
+npx playwright install --with-deps chromium firefox webkit
+npm run test:e2e
+```
+
+The browser suite runs Chromium, Firefox and WebKit against an isolated local test
+server. It checks workspace export/replace/merge round trips, offline interactivity,
+failed and successful service-worker updates, and desktop/phone navigation. The
+Limelight media export workflow requires WebCodecs and runs on Chromium. To use a
+system Chromium locally, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE`; no machine-specific
+browser path is required by default.
+
+Independent PDF/QR fixtures come from ReportLab; VP8 and PCM fixtures come from
+FFmpeg. Their generator and version provenance are checked in under `scripts/` and
+`tests/fixtures/`. Tests include encrypted/truncated inputs and verify content,
+not just successful parsing. They supplement the internal format round trips;
+they are not a claim of full PDF, QR or media conformance.
+
+Limelight separates its undoable state (`editorState.ts`), save projection and
+serialized per-project autosaves (`persistence.ts`), playback (`playback.ts`) and
+presentation controls (`controls.ts`). `ui.ts` composes those modules with the
+remaining editing tracks and capture workflow.

@@ -1,8 +1,8 @@
 /**
  * Progressive web app plumbing: register the worker, offer installation when
  * the browser says it is possible, and say something useful when the network
- * goes away. None of the apps need a connection, so going offline should be
- * reassuring rather than alarming.
+ * goes away. Cached tools remain available offline; optional engines and
+ * models must be downloaded before their first use.
  */
 import { toast } from './toast';
 
@@ -16,28 +16,43 @@ function registerWorker(): void {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
 
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then((registration) => {
-      registration.addEventListener('updatefound', () => {
-        const installing = registration.installing;
-        if (!installing) return;
-        installing.addEventListener('statechange', () => {
-          // A new version is ready and an old one is still driving the page.
-          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-            toast('A new version is ready.', {
-              actionLabel: 'Reload',
-              onAction: () => {
-                installing.postMessage('skip-waiting');
-                window.location.reload();
-              },
-            });
-          }
+  let observed: ServiceWorkerRegistration | null = null;
+  const connect = async () => {
+    try {
+      // Looking up an existing registration works offline. Re-registering first
+      // can reject in Firefox and leave a cached page without update listeners.
+      const registration = await navigator.serviceWorker.getRegistration('/')
+        ?? await navigator.serviceWorker.register('/sw.js');
+      if (observed !== registration) {
+        observed = registration;
+        const offerUpdate = (worker: ServiceWorker) => {
+          toast('A new version is ready.', {
+            actionLabel: 'Reload',
+            onAction: () => {
+              navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true });
+              worker.postMessage('skip-waiting');
+            },
+          });
+        };
+        if (registration.waiting) offerUpdate(registration.waiting);
+        registration.addEventListener('updatefound', () => {
+          const installing = registration.installing;
+          if (!installing) return;
+          installing.addEventListener('statechange', () => {
+            if (installing.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(installing);
+          });
         });
-      });
-    }).catch(() => {
-      /* Registration can fail in private windows. The site still works. */
-    });
-  });
+      }
+      if (navigator.onLine) void registration.update().catch(() => {});
+    } catch {
+      // First-time registration can fail offline or in private windows.
+      // Retry when connectivity returns; the ordinary page still works.
+    }
+  };
+  if (document.readyState === 'complete') void connect();
+  else window.addEventListener('load', () => { void connect(); }, { once: true });
+  window.addEventListener('online', () => { void connect(); });
+
 }
 
 type InstallPromptEvent = Event & {
@@ -86,7 +101,7 @@ function wireOfflineIndicator(): void {
   });
   window.addEventListener('offline', () => {
     update();
-    toast('Offline. Everything here still works.', { duration: 4000 });
+    toast('Offline. Cached tools and your saved data are available.', { duration: 4000 });
   });
   update();
 }

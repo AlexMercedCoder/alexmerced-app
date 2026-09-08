@@ -50,8 +50,8 @@ export async function loadWorkspace(now: Date = new Date()): Promise<Workspace> 
   return { decks: loadedDecks, cards: reconcile(loadedDecks, loadedCards) };
 }
 
-export async function saveDeck(deck: Deck): Promise<void> { (await connect()).decks.put(deck); }
-export async function saveCard(card: Card): Promise<void> { (await connect()).cards.put(card); }
+export async function saveDeck(deck: Deck): Promise<void> { await (await connect()).decks.put(deck); }
+export async function saveCard(card: Card): Promise<void> { await (await connect()).cards.put(card); }
 export async function saveCards(list: Card[]): Promise<void> { await (await connect()).cards.putMany(list); }
 export async function deleteCard(id: string): Promise<void> { await (await connect()).cards.delete(id); }
 export async function deleteCards(ids: string[]): Promise<void> { await (await connect()).cards.deleteMany(ids); }
@@ -85,15 +85,19 @@ export async function applyImport(text: string, mode: ImportMode): Promise<{ dec
   const store = await connect();
   if (mode === 'replace') {
     const kept = reconcile(incomingDecks, incomingCards);
-    await store.decks.replaceAll(incomingDecks);
-    await store.cards.replaceAll(kept);
+    await Collection.replaceTogether([
+      { collection: store.decks, records: incomingDecks },
+      { collection: store.cards, records: kept },
+    ]);
     return { decks: incomingDecks.length, cards: kept.length };
   }
 
   const current = await loadWorkspace();
   const mergedDecks = mergeByNewest(current.decks, incomingDecks);
   const mergedCards = reconcile(mergedDecks, mergeByNewest(current.cards, incomingCards));
-  await store.decks.replaceAll(mergedDecks);
-  await store.cards.replaceAll(mergedCards);
+  await Collection.replaceTogether([
+    { collection: store.decks, records: mergedDecks },
+    { collection: store.cards, records: mergedCards },
+  ]);
   return { decks: mergedDecks.length, cards: mergedCards.length };
 }

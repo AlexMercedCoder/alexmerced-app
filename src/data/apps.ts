@@ -134,7 +134,7 @@ export const apps: AppEntry[] = [
     name: 'Quire',
     tagline: 'Rearrange PDFs without handing them to anyone',
     description:
-      'Merge, split, reorder, rotate and extract PDF pages entirely on your own machine. Every other tool that does this uploads your documents to a server first. This one parses the file, moves the objects, and writes a new one, all in the tab you are looking at.',
+      'Merge, split, reorder, rotate and extract PDF pages entirely on your own machine. It parses the file, moves the objects, and writes a new one, all in the tab you are looking at.',
     action: 'Open Quire',
     theme: 'quire',
     accent: '#a03d55',

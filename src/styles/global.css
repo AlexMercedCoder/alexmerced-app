@@ -191,14 +191,15 @@ label.stack > span { font: 600 0.75rem var(--sans); color: var(--text-soft); let
   backdrop-filter: saturate(150%) blur(10px);
   border-bottom: 1px solid var(--rule);
 }
-.site-header__inner { display: flex; align-items: center; gap: 1rem; width: 100%; }
-.brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; margin-right: auto; font-weight: 700; letter-spacing: -0.02em; }
+.site-header__inner { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+.brand { flex: none; display: flex; align-items: center; gap: 0.6rem; text-decoration: none; margin-right: auto; font-weight: 700; letter-spacing: -0.02em; }
 .brand__dot { width: 1.6rem; height: 1.6rem; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: #fff; font: 700 0.85rem var(--mono); }
 .brand__name { font-size: 1rem; }
 .brand__app { color: var(--text-faint); font-weight: 600; }
 
-.header-nav { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+.header-nav { display: flex; align-items: center; gap: 0.35rem; min-width: 0; overflow-x: auto; overflow-y: hidden; padding-block: 4px; }
 .header-nav a {
+  flex: none; white-space: nowrap;
   text-decoration: none; font-size: 0.87rem; font-weight: 600; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm);
   color: var(--text-soft);
 }
@@ -287,7 +288,7 @@ dialog.sheet::backdrop { background: rgba(20, 22, 28, .45); }
 
 @media (max-width: 860px) {
   /* The app names stay reachable as a swipeable strip rather than being
-     hidden behind a menu, since there are only six of them. */
+     hidden behind a menu. */
   .site-header__inner { gap: 0.5rem; }
   .brand__app { display: none; }
   .brand__name { font-size: 0.92rem; }

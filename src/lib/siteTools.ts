@@ -34,7 +34,7 @@ const categories = CATEGORIES.map((category) => ({
 
 const storagePolicy = {
   summary:
-    'Every app runs entirely in the visitor’s browser. Records go in IndexedDB, interface preferences in localStorage. Nothing is uploaded, there is no account, and there is no analytics or third-party code.',
+    'Every app runs entirely in the visitor’s browser. Saved work and preferences use IndexedDB or localStorage; some file tools keep inputs only in memory. There is no account or analytics. Quarry uses self-hosted DuckDB; optional Limelight transcription downloads third-party code and models for local processing.',
   consequences: [
     'Data is scoped to one browser on one device and does not sync.',
     'Private windows usually discard everything on close.',
@@ -42,9 +42,9 @@ const storagePolicy = {
     'Nobody, the author included, can see what a visitor writes.',
   ],
   portability:
-    'Every app exports its whole dataset as JSON using one shared envelope, and imports it back with a merge or replace choice. Merging keeps whichever copy was edited most recently.',
+    'Workspace apps export JSON using a shared envelope and import with a merge or replace choice. File tools download their results; Limelight offers project files. Merging keeps whichever copy was edited most recently.',
   offline:
-    'The site installs as a progressive web app and works with no network at all after the first visit. Quarry is the exception: its database engine is fetched on demand and is not held offline.',
+    'Core tools work offline after their cache installs. Quarry and optional Limelight transcription require initial downloads; continued offline availability depends on cached engine, library and model files.',
 };
 
 export function siteTools(): McpTool[] {
@@ -127,7 +127,7 @@ export function siteTools(): McpTool[] {
         const chosen = slug ? AGENT_TOOLS.filter((entry) => entry.slug === slug) : AGENT_TOOLS;
         return textResult({
           note:
-            'These become callable once the page is open. Everything runs in this browser against this browser’s own storage; none of it reaches a network.',
+            'These become callable once the page is open. Everything runs in this browser against this browser’s own storage; some capabilities download their engine or models on first use.',
           totalTools: AGENT_TOOLS.reduce((sum, entry) => sum + entry.tools.length, 0),
           apps: chosen.map((entry) => ({
             slug: entry.slug,

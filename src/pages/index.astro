@@ -40,19 +40,18 @@ const jsonLd = [
   <section class="hero">
     <div class="shell shell--wide">
       <p class="eyebrow">alexmerced.app</p>
-      <h1>Thirteen small tools that keep your data on your machine.</h1>
+      <h1>{apps.length} small tools that keep your data on your machine.</h1>
       <p class="hero__lede">
         A shelf of things I wanted and could not find in a shape I liked. Each one runs entirely in
-        your browser. Nothing is uploaded, nothing needs an account, and every app writes its whole
-        dataset to a file whenever you ask.
+        your browser. Nothing is uploaded, nothing needs an account, and you can export saved work or download the files you make.
       </p>
 
       <ul class="promises">
         <li><strong>No account</strong><span>Open the page and start. There is nothing to sign up for.</span></li>
         <li><strong>No server</strong><span>Your work is stored in this browser, in IndexedDB and localStorage.</span></li>
-        <li><strong>No lock-in</strong><span>Export writes a plain JSON file. Import reads it back, anywhere.</span></li>
-        <li><strong>No connection</strong><span>Install it to your phone or desktop and it keeps working with the network off.</span></li>
-        <li><strong>No dependencies</strong><span>The QR encoder, the PDF reader and writer, and every format parser are written here from scratch.</span></li>
+        <li><strong>Portable files</strong><span>Export your workspace or download the files you make.</span></li>
+        <li><strong>Offline tools</strong><span>Core tools work after caching. SQL and optional transcription need an initial download.</span></li>
+        <li><strong>Local processing</strong><span>Your files are processed in this browser. Quarry loads its SQL engine from this site when you ask.</span></li>
       </ul>
     </div>
   </section>
@@ -93,20 +92,19 @@ const jsonLd = [
       <div>
         <h2>How the storage works</h2>
         <p>
-          Records go into <strong>IndexedDB</strong>, the browser's own database. Interface
-          preferences, the sort of thing that would be annoying rather than painful to lose, go into
-          <strong>localStorage</strong>. Both are tied to this browser on this device, so what you
+          Saved work and preferences use <strong>IndexedDB</strong> or <strong>localStorage</strong>.
+          Some file tools hold their inputs only in memory. Both are tied to this browser on this device, so what you
           see in one browser will not appear in another.
         </p>
         <p>
           That is the trade. There is no sync because there is no server, and there is no server
-          because that is the point. What there is instead is a export button in every app.
+          because that is the point. Export saved work and download finished files to keep your own copy.
         </p>
       </div>
       <div>
         <h2>Moving your data</h2>
         <p>
-          Every app writes the same kind of file: plain JSON, readable in any text editor, with a
+          Workspace exports use plain JSON, readable in any text editor, with a
           small header saying which app made it and when. Import reads that file back, and asks
           whether to merge it with what is already there or replace everything.
         </p>
@@ -134,7 +132,7 @@ const jsonLd = [
   .shelf__head { max-width: 44rem; margin-bottom: 0.9rem; }
   .shelf__head h2 { font-size: 1.2rem; margin: 0 0 0.2rem; }
   .shelf__head p { margin: 0; font-size: 0.88rem; color: var(--text-soft); }
-  .shelf__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1.1rem; }
+  .shelf__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); gap: 1.1rem; }
 
   .card {
     position: relative; display: grid; gap: 0.75rem; align-content: start;

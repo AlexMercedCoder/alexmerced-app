@@ -1,61 +1,33 @@
-import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { expect, test } from '@playwright/test';
 
-/** A real tiny WebM made by the browser, so the test carries no binary fixture. */
-async function videoFile(page: Page, name: string, colour: string, milliseconds: number) {
-  const base64 = await page.evaluate(async ({ colour, milliseconds }) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 320; canvas.height = 180;
-    const context = canvas.getContext('2d')!;
-    context.fillStyle = colour; context.fillRect(0, 0, canvas.width, canvas.height);
-    const stream = canvas.captureStream(12);
-    const audio = new AudioContext();
-    const tone = audio.createOscillator();
-    const quiet = audio.createGain();
-    const audioOut = audio.createMediaStreamDestination();
-    quiet.gain.value = 0.08;
-    tone.frequency.value = colour === '#185adb' ? 440 : 660;
-    tone.connect(quiet).connect(audioOut);
-    tone.start();
-    stream.addTrack(audioOut.stream.getAudioTracks()[0]);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-      ? 'video/webm;codecs=vp8,opus' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-    recorder.start();
-    const timer = window.setInterval(() => {
-      context.fillStyle = colour; context.fillRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = '#fff'; context.fillRect(Math.random() * 260, 70, 50, 40);
-    }, 50);
-    await new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-    window.clearInterval(timer);
-    const stopped = new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
-    recorder.stop(); await stopped;
-    tone.stop(); await audio.close();
-    stream.getTracks().forEach((track) => track.stop());
-    const bytes = new Uint8Array(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer());
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return btoa(binary);
-  }, { colour, milliseconds });
-  return { name, mimeType: 'video/webm', buffer: Buffer.from(base64, 'base64') };
+/** Independent, deterministic clips avoid short MediaRecorder captures with no frames. */
+async function videoFile(colour: 'blue' | 'orange') {
+  return {
+    name: `${colour}.webm`, mimeType: 'video/webm',
+    buffer: await readFile(new URL(`../fixtures/ffmpeg-${colour}.webm`, import.meta.url)),
+  };
 }
 
-test('add, reorder, edit, split, remove, undo, save and reload a reel', async ({ page }) => {
+test('add, reorder, edit, split, remove, undo, save and reload a reel', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'The full export workflow requires Chromium WebCodecs support.');
   const browserErrors: string[] = [];
   page.on('pageerror', (error) => browserErrors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error') browserErrors.push(message.text());
   });
   await page.goto('/limelight');
-  const first = await videoFile(page, 'blue.webm', '#185adb', 700);
-  const second = await videoFile(page, 'orange.webm', '#dc6b19', 900);
+  const first = await videoFile('blue');
+  const second = await videoFile('orange');
 
   await page.locator('#ll-file').setInputFiles(first);
-  await expect(page.locator('#ll-stage')).toBeVisible();
+  await expect(page.locator('#ll-stage'), await page.locator('#ll-status').textContent() ?? '').toBeVisible();
   await page.locator('#ll-clip-file').setInputFiles(second);
   await expect(page.locator('.ll-clip')).toHaveCount(2);
   await expect(page.locator('.ll-clip__thumb')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
 
   await page.locator('.ll-clip').nth(1).dragTo(page.locator('.ll-clip').first());
   await expect(page.locator('#ll-status')).toContainText('Reordered the clips');
@@ -83,7 +55,8 @@ test('add, reorder, edit, split, remove, undo, save and reload a reel', async ({
 
   await page.waitForTimeout(900);
   await page.reload();
-  await expect(page.locator('.ll-clip')).toHaveCount(3);
+  // Reopening must restore even a project with an empty automatic zoom track.
+  await expect(page.locator('.ll-clip')).toHaveCount(3, { timeout: 60_000 });
   await expect(page.getByLabel('Name clip 1')).toHaveValue('Opening');
 
   await page.locator('.ll-clip').first().locator('summary').click();
@@ -107,5 +80,24 @@ test('add, reorder, edit, split, remove, undo, save and reload a reel', async ({
   const exported = await download;
   expect(exported.suggestedFilename()).toMatch(usingMp4 ? /\.mp4$/ : /\.webm$/);
   if (usingMp4) await expect(page.locator('#ll-status')).not.toContainText('Opus');
+  const encoded = (await readFile((await exported.path())!)).toString('base64');
+  const metadata = await page.evaluate(async ({ encoded, mime }) => {
+    const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const video = document.createElement('video');
+    try {
+      const loaded = new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error('The browser cannot decode the exported file.'));
+      });
+      video.src = url;
+      await loaded;
+      return { width: video.videoWidth, height: video.videoHeight, duration: video.duration };
+    } finally { video.removeAttribute('src'); video.load(); URL.revokeObjectURL(url); }
+  }, { encoded, mime: usingMp4 ? 'video/mp4' : 'video/webm' });
+  expect(metadata.width).toBe(1280);
+  expect(metadata.height).toBe(720);
+  expect(metadata.duration).toBeGreaterThan(0);
+  expect(Number.isFinite(metadata.duration)).toBe(true);
   expect(browserErrors).toEqual([]);
 });

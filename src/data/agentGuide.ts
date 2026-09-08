@@ -226,7 +226,7 @@ export const AGENT_TOOLS: AppTools[] = [
 // --------------------------------------------------------------------- the guide
 
 export const GROUND_RULES = [
-  'Every tool runs in the visitor’s browser. Nothing is uploaded, there is no account, and no tool here reaches a network.',
+  'Every tool runs in the visitor’s browser. There is no account. Files are processed locally; some capabilities download engines or models before use.',
   'A tool only exists once its page is open, so navigate first. One app\u2019s tools are not available on another app\u2019s page: `quarry_run_sql` cannot be called from `/warren`, however plainly it was described there.',
   'Files go in and out as data URIs. Pass one in for an image, a PDF, an audio file or a video; a tool that produces a file returns a data: URI you can hand on or save.',
   'Stored data belongs to one browser on one device. It does not sync, and a private window usually discards it on close.',
