@@ -1,3 +1,4 @@
+import { captionStyle, defaultCaptionStyle, type CaptionStyle } from './enhancements';
 import { createId } from '../../lib/id';
 import { Collection, openDatabase } from '../../lib/idb';
 import { readPref, writePref } from '../../lib/prefs';
@@ -68,6 +69,7 @@ export type Settings = {
   showClicks: boolean;
   /** How large a subtitle is drawn, as a fraction of the frame height. */
   captionSize: number;
+  captionStyle?: CaptionStyle;
   /** Whether the subtitles are drawn into the exported picture. */
   burnCaptions: boolean;
   /** Levelling, rumble filtering and gating for the recorded voice. */
@@ -108,6 +110,7 @@ export const defaultSettings: Settings = {
   frameRate: 30,
   showClicks: true,
   captionSize: 0.045,
+  captionStyle: defaultCaptionStyle,
   burnCaptions: false,
   voice: defaultVoice,
   music: defaultMusic,
@@ -127,6 +130,7 @@ export const defaultSettings: Settings = {
 
 export type Project = {
   id: string;
+  checkpointOf?: string;
   name: string;
   /** The recording exactly as it came off MediaRecorder. */
   bytes: Uint8Array;
@@ -230,6 +234,7 @@ export function reviveSettings(value: unknown): Settings {
       highPass: typeof stored.voice?.highPass === 'number' ? Math.max(0, Math.min(300, stored.voice.highPass)) : 0,
       gate: typeof stored.voice?.gate === 'number' ? Math.max(0, Math.min(0.5, stored.voice.gate)) : 0,
     },
+    captionStyle: captionStyle(stored.captionStyle),
     captionSize: typeof stored.captionSize === 'number' ? Math.max(0.02, Math.min(0.12, stored.captionSize)) : 0.045,
     cursorSize: typeof stored.cursorSize === 'number' ? Math.max(0.5, Math.min(4, stored.cursorSize)) : 1,
     spotlight: typeof stored.spotlight === 'number' ? Math.max(0, Math.min(1, stored.spotlight)) : 0,
@@ -304,6 +309,7 @@ export function reviveProject(value: unknown): Project | null {
 
   return {
     id: project.id,
+    ...(typeof project.checkpointOf === 'string' ? { checkpointOf: project.checkpointOf } : {}),
     name: typeof project.name === 'string' && project.name.trim() ? project.name : 'Untitled recording',
     bytes,
     mime: typeof project.mime === 'string' && project.mime ? project.mime : 'video/webm',

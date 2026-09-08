@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import LimelightTools from '../components/LimelightTools.astro';
 import AppBar from '../components/AppBar.astro';
 import { getApp } from '../data/apps';
 const app = getApp('limelight');
@@ -18,9 +19,11 @@ const app = getApp('limelight');
       <input type="file" id="ll-project-file" accept="application/json,.json" hidden />
     </AppBar>
 
+    <dialog id="ll-device-dialog" class="ll-sheet" aria-labelledby="ll-device-title"><div class="ll-card"><h2 id="ll-device-title">Recording setup</h2><p>Preview the selected devices. The microphone meter shows input without playing it through your speakers. Screen and system audio are selected when recording starts.</p><video id="ll-device-video" autoplay muted playsinline hidden></video><label>Microphone level <meter id="ll-device-meter" min="0" max="1" value="0"></meter></label><p id="ll-device-status" role="status"></p><button class="btn" id="ll-device-close">Close setup</button></div></dialog>
     <div class="shell shell--wide ll">
       <section class="card ll-capture">
         <div class="ll-capture__row">
+          <button class="btn btn--sm" id="ll-device-check">Check camera and microphone</button>
           <button class="btn btn--primary ll-recordbtn" id="ll-record">Record</button>
           <span class="ll-clock" id="ll-clock"></span>
         </div>
@@ -76,6 +79,8 @@ const app = getApp('limelight');
         </div>
       </section>
 
+      <LimelightTools />
+
       <p class="ll-status" id="ll-status" data-state="idle">Nothing recorded yet.</p>
       <!--
         Everything the editor does, for somebody who is not watching it happen.
@@ -86,7 +91,8 @@ const app = getApp('limelight');
       <p class="ll-source-note" id="ll-source-note" hidden></p>
 
       <div class="ll-stage" id="ll-stage" hidden>
-        <canvas id="ll-preview" class="ll-preview"></canvas>
+        <div class="ll-preview-wrap"><canvas id="ll-preview" class="ll-preview"></canvas><div id="ll-safe-guide" class="ll-safe-guide" hidden></div></div>
+        <div class="ll-scrubrow"><label><input type="checkbox" id="ll-guides" /> Show 10% framing guides</label><button class="btn btn--sm" id="ll-thumbnail-png">Save frame as PNG</button><button class="btn btn--sm" id="ll-thumbnail-jpeg">Save frame as JPEG</button></div>
         <div class="ll-transport">
           <button class="ll-icon" id="ll-to-start" title="Back to the start of the trim (Home)" aria-label="Back to the start">&#9198;</button>
           <button class="ll-icon" id="ll-step-back" title="Back one frame, or a second with Shift (←)" aria-label="Back one frame">&#8592;</button>
@@ -103,6 +109,7 @@ const app = getApp('limelight');
           </label>
         </div>
 
+        <div class="ll-scrubrow"><label class="field-row"><span>Timeline zoom</span><select class="field" id="ll-timeline-zoom"><option value="1">Fit</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option><option value="16">16×</option></select></label><label><input type="checkbox" id="ll-timeline-snap" checked /> Snap blocks to clip edges, subtitles and playhead</label><button class="btn btn--sm" id="ll-timeline-center">Show playhead</button></div>
         <div class="ll-trim" id="ll-trim" aria-label="Trim range">
           <!-- Decoration under the trim range: what is at each moment, so the
                range is dragged against the recording rather than against grey. -->
@@ -164,7 +171,7 @@ const app = getApp('limelight');
           <div class="ll-trackpanel">
             <div class="ll-scrubrow" id="ll-cutrow" hidden>
               <button class="btn btn--sm" id="ll-cut-selection" disabled>Cut the selection</button>
-              <button class="btn btn--sm" id="ll-cut-silences">Remove silences</button>
+              <button class="btn btn--sm" id="ll-cut-silences">Review silences</button>
               <button class="btn btn--sm btn--ghost" id="ll-cut-clear" disabled>Keep everything</button>
               <span class="ll-time" id="ll-cut-label"></span>
             </div>

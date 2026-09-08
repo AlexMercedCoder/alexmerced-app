@@ -1,0 +1,98 @@
+<div id="ll-tools">
+  <section class="card ll-card ll-tools-panel">
+    <h2 class="ll-subhead">Projects and checkpoints</h2>
+    <p class="ll-note">Copies include the media and use extra browser storage. Restoring a checkpoint opens a new copy and keeps the saved checkpoint.</p>
+    <div class="ll-scrubrow">
+      <label class="field-row"><span>Version name</span><input class="field" id="ll-version-name" maxlength="120" placeholder="First cut" /></label>
+      <button class="btn btn--sm" id="ll-copy-project">Duplicate project</button>
+      <button class="btn btn--sm" id="ll-checkpoint-save">Save checkpoint</button>
+      <label class="field-row"><span>Saved checkpoint</span><select class="field" id="ll-checkpoint-pick"><option value="">Choose a checkpoint</option></select></label>
+      <button class="btn btn--sm" id="ll-checkpoint-restore">Restore a copy</button>
+    </div>
+  </section>
+  <details class="ll-group" id="ll-transcript-tools">
+    <summary class="ll-group__head">Transcript tools and caption style</summary>
+    <div class="ll-card">
+      <p class="ll-note">Search and timing use the source recording. Downloaded transcripts follow the finished edit. Select adjacent lines in the transcript to merge them.</p>
+      <div class="ll-scrubrow">
+        <label class="field-row"><span>Find in transcript</span><input class="field" id="ll-transcript-find" type="search" /></label>
+        <button class="btn btn--sm" id="ll-transcript-next">Next match</button>
+        <span id="ll-transcript-count" role="status"></span>
+        <label class="field-row"><span>Replace with</span><input class="field" id="ll-transcript-replacement" /></label>
+        <button class="btn btn--sm" id="ll-transcript-replace">Replace all matches</button>
+        <button class="btn btn--sm" id="ll-transcript-download">Download transcript</button>
+      </div>
+      <div class="ll-scrubrow">
+        <button class="btn btn--sm" id="ll-cue-merge">Merge selected lines</button>
+        <label class="field-row"><span>Shift all subtitles (seconds)</span><input class="field" id="ll-cue-shift-seconds" type="number" value="0" step="0.1" /></label>
+        <button class="btn btn--sm" id="ll-cue-shift">Shift timing</button>
+        <span id="ll-cue-overlaps" role="status"></span>
+      </div>
+      <div class="ll-tools-grid">
+        <label class="field-row"><span>Caption font</span><select class="field" id="ll-style-font"><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
+        <label class="field-row"><span>Caption text color</span><input id="ll-style-color" type="color" value="#f6f4ef" /></label>
+        <label class="field-row"><span>Caption background</span><input id="ll-style-background" type="color" value="#0a0a0c" /></label>
+        <label class="field-row"><span>Background opacity</span><input id="ll-style-opacity" type="range" min="0" max="1" value="0.72" step="0.01" /></label>
+        <label class="field-row"><span>Caption position</span><select class="field" id="ll-style-position"><option value="bottom">Bottom</option><option value="center">Center</option><option value="top">Top</option></select></label>
+        <label class="field-row"><span>Caption line spacing</span><input class="field" id="ll-style-lineHeight" type="number" min="1" max="2" value="1.28" step="0.01" /></label>
+        <label class="field-row"><span>Caption edge margin</span><input id="ll-style-margin" type="range" min="0" max="0.25" value="0.06" step="0.01" /></label>
+      </div>
+      <div class="ll-scrubrow">
+        <label class="field-row"><span>Caption style name</span><input class="field" id="ll-style-name" maxlength="80" /></label>
+        <button class="btn btn--sm" id="ll-style-save">Save caption style</button>
+        <label class="field-row"><span>Saved caption style</span><select class="field" id="ll-style-pick"><option value="">Choose a style</option></select></label>
+        <button class="btn btn--sm" id="ll-style-apply">Apply caption style</button>
+        <button class="btn btn--sm" id="ll-style-delete">Delete caption style</button>
+      </div>
+    </div>
+  </details>
+  <details class="ll-group" id="ll-silence-tools">
+    <summary class="ll-group__head">Review silence cuts</summary>
+    <div class="ll-card">
+      <p class="ll-note">The threshold is relative to the loudest moment. Padding is kept at each end; the minimum gap is measured after padding. Review each proposed cut before applying it.</p>
+      <div class="ll-tools-grid">
+        <label class="field-row"><span>Silence threshold (%)</span><input class="field" id="ll-silence-threshold" type="number" min="1" max="100" value="6" step="1" /></label>
+        <label class="field-row"><span>Minimum gap (seconds)</span><input class="field" id="ll-silence-min" type="number" min="0.1" max="30" value="0.6" step="0.1" /></label>
+        <label class="field-row"><span>Retained padding (seconds)</span><input class="field" id="ll-silence-pad" type="number" min="0" max="5" value="0.12" step="0.01" /></label>
+      </div>
+      <div class="ll-scrubrow"><button class="btn btn--sm" id="ll-silence-find">Find proposed cuts</button><button class="btn btn--sm" id="ll-silence-apply" disabled>Apply selected cuts</button><button class="btn btn--sm" id="ll-silence-stop">Stop preview</button></div>
+      <p id="ll-silence-summary" role="status"></p><ol id="ll-silence-list" class="ll-tools-list"></ol>
+    </div>
+  </details>
+  <details class="ll-group" id="ll-export-tools">
+    <summary class="ll-group__head">Review and queue exports</summary>
+    <div class="ll-card">
+      <button class="btn btn--sm" id="ll-export-review">Review current export</button>
+      <p id="ll-export-summary" role="status"></p>
+      <div class="ll-scrubrow">
+        <label class="field-row"><span>Test start in finished video (seconds)</span><input class="field" id="ll-test-from" type="number" min="0" value="0" step="0.1" /></label>
+        <label class="field-row"><span>Test length (seconds)</span><input class="field" id="ll-test-length" type="number" min="0.1" max="30" value="5" step="0.1" /></label>
+        <button class="btn btn--sm" id="ll-test-export">Export test range</button>
+      </div>
+      <p class="ll-note">Each queue entry captures the current edit and framing. Set the output shape, crop and caption placement, then add that version. Keep this page open while exports run. Download each completed file from the queue.</p>
+      <div class="ll-scrubrow"><label class="field-row"><span>Export version name</span><input class="field" id="ll-export-name" placeholder="Portrait" maxlength="80" /></label><button class="btn btn--sm" id="ll-queue-add">Add current version</button><button class="btn btn--sm" id="ll-queue-run">Run export queue</button><button class="btn btn--sm" id="ll-queue-clear">Clear export queue</button></div>
+      <ol id="ll-export-queue" class="ll-tools-list"></ol>
+    </div>
+  </details>
+  <p id="ll-tools-status" role="status" aria-live="polite"></p>
+</div>
+<style is:global>
+  .ll-capture__row { flex-wrap: wrap; }
+  .ll-preview-wrap { min-width: 0; }
+  .ll > * { min-width: 0; }
+  .ll-tools-panel { margin-bottom: .7rem; }
+  .ll-tools-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: .7rem; }
+  #ll-tools .field-row { min-width: 0; }
+  #ll-tools input.field, #ll-tools select.field { width: 100%; max-width: 22rem; }
+  .ll-tools-list { max-height: 20rem; overflow: auto; padding-left: 1.5rem; }
+  .ll-tools-list li { padding: .4rem; }
+  .ll-tools-list button { margin-left: .5rem; }
+  .ll-cue-timing { grid-column: 1 / -1; display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
+  .ll-cue-timing input { width: 7rem; }
+  .ll-cue.is-match { border-color: var(--accent); background: var(--accent-soft); }
+  .ll-timeline-viewport { overflow-x: auto; min-width: 0; }
+  .ll-timeline-viewport > * { max-width: none; }
+  .ll-preview-wrap { position: relative; }
+  .ll-safe-guide { position: absolute; inset: 10%; border: 2px dashed #fff; box-shadow: 0 0 0 1px #111; pointer-events: none; }
+  #ll-device-video { width: 100%; max-height: 40vh; background: #111; }
+</style>

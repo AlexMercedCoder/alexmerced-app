@@ -1,3 +1,4 @@
+import { captionStyle, type CaptionStyle } from './enhancements';
 import { encodeGif, type GifFrame } from '../../lib/gif';
 import { muxMp4, type Mp4Sample, type Mp4Track } from '../../lib/mp4';
 import { alignToZero, encodeAac, encodeOpus } from '../../lib/opus';
@@ -125,6 +126,7 @@ export type Project = {
   captions?: Cue[];
   /** Height of a caption as a fraction of the frame. */
   captionSize?: number;
+  captionStyle?: CaptionStyle;
   /** Arrows, boxes and highlights laid over the finished frame. */
   shapes?: Shape[];
   /** Levelling, rumble filtering and gating for the recorded voice. */
@@ -239,6 +241,7 @@ export function drawFrame(
   time: number,
   view: ZoomKeyframe,
   cursor: { x: number; y: number } | null,
+  captionTime = time,
 ): void {
   const composition = project.composition;
   const { width, height } = composition;
@@ -440,7 +443,7 @@ export function drawFrame(
     drawShapes(context, project.shapes, time, width, height);
   }
   if (project.captions?.length) {
-    drawCaptions(context, project.captions, time, width, height, project.captionSize ?? 0.045);
+    drawCaptions(context, project.captions, captionTime, width, height, project.captionSize ?? 0.045, project.captionStyle);
   }
 }
 
@@ -685,14 +688,15 @@ export function drawTexts(
  */
 function drawCaptions(
   context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D,
-  cues: Cue[], time: number, width: number, height: number, size: number,
+  cues: Cue[], time: number, width: number, height: number, size: number, style?: CaptionStyle,
 ): void {
+  const look = captionStyle(style);
   const showing = cuesAt(cues, time);
   if (showing.length === 0) return;
 
   const fontSize = Math.max(12, Math.round(height * Math.max(0.02, Math.min(0.12, size))));
   context.save();
-  context.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif`;
+  context.font = `600 ${fontSize}px ${look.font === 'serif' ? 'Georgia, serif' : look.font === 'mono' ? 'ui-monospace, monospace' : 'system-ui, sans-serif'}`;
   context.textBaseline = 'middle';
   context.textAlign = 'center';
 
@@ -701,23 +705,24 @@ function drawCaptions(
   const lines: string[] = [];
   for (const cue of showing) lines.push(...wrapText(cue.text, maxWidth, measure));
 
-  const lineHeight = fontSize * 1.28;
+  const lineHeight = fontSize * look.lineHeight;
   const padding = fontSize * 0.5;
   const blockHeight = lines.length * lineHeight + padding * 2;
-  const bottom = height - height * 0.06;
-  const top = bottom - blockHeight;
+  const top = Math.max(0, look.position === 'top' ? height * look.margin : look.position === 'center' ? (height - blockHeight) / 2 : height * (1 - look.margin) - blockHeight);
 
   let widest = 0;
   for (const line of lines) widest = Math.max(widest, context.measureText(line).width);
   const boxWidth = Math.min(width * 0.94, widest + padding * 2.4);
 
-  context.fillStyle = 'rgba(10, 10, 12, 0.72)';
+  context.fillStyle = look.background;
+  context.globalAlpha = look.opacity;
   context.fill(roundedPath(
     { x: width / 2 - boxWidth / 2, y: top, width: boxWidth, height: blockHeight },
     fontSize * 0.28,
   ));
 
-  context.fillStyle = '#f6f4ef';
+  context.globalAlpha = 1;
+  context.fillStyle = look.color;
   for (const [index, line] of lines.entries()) {
     context.fillText(line, width / 2, top + padding + lineHeight * (index + 0.5));
   }
@@ -988,7 +993,7 @@ export async function render(
       const frameProject = decoded
         ? { ...project, frame: decoded, video: element }
         : element === project.video ? project : { ...project, video: element };
-      drawFrame(context, frameProject, sourceTime, zoomAt(track, sourceTime), cursorTrack.length ? sampleAt(cursorTrack, sourceTime) : null);
+      drawFrame(context, frameProject, sourceTime, zoomAt(track, sourceTime), cursorTrack.length ? sampleAt(cursorTrack, sourceTime) : null, time);
       return time;
     };
 
@@ -1145,6 +1150,7 @@ export async function render(
     if (!audio && !aac) note = 'No sound was found in the recording, so this is silent.';
     }
 
+    if (signal?.aborted) throw new RenderError('Cancelled.');
     onProgress({ stage: 'Writing the file', done: total, total });
 
     if (wantsMp4) {

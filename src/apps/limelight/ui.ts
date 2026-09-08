@@ -1,3 +1,6 @@
+import { alignCuesToSegments } from './enhancements';
+import { mountEnhancements } from './enhancementUI';
+import { mountDeviceCheck } from './deviceCheck';
 import { runJob } from '../../lib/workspace/jobs';
 import { formatBytes } from '../../lib/bytes';
 import { createId } from '../../lib/id';
@@ -153,6 +156,15 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   let interestSource: 'pointer' | 'motion' | 'none' = 'none';
   let controller: AbortController | null = null;
   let previewTime = 0;
+  let enhancements: ReturnType<typeof mountEnhancements> | undefined;
+  let gapPreviewTimer: ReturnType<typeof setInterval> | undefined;
+  let gapPreviewVideo: HTMLVideoElement | null = null;
+  let gapPreviewGeneration = 0;
+  function stopGapPreview() {
+    clearInterval(gapPreviewTimer); gapPreviewVideo?.pause(); gapPreviewVideo = null; gapPreviewGeneration++;
+  }
+  root.addEventListener('pointerdown', stopGapPreview, true);
+  root.addEventListener('keydown', stopGapPreview, true);
   let stored: StoredProject | null = null;
 
   /** Playback state. The video element carries the position; these carry intent. */
@@ -427,6 +439,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       // Aligned to the finished video, since a cut moves every later line.
       captions: editor.settings.burnCaptions ? alignedCaptions() : [],
       captionSize: editor.settings.captionSize,
+      captionStyle: editor.settings.captionStyle,
       shapes: editor.shapes,
       voice: editor.settings.voice,
       music: musicSamples,
@@ -663,8 +676,13 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
 
   /** Reopens one that was stored earlier. */
   async function open(id: string): Promise<void> {
+    stopGapPreview(); await autosave.flush();
     const project = await loadProject(id);
     if (!project) return;
+    if (project.checkpointOf) {
+      const copy = { ...project, id: createId('rec'), name: `${project.name} (restored)`, checkpointOf: undefined, createdAt: new Date().toISOString() };
+      await saveProject(copy); await open(copy.id); return;
+    }
     stored = project;
     editor.settings = project.settings;
     editor.zooms = project.zooms;
@@ -928,7 +946,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       openButton.innerHTML = `<strong>${escapeHtml(project.name)}</strong>`
         + `<span>${formatClock(project.duration)} · ${project.width} by ${project.height}`
         + `${project.hasAudio ? ' · sound' : ''}</span>`;
-      openButton.addEventListener('click', () => { void open(project.id); });
+      openButton.addEventListener('click', () => {
+        void open(project.id).catch(error => setStatus(error instanceof Error ? error.message : 'Could not open this project.', 'bad'));
+      });
 
       const remove = document.createElement('button');
       remove.type = 'button';
@@ -953,6 +973,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     }
 
     $<HTMLDivElement>('ll-projects-empty').hidden = projects.length > 0;
+    void enhancements?.refreshCheckpoints();
     void refreshStorage();
   }
 
@@ -2165,26 +2186,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     toast(`Cut ${formatClock(to - from)}. Undo with Ctrl+Z.`);
   });
 
-  $<HTMLButtonElement>('ll-cut-silences').addEventListener('click', () => {
-    if (!wave || !recording) {
-      setStatus('There is no sound in this recording to find silences in.', 'bad');
-      return;
-    }
-    const found = findSilences(wave.loudness, recording.duration)
-      // Only inside the trimmed range: cutting silence from a part that is
-      // already being thrown away achieves nothing and reads as a bug.
-      .map((span) => ({ start: Math.max(span.start, editor.trim.start), end: Math.min(span.end, editor.trim.end) }))
-      .filter((span) => span.end - span.start > 0.05);
-
-    if (found.length === 0) {
-      setStatus('No silences long enough to be worth cutting.', 'good');
-      return;
-    }
-    const before = keptDuration(editor.cuts, editor.trim.start, editor.trim.end);
-    applyCuts([...editor.cuts, ...found], 'silences');
-    const saved = before - keptDuration(editor.cuts, editor.trim.start, editor.trim.end);
-    toast(`Removed ${found.length} silence${found.length === 1 ? '' : 's'}, ${formatClock(saved)} shorter.`);
-  });
+  $<HTMLButtonElement>('ll-cut-silences').addEventListener('click', () => enhancements?.showSilences());
 
   $<HTMLButtonElement>('ll-cut-clear').addEventListener('click', () => {
     if (!editor.cuts.length) return;
@@ -3046,7 +3048,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     // zoom, the cursor, the overlays, is addressed in reel seconds and does not
     // care which recording it came off.
     const drawn = { ...current, video: spotAt(time).element };
-    drawFrame(context, drawn, time, zoomAt(zoomTrack(), time), cursorAt(current, time));
+    drawFrame(context, drawn, time, zoomAt(zoomTrack(), time), cursorAt(current, time), editedAt(segmentsOf(editor.trim, editor.cuts, editor.speeds), time));
     if (selectedRedaction) drawRedactOutline(context, time);
   }
 
@@ -3401,8 +3403,9 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
         renderCues();
       });
 
-      const at = document.createElement('span');
-      at.className = 'll-time';
+      const at = document.createElement('button');
+      at.type = 'button';
+      at.className = 'll-time btn btn--sm';
       at.textContent = formatClock(cue.start);
       at.title = 'Go to this line';
       at.addEventListener('click', () => seekTo(cue.start));
@@ -3419,6 +3422,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
       });
 
       row.append(pick, at, words);
+      enhancements?.decorateCue(row, cue);
       cuesEl.append(row);
     }
 
@@ -3428,6 +3432,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     $<HTMLSpanElement>('ll-cues-label').textContent = picked.length
       ? `${picked.length} line${picked.length === 1 ? '' : 's'}, ${seconds.toFixed(1)}s`
       : '';
+    enhancements?.refresh();
     renderListen();
     $<HTMLInputElement>('ll-captions-burn').checked = editor.settings.burnCaptions;
     $<HTMLInputElement>('ll-caption-size').value = String(editor.settings.captionSize);
@@ -3579,11 +3584,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   function alignedCaptions(): Cue[] {
     if (!recording) return editor.captions;
     const segments = segmentsOf(editor.trim, editor.cuts, editor.speeds);
-    return alignToEdit(
-      editor.captions,
-      (source) => editedAt(segments, source),
-      (source) => !segments.some((part) => source >= part.start && source < part.end),
-    );
+    return alignCuesToSegments(editor.captions, segments);
   }
 
   $<HTMLButtonElement>('ll-cues-cut').addEventListener('click', () => {
@@ -4335,7 +4336,7 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
     cameraVideo = null;
   }
 
-  window.addEventListener('pagehide', () => { void autosave.flush(); session?.cancel(); release(); });
+  window.addEventListener('pagehide', () => { clearInterval(gapPreviewTimer); gapPreviewVideo?.pause(); gapPreviewGeneration++; void autosave.flush(); session?.cancel(); release(); });
 
   /**
    * Offers back a recording that was interrupted.
@@ -4394,6 +4395,57 @@ export async function mountLimelight(root: HTMLElement): Promise<void> {
   renderTransport();
   renderDestinations();
   await describeFormat();
+  enhancements = mountEnhancements(root, {
+    editor, project: () => { const p = project(); return p ? { ...p, keyframes: trackFromBlocks(editor.zooms, p.duration, editor.settings.zoom) } : null; },
+    camera: () => recording?.camera ?? null, time: () => previewTime, duration: () => recording?.duration ?? 0,
+    picked: pickedCues, seek: seekTo, wave: () => wave, applyCuts,
+    changed: (label) => { remember(label); void drawPreview(); }, renderCues,
+    currentId: () => stored?.id ?? null, renderProjects, open: async id => { await autosave.flush(); await open(id); },
+    captureStored: async () => {
+      if (!stored) throw new Error('Save or open a recording first.');
+      remember(); const captured = structuredClone(stored); const media = takeRecords();
+      await autosave.flush();
+      return { ...captured, takes: await media };
+    },
+    alignedCues: alignedCaptions,
+    previewSpan: span => {
+      stopGapPreview(); pause();
+      const generation = gapPreviewGeneration;
+      if (!span) return;
+      void (async () => {
+        previewTime = span.start; syncScrub();
+        const spot = spotAt(span.start);
+        await seekSafely(spot.element, spot.at);
+        if (generation !== gapPreviewGeneration) return;
+        gapPreviewVideo = spot.element;
+        spot.element.muted = false; spot.element.volume = Number(volInput.value);
+        await spot.element.play();
+        if (generation !== gapPreviewGeneration) { spot.element.pause(); return; }
+        gapPreviewTimer = setInterval(() => {
+          const reelTime = span.start + spot.element.currentTime - spot.at;
+          previewTime = Math.min(span.end, reelTime); syncScrub(); paint(previewTime);
+          const next = spotAt(previewTime);
+          if (reelTime >= span.end || spot.element.ended || next.element !== spot.element) {
+            spot.element.pause(); clearInterval(gapPreviewTimer); gapPreviewVideo = null;
+            if (reelTime < span.end && next.element !== spot.element) enhancements?.previewGap({ start: previewTime, end: span.end });
+          }
+        }, 40);
+      })().catch(e => setStatus(e instanceof Error ? e.message : 'Could not preview this gap.', 'bad'));
+    },
+    thumbnail: async mime => {
+      pause(); const current = project(); if (!current) throw new Error('Open a video first.');
+      const time = previewTime, spot = spotAt(time);
+      await seekSafely(spot.element, spot.at);
+      if (cameraVideo) await seekSafely(cameraVideo, time);
+      const image = document.createElement('canvas'); image.width = current.composition.width; image.height = current.composition.height;
+      const context = image.getContext('2d')!;
+      drawFrame(context, { ...current, video: spot.element }, time, zoomAt(zoomTrack(), time), cursorAt(current, time), editedAt(segmentsOf(editor.trim, editor.cuts, editor.speeds), time));
+      return await new Promise<Blob>((resolve, reject) => image.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not save this frame.')), mime, .92));
+    },
+  });
+  mountDeviceCheck(root, () => editor.settings, () => !!session?.running);
+  renderCues();
+
   await renderProjects();
   await renderDevices();
   await renderLooks();

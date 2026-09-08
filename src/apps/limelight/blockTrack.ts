@@ -1,3 +1,4 @@
+import { snapTrack } from './timelineView';
 /**
  * One timeline track, for any kind of block.
  *
@@ -262,7 +263,8 @@ export function mountBlockTrack<T extends Block>(options: TrackOptions<T>): Trac
 
   element.addEventListener('pointermove', (event) => {
     if (!drag) return;
-    const shift = timeAt(event) - drag.from;
+    const raw = timeAt(event) - drag.from;
+    const shift = event.altKey ? raw : snapTrack(element, drag.id, drag.edge, drag.start, drag.end, raw, options.duration());
     const moved = applyDrag(options.blocks(), drag.id, drag.edge, shift, drag);
     options.onChange(options.constrain ? options.constrain(moved, drag.id) : moved);
     reposition();

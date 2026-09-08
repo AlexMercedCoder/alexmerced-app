@@ -73,9 +73,13 @@ test('add, reorder, edit, split, remove, undo, save and reload a reel', async ({
   await page.getByLabel('Output size').selectOption({ label: '1280 by 720' });
   // Format lives in a collapsed advanced panel. Change it as a user setting
   // without coupling this workflow test to that panel's disclosure state.
-  const usingMp4 = await page.locator('#ll-format').evaluate((select: HTMLSelectElement) => {
+  const usingMp4 = await page.locator('#ll-format').evaluate(async (select: HTMLSelectElement) => {
     const mp4 = select.querySelector<HTMLOptionElement>('option[value="mp4"]');
-    if (mp4 && !mp4.disabled) {
+    // H.264 support does not imply AAC support in every Chromium build.
+    const aac = typeof AudioEncoder !== 'undefined' && await AudioEncoder.isConfigSupported({
+      codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 128_000,
+    }).then(config => config.supported === true).catch(() => false);
+    if (mp4 && !mp4.disabled && aac) {
       select.value = 'mp4';
       select.dispatchEvent(new Event('change', { bubbles: true }));
       return true;

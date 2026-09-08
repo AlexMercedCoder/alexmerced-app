@@ -275,6 +275,7 @@ export function evenSize(width: number, height: number): { width: number; height
 }
 
 export const OUTPUT_SIZES: { id: string; label: string; width: number; height: number }[] = [
+  { id: '480p', label: '854 by 480', width: 854, height: 480 },
   { id: '4k', label: '3840 by 2160, 4K', width: 3840, height: 2160 },
   { id: '1440p', label: '2560 by 1440', width: 2560, height: 1440 },
   { id: '1080p', label: '1920 by 1080', width: 1920, height: 1080 },

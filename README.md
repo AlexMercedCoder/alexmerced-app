@@ -301,3 +301,33 @@ steps; a running assembly step finishes before cancellation takes effect.
 The browser suite includes archive restore, task search and focus return, two-tab
 ownership, file transfers, mobile layout, and axe accessibility checks. These automated
 checks supplement keyboard testing; they do not certify every screen-reader workflow.
+
+### Limelight editing and export additions
+
+Limelight includes literal transcript search and replacement, subtitle start/end controls,
+splitting at the playhead, adjacent-line merging, whole-transcript timing shifts, overlap
+warnings, and plain-text transcript export. Subtitle colors, font family, background,
+placement, spacing, and margins persist with projects; named caption styles stay in this
+browser. Burned captions use the edited clock consistently after trims, cuts, and speed changes.
+
+Timeline tracks support synchronized horizontal zoom and scroll. Dragged blocks snap to
+clip boundaries, subtitle edges, and the playhead; hold Alt during a drag to bypass snapping.
+Silence removal offers adjustable thresholds and a list of proposed cuts to audition and
+select before applying. Changing the timeline invalidates an earlier proposal.
+
+Duplicate projects and named checkpoints include their media and consume additional storage.
+Opening or restoring a checkpoint creates a new project, preserving the checkpoint. Workspace
+backups include checkpoints and caption style preferences. Checkpoints can be deleted from
+the recordings list.
+
+Export review reports duration, dimensions, audio settings, supported formats, and an
+approximate bitrate-based size. Short test exports accept a range in finished-video seconds.
+The export queue holds up to eight snapshots with independent framing, captions, edits, and
+media. Entries render sequentially with cancellation and retry, and completed files have
+individual download links. Queue entries and results last only until the page closes; they
+are not saved projects. GIF exports are silent, and video encoding depends on browser support.
+PNG/JPEG frame export draws the composition without selection outlines or framing guides.
+
+Recording setup offers a temporary camera preview and microphone meter using the selected
+devices. Closing setup releases the tracks. Screen sharing and system audio are still selected
+through the browser's recording prompt.

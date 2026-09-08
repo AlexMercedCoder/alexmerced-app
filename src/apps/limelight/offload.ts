@@ -24,6 +24,9 @@ export function canExportInWorker(project: Project): boolean {
   // one thing a worker cannot do.
   if (!canDecodeSequentially()) return false;
   if (project.camera) return false;
+  // Audio decoding uses OfflineAudioContext, which is unavailable in workers.
+  // Sending an audible project there would turn decoder failure into a silent file.
+  if (project.keepAudio && project.format !== 'gif') return false;
   // An ImageBitmap can cross the boundary. An HTMLImageElement cannot.
   if (project.wallpaper && typeof ImageBitmap !== 'undefined'
     && !(project.wallpaper instanceof ImageBitmap)) return false;

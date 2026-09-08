@@ -96,7 +96,7 @@ export const TRACK_HELP: TrackHelp[] = [
     gestures: [
       'Click the waveform to move the playhead.',
       'Drag across it to select a stretch, then press Cut the selection.',
-      'Remove silences finds every quiet gap and takes them all out at once.',
+      'Review silences lists proposed cuts. Adjust the threshold and padding, preview each gap, then apply the selected cuts.',
     ],
   },
   {
@@ -179,6 +179,7 @@ export const GENERAL_HELP: { heading: string; points: string[] }[] = [
       'Transcribe the speech works out the words on this machine. It fetches a model the first time and keeps it; your recording never leaves the browser.',
       'Select lines of transcript and press Cut to remove those seconds from the video.',
       'Subtitles can be burnt into the picture, or saved as SRT or VTT.',
+      'Transcript tools search and replace words, merge selected lines, shift timing, and save caption styles. Each transcript line has start, end, and split controls.',
     ],
   },
   {
@@ -197,6 +198,9 @@ export const GENERAL_HELP: { heading: string; points: string[] }[] = [
       'Where it is going sets the shape and the output size together.',
       'A look saves the background, padding, shadow and tilt so the next recording can match this one.',
       'Export writes the file. Everything happens on this machine.',
+      'Review and queue exports checks the output settings, renders a short test range, or saves several versions with their own framing. Keep the page open until you download the results.',
+      'Save frame writes a PNG or JPEG without editor guides. Timeline zoom enlarges the tracks, and Alt bypasses snapping while dragging.',
+      'A named checkpoint keeps a separate copy of the project and its media. Opening a checkpoint creates another copy, so the checkpoint stays intact.',
       'Save the edits writes a small file with the trim, the zooms and everything else in it. Save everything carries the recording along too.',
       'Open a project puts a saved file back. Edits alone need the video open first, and are refused if it is the wrong one.',
     ],
