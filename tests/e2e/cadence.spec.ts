@@ -53,6 +53,7 @@ test.describe('Cadence recording and editing', () => {
   test('setup remains within phone width and unsupported capabilities are described', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 780 });
     await page.goto('/cadence/');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Cadence audio recorder and editor');
     await page.getByText('Recording setup', { exact: true }).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.setViewportSize({ width: 320, height: 780 });
