@@ -41,7 +41,7 @@ Live at **https://alexmerced.app**
 | **Quire** | Merge, split, reorder and rotate PDF pages, and turn images into pages |
 | **Rostrum** | Slide decks with a presenter view, Markdown in and out, and PDF or standalone HTML export |
 | **Tally** | Invoices with a live PDF preview, per-line tax, and money held in whole cents so the arithmetic is exact |
-| **Cadence** | Record from the microphone and edit: trim, cut, fade, normalise, resample, join with a crossfade |
+| **Cadence** | Record, recover, edit, mix, and export local audio. [User guide and release notes](CADENCE.md) |
 | **Foolscap** | Photograph a document and get a straight PDF: edge detection, perspective correction, local thresholding |
 | **Cutaway** | Trim, resize and convert video: WebM, animated GIF, or every frame as a PNG |
 | **Limelight** | Record the screen and polish it: background, rounded corners, and a zoom that follows what is happening |

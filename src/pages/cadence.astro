@@ -6,17 +6,53 @@ const app = getApp('cadence');
 ---
 <Base title="Cadence, record and edit audio without uploading it" description={app.description} app="cadence" chrome="app" keywords={app.keywords}>
   <div class="app-frame" id="cadence-root">
+    <h1 class="sr-only">Cadence audio recorder and editor</h1>
     <AppBar app="cadence">
       <button class="btn btn--sm" id="cd-download-source" disabled>Save original</button>
-      <button class="btn btn--sm btn--primary" id="cd-download" disabled>Save as WAV</button>
+      <button class="btn btn--sm btn--primary" id="cd-download" disabled>Export audio</button>
     </AppBar>
 
     <div class="shell shell--wide cd">
       <aside class="cd-side">
         <div class="cd-capture">
           <button class="btn btn--primary cd-recordbtn" id="cd-record">Record</button>
+          <button class="btn btn--sm" id="cd-pause" disabled>Pause</button>
+          <button class="btn btn--sm" id="cd-marker">Marker</button>
           <span class="cd-record-time" id="cd-record-time"></span>
         </div>
+        <p class="cd-hint" id="cd-record-status" role="status" aria-live="polite">Ready to record</p>
+        <meter id="cd-input-meter" min="0" max="1" value="0" aria-label="Microphone input level"></meter>
+        <meter id="cd-input-meter-r" min="0" max="1" value="0" aria-label="Right input channel level" hidden></meter>
+        <canvas id="cd-live-wave" width="280" height="64" aria-label="Live input waveform" style="width:100%;height:64px;border:1px solid var(--rule);border-radius:0.4rem"></canvas>
+        <span class="cd-hint" id="cd-input-db">Input idle</span>
+        <details class="card cd-record-setup">
+          <summary>Recording setup</summary>
+          <div class="cd-settings">
+            <label class="field-row"><span>Capture source</span><select class="field" id="cd-capture-source"><option value="microphone">Microphone</option><option value="system">Browser tab or system audio</option></select></label>
+            <label class="field-row"><span>Microphone</span><select class="field" id="cd-mic"><option value="">Default microphone</option></select></label>
+            <label class="field-row"><span>Preset</span><select class="field" id="cd-preset"><option value="raw">Raw / Unprocessed</option><option value="voice">Voice</option><option value="podcast">Podcast</option><option value="music">Music</option><option value="custom">Custom</option></select></label>
+            <label class="field-row"><span>Requested sample rate</span><select class="field" id="cd-sample-rate"><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option><option value="96000">96 kHz</option></select></label>
+            <label class="field-row"><span>Requested channels</span><select class="field" id="cd-channels"><option value="1">Mono</option><option value="2">Stereo</option></select></label>
+            <label class="field-row"><span>Software input gain, dB</span><input class="field" id="cd-input-gain" type="range" min="-24" max="24" step="1" /><output id="cd-gain-value">0 dB</output></label>
+            <label class="field-row"><span>Countdown</span><select class="field" id="cd-countdown"><option value="0">Off</option><option value="3">3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select></label>
+            <label class="field-row"><span><input type="checkbox" id="cd-silence-stop" /> Stop after sustained silence</span></label>
+            <label class="field-row"><span>Silence below, dBFS</span><input class="field" id="cd-silence-db" type="number" min="-80" max="-10" step="1" /></label>
+            <label class="field-row"><span>Silence duration, seconds</span><input class="field" id="cd-silence-seconds" type="number" min="2" max="30" step="1" /></label>
+            <label class="field-row"><span><input type="checkbox" id="cd-noise" /> Noise suppression</span></label>
+            <label class="field-row"><span><input type="checkbox" id="cd-echo" /> Echo cancellation</span></label>
+            <label class="field-row"><span><input type="checkbox" id="cd-agc" /> Automatic gain control</span></label>
+          </div>
+          <div class="cd-actions"><button class="btn btn--sm" id="cd-save-preset">Save preset</button><button class="btn btn--sm" id="cd-update-preset" disabled>Update preset</button><button class="btn btn--sm" id="cd-preview">Preview input</button><button class="btn btn--sm" id="cd-test">Test microphone</button><button class="btn btn--sm" id="cd-test-play" disabled>Play test</button><button class="btn btn--sm" id="cd-test-discard" disabled>Discard test</button></div>
+          <div class="cd-settings">
+            <label class="field-row"><span><input type="checkbox" id="cd-monitor" /> Monitor input (off by default)</span></label>
+            <label class="field-row"><span>Monitor volume</span><input class="field" id="cd-monitor-volume" type="range" min="0" max="1" step="0.05" value="0.25" /></label>
+            <label class="field-row"><span>Monitor output</span><select class="field" id="cd-monitor-output"><option value="">Default speakers</option></select></label>
+          </div>
+          <p class="cd-hint">Use headphones when monitoring. Speakers can feed back into the microphone. Monitoring may have noticeable latency.</p>
+          <p class="cd-hint" id="cd-applied">The browser may use different capture settings. Applied settings appear after permission is granted. Software gain does not change the hardware microphone gain.</p>
+          <p class="cd-hint">For tab or system audio, your browser opens a share dialog. Select a source with audio and enable its audio sharing option. Availability varies by browser and operating system.</p>
+        </details>
+        <div class="card cd-recovery" id="cd-recovery" hidden><strong>Recover a recording</strong><div id="cd-recovery-list"></div></div>
         <div class="cd-drop" id="cd-drop">
           <button class="btn btn--sm" id="cd-add">Add audio files</button>
           <p>or drop them here</p>
@@ -26,6 +62,8 @@ const app = getApp('cadence');
         <div class="cd-head">
           <h2 class="cd-subhead">Clips</h2>
           <button class="btn btn--sm" id="cd-join" disabled>Join ticked</button>
+          <button class="btn btn--sm" id="cd-mix" disabled>Mix ticked</button>
+          <button class="btn btn--sm" id="cd-play-mix" disabled>Play mix</button>
         </div>
         <div class="cd-list" id="cd-list"></div>
         <div class="empty" id="cd-empty">
@@ -33,6 +71,7 @@ const app = getApp('cadence');
           <p>Record from the microphone, or add a file. Neither one leaves this browser.</p>
         </div>
         <p class="cd-storage" id="cd-storage"></p>
+        <details class="card cd-record-setup"><summary>Help and shortcuts</summary><p class="cd-hint">Record and Stop are the only steps needed. Recording setup offers devices, tests, and advanced controls. Alt+R records or stops, Alt+P pauses or resumes, and Alt+M adds a marker. Recordings stay in this browser; export important work. Recovery may be incomplete after a crash. Use headphones when monitoring.</p></details>
       </aside>
 
       <section aria-label="Cadence workspace" class="cd-work" id="cd-work" hidden>
@@ -43,15 +82,21 @@ const app = getApp('cadence');
           <div class="cd-selection" id="cd-selection" hidden></div>
           <div class="cd-playhead" id="cd-playhead"></div>
         </div>
+        <div class="cd-settings"><label class="field-row"><span>Waveform zoom</span><input id="cd-zoom" type="range" min="1" max="16" value="1" step="1" /></label><label class="field-row"><span>Timeline position</span><input id="cd-scroll" type="range" min="0" max="100" value="0" step="1" /></label></div>
+        <details class="card cd-card"><summary>Frequency view</summary><p class="cd-hint">Live spectrogram while playing. Low frequencies are at the bottom.</p><canvas id="cd-spectrum" width="640" height="160" aria-label="Live spectrogram" style="width:100%;height:160px"></canvas></details>
 
         <div class="cd-transport">
           <button class="btn btn--primary" id="cd-play">Play</button>
           <button class="btn btn--sm" id="cd-select-all">Whole clip</button>
           <button class="btn btn--sm" id="cd-undo" disabled>Undo</button>
+          <button class="btn btn--sm" id="cd-redo" disabled>Redo</button>
+          <button class="btn btn--sm" id="cd-reset" disabled>Reset to original</button>
+          <button class="btn btn--sm" id="cd-punch">Punch in selection</button>
           <p class="cd-hint">Drag across the waveform to choose a region.</p>
         </div>
 
         <div class="cd-stats" id="cd-stats"></div>
+        <div class="cd-hint" id="cd-markers" aria-label="Markers"></div>
 
         <section class="card cd-card">
           <h2 class="cd-subhead">Edit</h2>
@@ -72,10 +117,43 @@ const app = getApp('cadence');
           </div>
         </section>
 
+        <details class="card cd-card" id="cd-effects-panel">
+          <summary>Playback and export effects</summary>
+          <p class="cd-hint">Effects change playback and WAV export. The stored recording stays unchanged. Reset effects to hear the dry edit.</p>
+          <div class="cd-actions"><button class="btn btn--sm" id="cd-effects-voice">Voice preset</button><button class="btn btn--sm" id="cd-effects-reset">Reset effects</button></div>
+          <div class="cd-settings">
+            <label class="field-row"><span><input type="checkbox" id="cd-fx-enabled" /> Enable effects</span></label>
+            <label class="field-row"><span>High pass, Hz (0 off)</span><input class="field" id="cd-fx-high" type="number" min="0" max="2000" step="10" /></label>
+            <label class="field-row"><span>Low pass, Hz (0 off)</span><input class="field" id="cd-fx-low" type="number" min="0" max="20000" step="100" /></label>
+            <label class="field-row"><span>Bass, dB</span><input class="field" id="cd-fx-bass" type="number" min="-18" max="18" step="1" /></label>
+            <label class="field-row"><span>Mid, dB</span><input class="field" id="cd-fx-mid" type="number" min="-18" max="18" step="1" /></label>
+            <label class="field-row"><span>Treble, dB</span><input class="field" id="cd-fx-treble" type="number" min="-18" max="18" step="1" /></label>
+            <label class="field-row"><span>Compressor threshold, dB</span><input class="field" id="cd-fx-threshold" type="number" min="-60" max="0" step="1" /></label>
+            <label class="field-row"><span>Compressor ratio (1 off)</span><input class="field" id="cd-fx-ratio" type="number" min="1" max="20" step="0.5" /></label>
+            <label class="field-row"><span>Attack, ms</span><input class="field" id="cd-fx-attack" type="number" min="1" max="100" step="1" /></label>
+            <label class="field-row"><span>Release, ms</span><input class="field" id="cd-fx-release" type="number" min="10" max="1000" step="10" /></label>
+            <label class="field-row"><span>Gate threshold, dB (-90 off)</span><input class="field" id="cd-fx-gate" type="number" min="-90" max="0" step="1" /></label>
+            <label class="field-row"><span><input type="checkbox" id="cd-fx-limiter" /> Limiter</span></label>
+            <label class="field-row"><span>Output gain, dB</span><input class="field" id="cd-fx-output" type="number" min="-24" max="24" step="1" /></label>
+          </div>
+        </details>
+
+        <details class="card cd-card">
+          <summary>Local transcription</summary>
+          <p class="cd-hint">Optional: download a roughly 40 MB speech model once, then process audio in this browser. It can be slow on phones. The recording is not uploaded.</p>
+          <div class="cd-actions"><button class="btn btn--sm" id="cd-transcribe">Transcribe this clip</button><button class="btn btn--sm" id="cd-transcript-save" disabled>Save text</button></div>
+          <p class="cd-hint" id="cd-transcript-status" role="status"></p>
+          <textarea class="field" id="cd-transcript" rows="6" aria-label="Transcript text" style="width:100%"></textarea>
+        </details>
+
         <section class="card cd-card">
           <h2 class="cd-subhead">Settings</h2>
           <div class="cd-settings">
+            <label class="field-row"><span>Export type</span><select class="field" id="cd-export-kind"><option value="wav">WAV</option><option value="opus">Opus in WebM (when supported)</option></select></label>
             <label class="field-row"><span>Export format</span><select class="field" id="cd-format"></select></label>
+            <label class="field-row"><span>Export sample rate</span><select class="field" id="cd-export-rate"><option value="0">Source rate</option><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option><option value="96000">96 kHz</option></select></label>
+            <label class="field-row"><span>Export channels</span><select class="field" id="cd-export-channels"><option value="0">Source channels</option><option value="1">Mono</option><option value="2">Stereo</option></select></label>
+            <label class="field-row"><span>Opus bitrate</span><select class="field" id="cd-opus-bitrate"><option value="64000">64 kbps</option><option value="128000">128 kbps</option><option value="192000">192 kbps</option><option value="256000">256 kbps</option></select></label>
             <label class="field-row"><span>Fade length, seconds</span><input class="field" id="cd-fade-length" type="number" min="0" max="60" step="0.25" /></label>
             <label class="field-row"><span>Crossfade, seconds</span><input class="field" id="cd-crossfade" type="number" min="0" max="30" step="0.05" /></label>
             <label class="field-row"><span>Normalise target, dBFS</span><input class="field" id="cd-target" type="number" min="-40" max="0" step="0.5" /></label>
@@ -100,15 +178,20 @@ const app = getApp('cadence');
   .cd { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 1.25rem; align-items: start; padding: 1.25rem 0 3rem; }
   .cd-subhead { font-size: 0.72rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 0.5rem; }
   .cd-hint { font-size: 0.78rem; color: var(--ink-soft); margin: 0; }
-  .cd-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 1rem; }
+  .cd-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
   .cd-head .cd-subhead { margin: 0; }
 
-  .cd-side { min-width: 0; display: grid; gap: 0.5rem; align-content: start; }
-  .cd-capture { display: flex; align-items: center; gap: 0.6rem; }
+  .cd-side { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; align-content: start; }
+  .cd-capture { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; min-width: 0; }
   .cd-recordbtn { flex: 1; }
   .cd-recordbtn.is-recording { background: #b91c1c; border-color: #b91c1c; animation: cd-pulse 1.4s ease-in-out infinite; }
   @keyframes cd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
   .cd-record-time { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--ink-soft); min-width: 4.2rem; }
+  .cd-record-setup { padding: 0.8rem; }
+  .cd-record-setup summary { cursor: pointer; font-weight: 600; }
+  .cd-record-setup .cd-settings { margin: 0.8rem 0; grid-template-columns: minmax(0, 1fr); }
+  #cd-input-meter { width: 100%; }
+  .cd-recovery { padding: 0.8rem; }
 
   .cd-drop { display: grid; gap: 0.3rem; justify-items: center; padding: 0.85rem; border: 1px dashed var(--rule); border-radius: 0.6rem; text-align: center; }
   .cd-drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
@@ -123,9 +206,12 @@ const app = getApp('cadence');
   .cd-row__open span { font-size: 0.73rem; color: var(--ink-soft); }
   .cd-row__remove { border: 0; background: none; color: var(--ink-soft); cursor: pointer; font-size: 1.15rem; line-height: 1; padding: 0.2rem 0.3rem; }
   .cd-row__remove:hover { color: #b91c1c; }
+  .cd-row__track { grid-column: 1 / -1; display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; font-size: 0.72rem; }
+  .cd-row__track input[type=number] { width: 4.2rem; }
+  .cd-row__track input[type=range] { width: 5rem; }
   .cd-storage { font-size: 0.74rem; color: var(--ink-soft); margin: 0.4rem 0 0; }
 
-  .cd-work { min-width: 0; display: grid; gap: 0.9rem; }
+  .cd-work { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.9rem; }
   .cd-name { font-size: 1.05rem; font-weight: 600; }
   .cd-wavewrap { position: relative; border: 1px solid var(--rule); border-radius: 0.6rem; background: var(--paper-raised); overflow: hidden; }
   .cd-wave { display: block; width: 100%; height: 180px; touch-action: none; cursor: crosshair; }

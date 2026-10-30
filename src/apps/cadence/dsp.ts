@@ -245,6 +245,40 @@ export function join(clips: Samples[], crossfadeSeconds = 0): Samples {
   return { sampleRate, channels };
 }
 
+/** Renders independent tracks on one timeline, with offsets and per-track level. */
+export function mixTracks(tracks: { samples: Samples; offsetSeconds: number; volume: number }[]): Samples {
+  const usable = tracks.filter((track) => frameCount(track.samples) > 0);
+  if (!usable.length) return { sampleRate: 48000, channels: [new Float32Array(0)] };
+  const sampleRate = Math.max(...usable.map((track) => track.samples.sampleRate));
+  const channelCount = Math.max(...usable.map((track) => track.samples.channels.length));
+  const prepared = usable.map((track) => ({
+    ...track,
+    samples: track.samples.sampleRate === sampleRate ? track.samples : resample(track.samples, sampleRate),
+    offset: Math.max(0, Math.round(track.offsetSeconds * sampleRate)),
+  }));
+  const frames = Math.max(...prepared.map((track) => track.offset + frameCount(track.samples)));
+  const channels = Array.from({ length: channelCount }, () => new Float32Array(frames));
+  for (const track of prepared) {
+    const volume = Number.isFinite(track.volume) ? Math.max(0, Math.min(2, track.volume)) : 1;
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const source = track.samples.channels[channel] ?? track.samples.channels[0];
+      const target = channels[channel];
+      for (let index = 0; index < source.length; index += 1) target[track.offset + index] += source[index] * volume;
+    }
+  }
+  return { sampleRate, channels };
+}
+
+/** Replaces a timeline region with a new take while leaving both sources untouched. */
+export function replaceRegion(source: Samples, replacement: Samples, start: number, end: number): Samples {
+  if (!(end > start)) throw new Error('Select a region to replace.');
+  return join([
+    trim(source, 0, start),
+    replacement,
+    trim(source, end, frameCount(source) / source.sampleRate),
+  ]);
+}
+
 /**
  * Finds where the audio actually starts and stops, so leading and trailing
  * silence can be dropped. The threshold is in decibels below full scale.
@@ -285,17 +319,19 @@ export function trimSilence(samples: Samples, thresholdDb = -50, padSeconds = 0.
  * Reduces the waveform to min and max pairs per pixel column. Drawing every
  * sample would be both slow and wrong, since a column covers thousands of them.
  */
-export function waveformPeaks(samples: Samples, columns: number): { min: Float32Array; max: Float32Array } {
+export function waveformPeaks(samples: Samples, columns: number, startSeconds = 0, endSeconds = frameCount(samples) / samples.sampleRate): { min: Float32Array; max: Float32Array } {
   const width = Math.max(1, Math.floor(columns));
   const min = new Float32Array(width).fill(0);
   const max = new Float32Array(width).fill(0);
-  const frames = frameCount(samples);
+  const start = Math.max(0, Math.min(frameCount(samples), Math.floor(startSeconds * samples.sampleRate)));
+  const end = Math.max(start, Math.min(frameCount(samples), Math.ceil(endSeconds * samples.sampleRate)));
+  const frames = end - start;
   if (frames === 0) return { min, max };
 
   const perColumn = frames / width;
   for (let column = 0; column < width; column += 1) {
-    const from = Math.floor(column * perColumn);
-    const to = Math.min(frames, Math.max(from + 1, Math.floor((column + 1) * perColumn)));
+    const from = start + Math.floor(column * perColumn);
+    const to = start + Math.min(frames, Math.max(from - start + 1, Math.floor((column + 1) * perColumn)));
     let low = Infinity;
     let high = -Infinity;
     for (const channel of samples.channels) {

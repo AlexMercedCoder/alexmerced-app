@@ -1,4 +1,5 @@
 import { createId } from '../../lib/id';
+import { reviveEffects, type Effects } from './effects';
 
 export const APP_ID = 'cadence';
 export const APP_VERSION = 1;
@@ -14,6 +15,15 @@ export type Clip = {
   /** The encoded file: WebM from a recording, or whatever was dropped in. */
   bytes: Uint8Array;
   mime: string;
+  /** Immutable first recording/import, retained after edits. */
+  originalBytes?: Uint8Array;
+  originalMime?: string;
+  volume?: number;
+  offsetSeconds?: number;
+  muted?: boolean;
+  solo?: boolean;
+  markers?: { time: number; label: string }[];
+  effects?: Effects;
   duration: number;
   sampleRate: number;
   channelCount: number;
@@ -73,6 +83,7 @@ export function reviveClip(value: unknown): Clip | null {
   // IndexedDB hands typed arrays back as they went in, but a hand-edited file
   // or an older export may carry a plain ArrayBuffer instead.
   const raw: unknown = clip.bytes;
+  const originalRaw: unknown = clip.originalBytes;
   const bytes =
     raw instanceof Uint8Array ? raw
     : raw instanceof ArrayBuffer ? new Uint8Array(raw)
@@ -88,6 +99,14 @@ export function reviveClip(value: unknown): Clip | null {
     name: typeof clip.name === 'string' && clip.name.trim() ? clip.name : 'Untitled clip',
     bytes,
     mime: typeof clip.mime === 'string' && clip.mime ? clip.mime : 'audio/wav',
+    originalBytes: originalRaw instanceof Uint8Array ? originalRaw : originalRaw instanceof ArrayBuffer ? new Uint8Array(originalRaw) : undefined,
+    originalMime: typeof clip.originalMime === 'string' ? clip.originalMime : undefined,
+    volume: typeof clip.volume === 'number' && Number.isFinite(clip.volume) ? Math.max(0, Math.min(2, clip.volume)) : 1,
+    offsetSeconds: typeof clip.offsetSeconds === 'number' && Number.isFinite(clip.offsetSeconds) ? Math.max(0, clip.offsetSeconds) : 0,
+    muted: clip.muted === true,
+    solo: clip.solo === true,
+    markers: Array.isArray(clip.markers) ? clip.markers.filter((marker) => typeof marker.time === 'number' && Number.isFinite(marker.time) && typeof marker.label === 'string') : [],
+    effects: reviveEffects(clip.effects),
     duration: positive(clip.duration, 0),
     sampleRate: Math.round(positive(clip.sampleRate, 48000)),
     channelCount: Math.max(1, Math.round(positive(clip.channelCount, 1))),

@@ -1,12 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import {
   changeSpeed, cut, decibelsToGain, fadeCurve, fadeIn, fadeOut, findBounds, formatTime, gain,
-  gainToDecibels, join, normalisePeak, normaliseRms, peak, resample, reverse, rms, silence,
-  toMono, toStereo, trim, trimSilence, waveformPeaks,
+  gainToDecibels, join, mixTracks, normalisePeak, normaliseRms, peak, resample, reverse, rms, silence,
+  toMono, toStereo, trim, trimSilence, waveformPeaks, replaceRegion,
 } from './dsp';
 import { frameCount, type Samples } from './wav';
 
 const RATE = 1000;
+
+describe('multitrack mixing', () => {
+  it('aligns tracks by offset and applies volume without changing sources', () => {
+    const first = { sampleRate: RATE, channels: [Float32Array.from([0.5, 0.5, 0.5])] };
+    const second = { sampleRate: RATE, channels: [Float32Array.from([0.25, 0.25])] };
+    const mixed = mixTracks([
+      { samples: first, offsetSeconds: 0, volume: 1 },
+      { samples: second, offsetSeconds: 0.001, volume: 2 },
+    ]);
+    expect(Array.from(mixed.channels[0])).toEqual([0.5, 1, 1]);
+    expect(Array.from(first.channels[0])).toEqual([0.5, 0.5, 0.5]);
+  });
+});
+
+describe('punch in', () => {
+  it('replaces the selected samples and keeps both inputs unchanged', () => {
+    const source = { sampleRate: RATE, channels: [Float32Array.from([1, 2, 3, 4])] };
+    const take = { sampleRate: RATE, channels: [Float32Array.from([9, 8])] };
+    expect(Array.from(replaceRegion(source, take, 0.001, 0.003).channels[0])).toEqual([1, 9, 8, 4]);
+    expect(Array.from(source.channels[0])).toEqual([1, 2, 3, 4]);
+  });
+});
 
 function ramp(length: number, channelCount = 1): Samples {
   return {
